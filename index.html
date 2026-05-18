@@ -1,0 +1,3704 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>TritLogic v2 — Balanced Ternary Circuit Simulator</title>
+<style>
+  :root {
+    --bg: #14171c;
+    --panel: #1d2026;
+    --panel-2: #262a32;
+    --panel-3: #2e333d;
+    --border: #3a3f4a;
+    --border-strong: #4a5060;
+    --text: #d8dde6;
+    --muted: #8a92a1;
+    --accent: #6ea8ff;
+    --accent-2: #8effb0;
+    --warn: #ffba6e;
+    --t-neg: #e35555;
+    --t-zero: #888c95;
+    --t-pos: #54c060;
+    --t-undef: #44485a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: ui-sans-serif, system-ui, sans-serif;
+    background: var(--bg); color: var(--text); overflow: hidden; font-size: 13px; }
+  body {
+    display: grid;
+    grid-template-rows: 44px 1fr 0px;
+    grid-template-columns: 230px 1fr 280px;
+  }
+  body.wave-open { grid-template-rows: 44px 1fr 160px; }
+
+  header {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; padding: 0 12px; gap: 8px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header .title { font-weight: 600; letter-spacing: .3px; }
+  header .sub { color: var(--muted); margin-left: 4px; font-size: 12px; }
+  header .spacer { flex: 1; }
+  header button, .btn {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer;
+  }
+  header button:hover, .btn:hover { border-color: var(--accent); }
+  header button.active { background: var(--accent); color: #11141a; border-color: var(--accent); }
+  header .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+
+  aside.palette {
+    background: var(--panel); border-right: 1px solid var(--border);
+    padding: 8px; overflow-y: auto;
+  }
+  aside.palette h3 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin: 8px 0 4px 0;
+  }
+  .pal-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; margin-bottom: 3px; border: 1px solid var(--border);
+    background: var(--panel-2); border-radius: 5px; cursor: pointer; user-select: none;
+    font-size: 12px;
+  }
+  .pal-item:hover { border-color: var(--accent); }
+  .pal-item.active { border-color: var(--accent); background: #2f3a52; }
+  .pal-item .icon { width: 26px; height: 20px; flex-shrink: 0;
+                    display: flex; align-items: center; justify-content: center;
+                    border: 1px solid var(--border); border-radius: 3px; background: #1a1d23;
+                    font-size: 10px; font-weight: 600; }
+  .pal-item .desc { color: var(--muted); font-size: 10px; margin-left: auto; }
+
+  main.canvas-wrap {
+    position: relative; overflow: hidden; background: #14171c;
+  }
+  canvas { display: block; }
+
+  aside.inspector {
+    background: var(--panel); border-left: 1px solid var(--border);
+    padding: 10px; overflow-y: auto;
+  }
+  aside.inspector h3 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin: 10px 0 5px 0;
+  }
+  aside.inspector .kv { display: flex; justify-content: space-between;
+                        padding: 2px 0; color: var(--muted); font-size: 12px; }
+  aside.inspector .kv b { color: var(--text); font-weight: 500; font-family: monospace; }
+  .inspector-form label { display: block; font-size: 11px; color: var(--muted);
+                          margin: 5px 0 2px 0; }
+  .inspector-form input, .inspector-form select {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px;
+    font-size: 12px; font-family: monospace;
+  }
+  .inspector-form input:focus, .inspector-form select:focus {
+    outline: none; border-color: var(--accent);
+  }
+  .help li { margin: 3px 0; color: var(--muted); font-size: 11px; }
+  .help kbd {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 3px;
+    padding: 1px 4px; font-size: 10px; color: var(--text); font-family: monospace;
+  }
+  .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px;
+            vertical-align: middle; margin-right: 4px; }
+  .legend { font-size: 11px; color: var(--muted); line-height: 1.6; }
+
+  .status {
+    position: absolute; left: 8px; bottom: 8px;
+    background: rgba(35, 39, 47, .9); border: 1px solid var(--border);
+    padding: 4px 8px; border-radius: 4px; font-size: 11px; color: var(--muted);
+    pointer-events: none; max-width: 60%;
+  }
+
+  /* Waveform panel */
+  .wave-panel {
+    grid-column: 1 / -1;
+    background: var(--panel); border-top: 1px solid var(--border);
+    overflow: hidden; position: relative;
+    display: none;
+  }
+  body.wave-open .wave-panel { display: block; }
+  .wave-panel .wave-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 8px; border-bottom: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+  }
+  .wave-panel canvas { width: 100%; height: calc(100% - 28px); display: block; }
+
+  /* Modal */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 16px; min-width: 480px; max-width: 90vw;
+    max-height: 85vh; overflow-y: auto;
+  }
+  .modal h2 { margin: 0 0 8px 0; font-size: 16px; }
+  .modal .close { float: right; }
+  .modal .sweep-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+                       margin-bottom: 10px; }
+  .modal .sweep-list .group {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 5px; padding: 8px;
+  }
+  .modal .sweep-list h4 { margin: 0 0 6px 0; font-size: 11px;
+                          color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .modal .sweep-list label { display: block; font-size: 12px; padding: 2px 0; cursor: pointer; }
+  .tt-result table { border-collapse: collapse; width: 100%; font-family: monospace; }
+  .tt-result th, .tt-result td {
+    border: 1px solid var(--border); padding: 3px 8px; font-size: 12px; text-align: center;
+  }
+  .tt-result th { background: var(--panel-2); }
+  .tt-result td.trit-T { color: var(--t-neg); font-weight: 600; }
+  .tt-result td.trit-0 { color: var(--t-zero); }
+  .tt-result td.trit-P { color: var(--t-pos); font-weight: 600; }
+  .tt-result td.input-cell { background: rgba(110, 168, 255, 0.07); }
+
+  /* Tests modal */
+  .test-row {
+    padding: 3px 8px; border-radius: 3px; margin-bottom: 2px;
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .test-row.pass { background: rgba(84, 192, 96, 0.07); }
+  .test-row.fail { background: rgba(227, 85, 85, 0.12); }
+  .test-row .badge {
+    display: inline-block; min-width: 38px; text-align: center;
+    padding: 1px 5px; border-radius: 3px; font-weight: 600; font-size: 11px;
+  }
+  .test-row.pass .badge { background: var(--t-pos); color: #11141a; }
+  .test-row.fail .badge { background: var(--t-neg); color: #fff; }
+  .test-row .err { color: var(--t-neg); margin-left: 8px; font-size: 11px; }
+
+  /* Gate Builder truth-table */
+  .gb-block { background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 8px; margin-bottom: 8px; }
+  .gb-block h4 { margin: 0 0 6px 0; font-size: 11px; color: var(--muted); font-family: monospace; }
+  .gb-row { display: flex; gap: 4px; align-items: center; }
+  .gb-axis { font-family: monospace; font-size: 11px; color: var(--muted); min-width: 24px; text-align: right; padding-right: 4px; }
+  .gb-cell {
+    width: 32px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: 3px;
+    cursor: pointer; user-select: none;
+    font-family: monospace; font-weight: 600; font-size: 13px; color: #fff;
+  }
+  .gb-cell.trit-T { background: var(--t-neg); }
+  .gb-cell.trit-0 { background: #4a5060; color: #d8dde6; }
+  .gb-cell.trit-P { background: var(--t-pos); color: #11141a; }
+  .gb-cell:hover { outline: 1px solid var(--accent); }
+  .gb-corner { width: 24px; }
+
+  /* Subcircuit library */
+  .sub-lib { margin-top: 4px; }
+  .sub-entry {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px; margin-bottom: 3px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px;
+    font-size: 12px; cursor: pointer;
+  }
+  .sub-entry:hover { border-color: var(--accent-2); }
+  .sub-entry .pin-counts { color: var(--muted); font-size: 10px; margin-left: auto; }
+  .sub-entry button {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--muted); padding: 1px 5px; font-size: 10px; border-radius: 3px;
+    cursor: pointer;
+  }
+  .sub-entry button:hover { color: var(--t-neg); border-color: var(--t-neg); }
+
+  .selection-rect {
+    pointer-events: none;
+  }
+
+  /* Retro CRT theme — green-phosphor palette + scanlines.  Toggled by
+     adding the .crt class to <body>.  Pure CSS, no JS hook into draw(). */
+  body.crt {
+    --bg: #0a1208;
+    --panel: #0e1a0c;
+    --panel-2: #122512;
+    --panel-3: #173017;
+    --border: #2b4d2b;
+    --border-strong: #3d6b3d;
+    --text: #7effb6;
+    --muted: #4f9968;
+    --accent: #b0ff8e;
+    --accent-2: #6effb8;
+    --t-neg: #ff7050;
+    --t-zero: #4f9968;
+    --t-pos: #7effb6;
+    text-shadow: 0 0 1px currentColor;
+  }
+  body.crt::after {
+    content: "";
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0, 30, 0, 0.20) 0px, rgba(0, 30, 0, 0.20) 1px,
+      transparent 1px, transparent 3px
+    );
+    pointer-events: none; z-index: 999;
+    mix-blend-mode: multiply;
+  }
+  body.crt header { box-shadow: inset 0 -1px 0 var(--border-strong); }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="title">TritLogic</span>
+  <span class="sub">v2 · balanced ternary</span>
+  <span class="sep"></span>
+  <button id="btn-step" title="Advance one clock cycle">⏭ Step</button>
+  <button id="btn-play" title="Auto-step at 4 Hz">▶ Play</button>
+  <button id="btn-reset" title="Reset sequential state (flip-flops, clocks, waveform)">⟲ Reset</button>
+  <span class="sep"></span>
+  <button id="btn-tt" title="Generate truth table from selected inputs/outputs">Truth Table</button>
+  <button id="btn-pack" title="Pack selected components into a new subcircuit">Pack ▢</button>
+  <button id="btn-gate" title="Define a new gate from a truth table">Build Gate</button>
+  <button id="btn-wave" title="Toggle waveform panel">Wave</button>
+  <button id="btn-tests" title="Run the built-in self-test suite">Tests</button>
+  <button id="btn-crt" title="Toggle retro CRT theme">CRT</button>
+  <span class="spacer"></span>
+  <select id="example-select" title="Load a preset circuit"
+          style="background: var(--panel-2); color: var(--text);
+                 border: 1px solid var(--border); border-radius: 5px;
+                 padding: 4px 8px; font-size: 12px;">
+    <option value="">— Examples —</option>
+  </select>
+  <button id="btn-clear">Clear</button>
+  <button id="btn-save">Save</button>
+  <button id="btn-load">Load</button>
+  <input type="file" id="file-input" accept="application/json" style="display:none" />
+</header>
+
+<aside class="palette">
+  <h3>Tool</h3>
+  <div class="pal-item active" data-tool="select">
+    <div class="icon">↖</div><div>Select</div><div class="desc">drag / wire</div>
+  </div>
+  <div class="pal-item" data-tool="delete">
+    <div class="icon">✕</div><div>Delete</div>
+  </div>
+
+  <h3>Sources</h3>
+  <div class="pal-item" data-tool="place" data-type="INPUT">
+    <div class="icon">IN</div><div>Input</div><div class="desc">click to cycle</div>
+  </div>
+  <div class="pal-item" data-tool="place" data-type="CONST">
+    <div class="icon">K</div><div>Constant</div>
+  </div>
+  <div class="pal-item" data-tool="place" data-type="TRYTE_IN">
+    <div class="icon">TR</div><div>Tryte input</div><div class="desc">6 trits</div>
+  </div>
+  <div class="pal-item" data-tool="place" data-type="CLOCK">
+    <div class="icon">⏲</div><div>Clock</div>
+  </div>
+
+  <h3>Sinks</h3>
+  <div class="pal-item" data-tool="place" data-type="OUTPUT">
+    <div class="icon">●</div><div>Probe</div>
+  </div>
+  <div class="pal-item" data-tool="place" data-type="TRYTE_OUT">
+    <div class="icon">#</div><div>Tryte probe</div>
+  </div>
+  <div class="pal-item" data-tool="place" data-type="WAVE">
+    <div class="icon">∿</div><div>Waveform</div><div class="desc">records</div>
+  </div>
+
+  <h3>Inverters</h3>
+  <div class="pal-item" data-tool="place" data-type="STI">
+    <div class="icon">STI</div><div>NEG</div>
+  </div>
+  <div class="pal-item" data-tool="place" data-type="PTI">
+    <div class="icon">PTI</div><div>+inv</div>
+  </div>
+  <div class="pal-item" data-tool="place" data-type="NTI">
+    <div class="icon">NTI</div><div>−inv</div>
+  </div>
+
+  <h3>Gates</h3>
+  <div class="pal-item" data-tool="place" data-type="MIN">
+    <div class="icon">MIN</div><div>Tern. AND</div>
+  </div>
+  <div class="pal-item" data-tool="place" data-type="MAX">
+    <div class="icon">MAX</div><div>Tern. OR</div>
+  </div>
+  <div class="pal-item" data-tool="place" data-type="ADDER">
+    <div class="icon">+</div><div>Full adder</div>
+  </div>
+
+  <h3>Sequential</h3>
+  <div class="pal-item" data-tool="place" data-type="DFF">
+    <div class="icon">DFF</div><div>D flip-flop</div>
+  </div>
+
+  <h3>Custom gates</h3>
+  <div class="sub-lib" id="gate-lib"></div>
+
+  <h3>Subcircuits</h3>
+  <div class="sub-lib" id="sub-lib"></div>
+</aside>
+
+<main class="canvas-wrap">
+  <canvas id="cv"></canvas>
+  <div class="status" id="status">ready</div>
+</main>
+
+<aside class="inspector">
+  <h3>Legend</h3>
+  <div class="legend">
+    <span class="swatch" style="background: var(--t-neg)"></span>T = −1<br>
+    <span class="swatch" style="background: var(--t-zero)"></span>0<br>
+    <span class="swatch" style="background: var(--t-pos)"></span>+1<br>
+    <span class="swatch" style="background: var(--t-undef)"></span>undefined
+  </div>
+
+  <h3>Selection</h3>
+  <div id="sel-info" style="color: var(--muted);">nothing selected</div>
+
+  <h3>Controls</h3>
+  <ul class="help">
+    <li>Drag components to move. Click an <b>Input</b> to cycle T → 0 → +1.</li>
+    <li>To wire, click an output pin then an input pin.</li>
+    <li>Drag on empty space to <b>pan the canvas</b>. <kbd>Shift</kbd>+drag rect-selects.</li>
+    <li><kbd>Del</kbd> deletes. <kbd>Esc</kbd> cancels wiring. <kbd>Space</kbd>+drag also pans. Wheel zooms.</li>
+    <li><b>Step</b> advances one clock tick (latches flip-flops, ticks clocks).</li>
+  </ul>
+
+  <h3>Simulator</h3>
+  <div class="kv"><span>Components</span><b id="stat-comp">0</b></div>
+  <div class="kv"><span>Wires</span><b id="stat-wires">0</b></div>
+  <div class="kv"><span>Tick</span><b id="stat-tick">0</b></div>
+  <div class="kv"><span>Iter</span><b id="stat-iter">0</b></div>
+  <div class="kv"><span>Stable</span><b id="stat-stable">yes</b></div>
+  <div class="kv" title="Input pins with no incoming wire. Highlighted with an amber ring on the canvas.">
+    <span>Floating inputs</span><b id="stat-floating">0</b></div>
+  <div class="kv" title="Exceptions caught during component evaluation. Check the browser console for details.">
+    <span>Eval errors</span><b id="stat-errors">0</b></div>
+</aside>
+
+<section class="wave-panel" id="wave-panel">
+  <div class="wave-header">
+    <span>Waveforms</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="btn" id="btn-wave-clear">Clear history</button>
+    <button class="btn" id="btn-wave-close">×</button>
+  </div>
+  <canvas id="wave-cv"></canvas>
+</section>
+
+<!-- Truth table modal -->
+<div class="modal-bg" id="tt-modal">
+  <div class="modal">
+    <h2>Truth Table <button class="btn close" id="tt-close">close</button></h2>
+    <div class="sweep-list">
+      <div class="group">
+        <h4>Sweep these inputs (3^n rows)</h4>
+        <div id="tt-inputs"></div>
+      </div>
+      <div class="group">
+        <h4>Show these outputs</h4>
+        <div id="tt-outputs"></div>
+      </div>
+    </div>
+    <button class="btn" id="tt-generate">Generate table</button>
+    <span style="color: var(--muted); margin-left: 8px; font-size: 11px;">
+      Limit: 7 inputs (2,187 rows max).
+    </span>
+    <div class="tt-result" id="tt-result" style="margin-top: 12px;"></div>
+  </div>
+</div>
+
+<!-- Gate Builder modal -->
+<div class="modal-bg" id="gate-modal">
+  <div class="modal" style="min-width: 540px;">
+    <h2>Build a gate <button class="btn close" id="gate-close">close</button></h2>
+    <p style="color: var(--muted); font-size: 12px;">
+      Define a new ternary gate by filling in its truth table. Click cells to cycle
+      <span style="color: var(--t-neg)">T</span> →
+      <span style="color: var(--t-zero)">0</span> →
+      <span style="color: var(--t-pos)">+1</span>.
+      The resulting gate is a <em>behavioural</em> component — the simulator evaluates it by table
+      lookup, not by an internal circuit of MIN/MAX/STI primitives.
+    </p>
+    <div class="inspector-form" style="display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px 10px; align-items: center;">
+      <label style="margin: 0;">Name</label>
+      <input id="gate-name" type="text" value="MyGate" />
+      <label style="margin: 0;">Inputs</label>
+      <select id="gate-inputs">
+        <option value="1">1</option>
+        <option value="2" selected>2</option>
+        <option value="3">3</option>
+      </select>
+    </div>
+    <div id="gate-table" style="margin: 14px 0;"></div>
+    <div>
+      <button class="btn" id="gate-add" style="border-color: var(--accent-2); color: var(--accent-2);">Add to library</button>
+      <button class="btn" id="gate-clear-table" style="margin-left: 6px;">Clear table</button>
+      <span id="gate-status" style="color: var(--muted); margin-left: 12px; font-size: 11px;"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Tests modal -->
+<div class="modal-bg" id="tests-modal">
+  <div class="modal">
+    <h2>Self-tests <button class="btn close" id="tests-close">close</button></h2>
+    <p style="color: var(--muted); font-size: 12px;">
+      Pure-function checks on the simulator's data path. These verify the
+      math, not the UI. A failure means the simulator is producing wrong
+      values somewhere — fix it before trusting any circuit you draw.
+    </p>
+    <div style="margin: 8px 0;">
+      <button class="btn" id="tests-run" style="border-color: var(--accent);">Run all tests</button>
+      <span id="tests-summary" style="margin-left: 12px; color: var(--muted); font-size: 12px;"></span>
+    </div>
+    <div id="tests-result" style="margin-top: 8px; font-family: monospace; font-size: 12px;"></div>
+  </div>
+</div>
+
+<!-- Pack subcircuit modal -->
+<div class="modal-bg" id="pack-modal">
+  <div class="modal">
+    <h2>Pack into subcircuit <button class="btn close" id="pack-close">close</button></h2>
+    <p style="color: var(--muted); font-size: 12px;">
+      Selected components become a reusable block.
+      INPUTs in the selection become input pins; OUTPUTs become output pins.
+      Set a name (and optionally rename pins below) before packing.
+    </p>
+    <div class="inspector-form" id="pack-form"></div>
+    <div style="margin-top: 10px;">
+      <button class="btn" id="pack-confirm" style="border-color: var(--accent);">Pack</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+//  TRIT VALUES & UTILITIES
+// ============================================================================
+//
+//  A "trit" is one of -1, 0, +1.  We use the JavaScript number type directly
+//  because it makes arithmetic in component eval() functions natural.
+//  The value `null` represents an undefined / floating wire — propagates
+//  through gates as null.
+
+const TRIT_COLOR = {
+  '-1': '#e35555', '0': '#888c95', '1': '#54c060', undef: '#44485a',
+};
+const tritColor = (v) => v == null ? TRIT_COLOR.undef : (TRIT_COLOR[String(v)] || TRIT_COLOR.undef);
+const tritLabel = (v) => v === -1 ? 'T' : v === 0 ? '0' : v === 1 ? '1' : '?';
+const tritClass = (v) => v === -1 ? 'trit-T' : v === 0 ? 'trit-0' : v === 1 ? 'trit-P' : '';
+
+// File format version for save/load.  Increment when the JSON shape
+// changes incompatibly so the loader can either upgrade or warn.
+const SAVE_FORMAT_VERSION = 1;
+
+// Prefer the platform's structuredClone (faster + preserves more JS types)
+// and fall back to the JSON round-trip when it isn't available.  This
+// shows up in cleanComps() and cloneSubScope() in particular.
+const deepClone = (typeof structuredClone === 'function')
+  ? structuredClone
+  : (x => JSON.parse(JSON.stringify(x)));
+
+// Decimal → balanced-ternary digit array, LSB first, length N.
+//
+// JS `%` returns negative remainders for negative dividends (-7 % 3 === -1),
+// and `Math.trunc(n/3)` truncates toward zero — together those mean a naive
+// loop produces wrong digits for negatives.  The fix: take the raw signed
+// remainder, map 2 → -1 and -2 → +1, and update n via the exact identity
+// (n - r) / 3 which is always an integer.
+function intToTrits(n, width) {
+  const trits = [];
+  n = Math.trunc(n);
+  for (let i = 0; i < width; i++) {
+    let r = n % 3;
+    if (r ===  2) r = -1;
+    if (r === -2) r =  1;
+    trits.push(r);
+    n = (n - r) / 3;
+  }
+  return trits;
+}
+
+// Sanity check on startup: every 6-trit value must round-trip.  Fires once
+// at parse time.  Cheap (~729 iterations) and saves debugging time.
+(function selfTestIntToTrits() {
+  for (let n = -364; n <= 364; n++) {
+    const back = tritsToInt(intToTrits(n, 6));
+    if (back !== n) {
+      console.error(`intToTrits round-trip failed: ${n} → ${back}`);
+      return;
+    }
+  }
+})();
+function tritsToInt(trits) {
+  let s = 0;
+  for (let i = 0; i < trits.length; i++) s += (trits[i] ?? 0) * Math.pow(3, i);
+  return s;
+}
+// Parse a balanced-ternary string like "1T01" (MSB first) or a decimal int.
+//
+// Returns { trits, warning }.  `trits` is always a length-`width` array of
+// {-1,0,+1}.  `warning` is a string when the input had to be clamped,
+// truncated, or rejected — otherwise null.  Callers should surface the
+// warning via setStatus so the user sees it instead of silently getting
+// zeros.
+function parseTryteString(s, width = 6) {
+  s = (s || '').trim();
+  if (s === '') return { trits: new Array(width).fill(0), warning: null };
+  // Decimal form.
+  if (/^-?\d+$/.test(s)) {
+    const n = parseInt(s, 10);
+    const maxAbs = (Math.pow(3, width) - 1) / 2;     // 364 for width 6
+    if (Math.abs(n) > maxAbs) {
+      const clamped = Math.max(-maxAbs, Math.min(maxAbs, n));
+      return { trits: intToTrits(clamped, width),
+               warning: `value ${n} out of ${width}-trit range (±${maxAbs}); clamped to ${clamped}` };
+    }
+    return { trits: intToTrits(n, width), warning: null };
+  }
+  // Balanced-ternary string form (MSB first).
+  if (/^[T01]+$/i.test(s)) {
+    const arr = s.toUpperCase().split('').reverse().map(c => c === 'T' ? -1 : c === '0' ? 0 : 1);
+    if (arr.length > width) {
+      return { trits: arr.slice(0, width),
+               warning: `string longer than ${width} trits; only LSB ${width} kept` };
+    }
+    while (arr.length < width) arr.push(0);
+    return { trits: arr, warning: null };
+  }
+  // Anything else is unparseable.  Return zeros + a warning rather than
+  // pretending the user typed 0 successfully.
+  return { trits: new Array(width).fill(0),
+           warning: `could not parse "${s}"; expected decimal or balanced-ternary (T/0/1) string` };
+}
+function formatTryte(trits) {
+  // Pretty form: balanced-ternary MSB first + decimal in parens
+  const bt = trits.slice().reverse().map(t => t === -1 ? 'T' : t === 0 ? '0' : '1').join('');
+  return `${bt} (${tritsToInt(trits)})`;
+}
+
+// ============================================================================
+//  COMPONENT TYPE REGISTRY
+// ============================================================================
+//
+//  Each entry describes geometry, pin layout, default state, and the pure
+//  eval() function that maps inputs → outputs.  Sequential components
+//  additionally define latch(c, vIn) which is called on each clock tick to
+//  mutate internal state.
+
+const TYPES = {};
+
+// ---- I/O sources ----------------------------------------------------------
+TYPES.INPUT = {
+  w: 56, h: 40,
+  pins: { out: { side: 'right', dx: 56, dy: 20, kind: 'out' } },
+  defaults: () => ({ value: 0, name: '' }),
+  eval: (c) => ({ out: c.state.value }),
+  draw: drawInput,
+  inspector: (c) => [
+    { label: 'Pin name (for subcircuits)', kind: 'text', get: () => c.state.name || '',
+      set: v => c.state.name = v },
+    { label: 'Value', kind: 'select', options: [['-1','T'],['0','0'],['1','+1']],
+      get: () => String(c.state.value), set: v => { c.state.value = parseInt(v,10); } },
+  ],
+};
+
+TYPES.CONST = {
+  w: 40, h: 28,
+  pins: { out: { side: 'right', dx: 40, dy: 14, kind: 'out' } },
+  defaults: () => ({ value: 1 }),
+  eval: (c) => ({ out: c.state.value }),
+  draw: drawConst,
+  inspector: (c) => [
+    { label: 'Value', kind: 'select', options: [['-1','T'],['0','0'],['1','+1']],
+      get: () => String(c.state.value), set: v => { c.state.value = parseInt(v,10); } },
+  ],
+};
+
+TYPES.TRYTE_IN = {
+  // 6-trit input: 6 output pins, value editable.
+  w: 80, h: 100,
+  pins: (() => {
+    const p = {};
+    for (let i = 0; i < 6; i++) {
+      p['t' + i] = { side: 'right', dx: 80, dy: 18 + i * 14, kind: 'out' };
+    }
+    return p;
+  })(),
+  defaults: () => ({ value: 0, name: '' }),
+  eval: (c) => {
+    const trits = intToTrits(c.state.value, 6);
+    const out = {};
+    for (let i = 0; i < 6; i++) out['t' + i] = trits[i];
+    return out;
+  },
+  draw: drawTryteIn,
+  inspector: (c) => [
+    { label: 'Decimal value', kind: 'number', get: () => c.state.value,
+      set: v => {
+        const n = parseInt(v || '0', 10) || 0;
+        const clamped = Math.max(-364, Math.min(364, n));
+        c.state.value = clamped;
+        if (clamped !== n) {
+          setStatus(`tryte value ${n} out of range (±364); clamped to ${clamped}`);
+        }
+      } },
+    { label: 'Balanced ternary (MSB first)', kind: 'text',
+      get: () => intToTrits(c.state.value, 6).slice().reverse()
+                 .map(t => t === -1 ? 'T' : t === 0 ? '0' : '1').join(''),
+      set: v => {
+        const { trits, warning } = parseTryteString(v, 6);
+        c.state.value = tritsToInt(trits);
+        if (warning) setStatus(warning);
+      } },
+  ],
+};
+
+TYPES.CLOCK = {
+  // A ternary clock has two reasonable cycle patterns:
+  //
+  //   mode 'tri' (default): T → 0 → +1 → T → ...   — visits all three states.
+  //   mode 'bi':            T ↔ +1                — skips the middle state.
+  //
+  // The tri mode is more honest in a balanced-ternary system; bi mode is
+  // useful when you want classical rising/falling edge timing without
+  // an intermediate state.  Either way the DFF latches on the transition
+  // INTO +1 from anything else, so latches happen once per cycle in
+  // both modes (every 3 ticks for tri, every 2 ticks for bi).
+  w: 56, h: 40,
+  pins: { out: { side: 'right', dx: 56, dy: 20, kind: 'out' } },
+  defaults: () => ({ value: -1, mode: 'tri' }),
+  eval: (c) => ({ out: c.state.value }),
+  draw: drawClock,
+  inspector: (c) => [
+    { label: 'Cycle mode', kind: 'select',
+      options: [['tri','Three-state (T → 0 → +1)'], ['bi','Two-state (T ↔ +1)']],
+      get: () => c.state.mode || 'tri',
+      set: v => { c.state.mode = v; } },
+    { label: 'Current value', kind: 'select',
+      options: [['-1','T'],['0','0'],['1','+1']],
+      get: () => String(c.state.value),
+      set: v => { c.state.value = parseInt(v,10); } },
+  ],
+};
+
+// ---- I/O sinks ------------------------------------------------------------
+TYPES.OUTPUT = {
+  w: 40, h: 40,
+  pins: { in: { side: 'left', dx: 0, dy: 20, kind: 'in' } },
+  defaults: () => ({ name: '' }),
+  eval: () => ({}),
+  draw: drawOutput,
+  inspector: (c) => [
+    { label: 'Pin name (for subcircuits)', kind: 'text', get: () => c.state.name || '',
+      set: v => c.state.name = v },
+  ],
+};
+
+TYPES.TRYTE_OUT = {
+  w: 88, h: 100,
+  pins: (() => {
+    const p = {};
+    for (let i = 0; i < 6; i++) {
+      p['t' + i] = { side: 'left', dx: 0, dy: 18 + i * 14, kind: 'in' };
+    }
+    return p;
+  })(),
+  defaults: () => ({}),
+  eval: () => ({}),
+  draw: drawTryteOut,
+};
+
+TYPES.WAVE = {
+  // A probe that records its input value at every clock tick.  Unlike a true
+  // sequential element, WAVE is a passive observer; we record its input
+  // value after the final combinational settle each step (not in the latch
+  // phase) so the trace reflects the post-edge state.
+  w: 56, h: 40,
+  pins: { in: { side: 'left', dx: 0, dy: 20, kind: 'in' } },
+  defaults: () => ({ name: '', trace: [] }),
+  eval: () => ({}),
+  draw: drawWave,
+  inspector: (c) => [
+    { label: 'Probe name', kind: 'text', get: () => c.state.name || '',
+      set: v => c.state.name = v },
+  ],
+};
+
+// ---- Unary inverters ------------------------------------------------------
+function makeInverter(label, fn) {
+  return {
+    w: 64, h: 40,
+    pins: {
+      in:  { side: 'left',  dx: 0,  dy: 20, kind: 'in' },
+      out: { side: 'right', dx: 64, dy: 20, kind: 'out' },
+    },
+    defaults: () => ({}),
+    eval: (_, v) => v.in == null ? { out: null } : { out: fn(v.in) },
+    draw: (c) => drawInverterShape(c, label),
+  };
+}
+TYPES.STI = makeInverter('STI', a => -a);
+TYPES.PTI = makeInverter('PTI', a => a === 1 ? -1 : 1);   // T,0 → 1 ; 1 → T
+TYPES.NTI = makeInverter('NTI', a => a === -1 ? 1 : -1);  // T → 1 ; 0,1 → T
+
+// ---- Binary gates ---------------------------------------------------------
+function makeBinary(label, fn) {
+  return {
+    w: 72, h: 60,
+    pins: {
+      a:   { side: 'left',  dx: 0,  dy: 16, kind: 'in' },
+      b:   { side: 'left',  dx: 0,  dy: 44, kind: 'in' },
+      out: { side: 'right', dx: 72, dy: 30, kind: 'out' },
+    },
+    defaults: () => ({}),
+    eval: (_, v) => (v.a == null || v.b == null) ? { out: null } : { out: fn(v.a, v.b) },
+    draw: (c) => drawBinaryShape(c, label),
+  };
+}
+TYPES.MIN = makeBinary('MIN', (a, b) => Math.min(a, b));
+TYPES.MAX = makeBinary('MAX', (a, b) => Math.max(a, b));
+
+// ---- Full-trit adder ------------------------------------------------------
+const ADDER_TABLE = {
+  '-3': { sum:  0, cout: -1 },
+  '-2': { sum:  1, cout: -1 },
+  '-1': { sum: -1, cout:  0 },
+   '0': { sum:  0, cout:  0 },
+   '1': { sum:  1, cout:  0 },
+   '2': { sum: -1, cout:  1 },
+   '3': { sum:  0, cout:  1 },
+};
+TYPES.ADDER = {
+  w: 96, h: 88,
+  pins: {
+    a:    { side: 'left',  dx: 0,  dy: 18, kind: 'in' },
+    b:    { side: 'left',  dx: 0,  dy: 44, kind: 'in' },
+    cin:  { side: 'left',  dx: 0,  dy: 70, kind: 'in' },
+    sum:  { side: 'right', dx: 96, dy: 26, kind: 'out' },
+    cout: { side: 'right', dx: 96, dy: 62, kind: 'out' },
+  },
+  defaults: () => ({}),
+  eval: (_, v) => {
+    if (v.a == null || v.b == null || v.cin == null) return { sum: null, cout: null };
+    return ADDER_TABLE[String(v.a + v.b + v.cin)];
+  },
+  draw: drawAdder,
+};
+
+// ---- D flip-flop ----------------------------------------------------------
+//
+//  Edge-triggered on rising edge of clk (clkPrev !== 1 && clk === 1).
+//  Internal state: q (current stored trit), clkPrev (last seen clk value).
+//  Output is always state.q.  We latch on tick() — the combinational
+//  simulator never modifies state.
+
+TYPES.DFF = {
+  w: 80, h: 60,
+  pins: {
+    d:   { side: 'left',  dx: 0,  dy: 18, kind: 'in' },
+    clk: { side: 'left',  dx: 0,  dy: 44, kind: 'in' },
+    q:   { side: 'right', dx: 80, dy: 30, kind: 'out' },
+  },
+  defaults: () => ({ q: 0, clkPrev: 0 }),
+  eval: (c) => ({ q: c.state.q }),
+  latch: (c, vIn) => {
+    const clk = vIn.clk ?? 0;
+    if (c.state.clkPrev !== 1 && clk === 1) {
+      c.state.q = vIn.d ?? c.state.q;
+    }
+    c.state.clkPrev = clk;
+  },
+  isSequential: true,
+  draw: drawDFF,
+};
+
+// ============================================================================
+//  WORLD STATE
+// ============================================================================
+
+let comps = [];     // { id, type, x, y, state, subScope? }
+let wires = [];     // { id, fromId, fromPort, toId, toPort }
+let nextCompId = 1, nextWireId = 1;
+let outVals = {};
+
+let subcircuitDefs = {};   // name -> { inputs:[{name}], outputs:[{name}], comps, wires, nextCompId, nextWireId }
+
+let view = { tx: 40, ty: 40, scale: 1 };
+let tick = 0;
+let autoPlay = null;
+
+// Tool / interaction state
+let tool = 'select';
+let placeType = null;
+let mouse = { x: 0, y: 0, wx: 0, wy: 0, down: false, spaceDown: false };
+let drag = null;             // { kind:'comp'|'pan'|'rect', startX, startY, ... }
+let pendingWire = null;
+let hoverPin = null;
+let selection = new Set();   // Set of component IDs
+let selectedWire = null;
+let lastClickPos = null;
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const statusEl = document.getElementById('status');
+const selInfo = document.getElementById('sel-info');
+const waveCv = document.getElementById('wave-cv');
+const waveCtx = waveCv.getContext('2d');
+
+function resize() {
+  cv.width = cv.parentElement.clientWidth;
+  cv.height = cv.parentElement.clientHeight;
+  waveCv.width = waveCv.parentElement.clientWidth;
+  waveCv.height = waveCv.parentElement.clientHeight - 28;
+  draw();
+  drawWaves();
+}
+window.addEventListener('resize', resize);
+
+// ============================================================================
+//  HIT-TESTING & COORDINATES
+// ============================================================================
+
+function screenToWorld(sx, sy) {
+  return { x: (sx - view.tx) / view.scale, y: (sy - view.ty) / view.scale };
+}
+function snap(v, g = 10) { return Math.round(v / g) * g; }
+
+// Map for O(1) component lookup.  Kept in sync via syncCompMap() at each
+// place that mutates the comps array; getComp falls back to a full rebuild
+// if it detects the map and array have drifted.
+let compById = new Map();
+function syncCompMap() { compById = new Map(comps.map(c => [c.id, c])); }
+function getComp(id) {
+  if (compById.size !== comps.length) syncCompMap();
+  return compById.get(id);
+}
+
+function compDef(c) {
+  if (c.type.startsWith('SUB:'))  return subInstanceDef(c);
+  if (c.type.startsWith('GATE:')) return customGateDef(c);
+  const t = TYPES[c.type];
+  if (!t) return unknownTypeDef(c);
+  return t;
+}
+function unknownTypeDef(c) {
+  // Defensive fallback for save files containing types this build doesn't
+  // know about (e.g. a forward-compatible save).  Returns a draw-only block
+  // with no pins so the simulator skips it; renders as a red "?" box so
+  // the user can see which component is the problem.
+  return {
+    w: 80, h: 60, pins: {}, defaults: () => ({}), eval: () => ({}),
+    draw: () => {
+      ctx.fillStyle = '#3a2226'; ctx.fillRect(0, 0, 80, 60);
+      ctx.strokeStyle = '#e35555'; ctx.strokeRect(0.5, 0.5, 79, 59);
+      ctx.fillStyle = '#e35555';
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('?' + (c.type.length > 7 ? c.type.slice(0, 6) + '…' : c.type), 40, 30);
+    },
+  };
+}
+
+function pinAbsPos(comp, portName) {
+  const def = compDef(comp);
+  const p = def.pins[portName];
+  return { x: comp.x + p.dx, y: comp.y + p.dy, side: p.side, kind: p.kind };
+}
+
+function hitTestComp(wx, wy) {
+  for (let i = comps.length - 1; i >= 0; i--) {
+    const c = comps[i];
+    const def = compDef(c);
+    if (wx >= c.x && wx <= c.x + def.w && wy >= c.y && wy <= c.y + def.h) return c;
+  }
+  return null;
+}
+function hitTestPin(wx, wy, tol = 7) {
+  for (const c of comps) {
+    const def = compDef(c);
+    for (const port in def.pins) {
+      const p = pinAbsPos(c, port);
+      const dx = wx - p.x, dy = wy - p.y;
+      if (dx * dx + dy * dy <= tol * tol) {
+        return { comp: c, port, kind: p.kind, x: p.x, y: p.y };
+      }
+    }
+  }
+  return null;
+}
+function hitTestWire(wx, wy, tol = 5) {
+  for (let i = wires.length - 1; i >= 0; i--) {
+    const w = wires[i];
+    const path = wirePath(w);
+    for (let j = 0; j < path.length - 1; j++) {
+      if (pointSegmentDist(wx, wy, path[j].x, path[j].y, path[j+1].x, path[j+1].y) <= tol) {
+        return w;
+      }
+    }
+  }
+  return null;
+}
+function pointSegmentDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx*dx + dy*dy;
+  if (len2 === 0) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+  return Math.hypot(px - (ax + t*dx), py - (ay + t*dy));
+}
+
+// ============================================================================
+//  WIRE ROUTING
+// ============================================================================
+//
+//  We build a simple orthogonal path with the elbow positioned at the midpoint
+//  along the dominant axis.  This avoids the worst case where a wire would
+//  pass straight through a gate when source and destination are roughly
+//  vertically aligned.
+
+// Axis-aligned segment vs box overlap.  Strict on the perpendicular axis
+// so a segment exactly along a component's edge doesn't count as a hit —
+// otherwise pin stubs would always self-flag.
+function segHitsBox(x1, y1, x2, y2, bx, by, bw, bh) {
+  if (y1 === y2) {
+    if (y1 <= by || y1 >= by + bh) return false;
+    const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
+    return !(hi <= bx || lo >= bx + bw);
+  }
+  if (x1 === x2) {
+    if (x1 <= bx || x1 >= bx + bw) return false;
+    const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
+    return !(hi <= by || lo >= by + bh);
+  }
+  return false; // wires here are always axis-aligned
+}
+function pathCrossesObstacle(path, exclude) {
+  for (const c of comps) {
+    if (exclude.has(c.id)) continue;
+    const def = compDef(c);
+    for (let i = 0; i < path.length - 1; i++) {
+      if (segHitsBox(path[i].x, path[i].y, path[i+1].x, path[i+1].y,
+                     c.x, c.y, def.w, def.h)) return true;
+    }
+  }
+  return false;
+}
+
+// A* obstacle-aware router on a coarse grid.  Replaces the previous
+// "try a handful of L-shape elbows" heuristic, which broke down in dense
+// layouts.  Cells overlapping a non-endpoint component are blocked; the
+// search returns a path that's guaranteed not to cross any component.
+
+// Minimal binary min-heap so A*'s open-set extraction is O(log n) rather
+// than O(n).  Items are { key, priority } pairs.
+class _MinHeap {
+  constructor() { this.a = []; }
+  get size() { return this.a.length; }
+  push(item) {
+    this.a.push(item);
+    let i = this.a.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (this.a[p].priority > this.a[i].priority) {
+        [this.a[p], this.a[i]] = [this.a[i], this.a[p]];
+        i = p;
+      } else break;
+    }
+  }
+  pop() {
+    if (this.a.length === 0) return undefined;
+    const top = this.a[0];
+    const last = this.a.pop();
+    if (this.a.length > 0) {
+      this.a[0] = last;
+      let i = 0, n = this.a.length;
+      while (true) {
+        const l = 2*i + 1, r = 2*i + 2;
+        let m = i;
+        if (l < n && this.a[l].priority < this.a[m].priority) m = l;
+        if (r < n && this.a[r].priority < this.a[m].priority) m = r;
+        if (m === i) break;
+        [this.a[m], this.a[i]] = [this.a[i], this.a[m]];
+        i = m;
+      }
+    }
+    return top;
+  }
+}
+
+function _aStarRoute(sgx, sgy, egx, egy, obstacles, bounds, occupied, mySourceKey) {
+  const startKey = sgx + ',' + sgy;
+  const endKey   = egx + ',' + egy;
+  if (startKey === endKey) return [{ gx: sgx, gy: sgy }];
+
+  const gScore = new Map([[startKey, 0]]);
+  const cameFrom = new Map();
+  const cameDir  = new Map();   // for turn-penalty
+  const open = new _MinHeap();
+  open.push({ key: startKey, priority: Math.abs(egx - sgx) + Math.abs(egy - sgy) });
+  const closed = new Set();
+  let iter = 0;
+  const MAX_ITER = 20000;
+
+  while (open.size && iter++ < MAX_ITER) {
+    const cur = open.pop();
+    if (closed.has(cur.key)) continue;
+    if (cur.key === endKey) {
+      // Reconstruct
+      const cells = [cur.key];
+      let k = cur.key;
+      while (cameFrom.has(k)) { k = cameFrom.get(k); cells.unshift(k); }
+      return cells.map(s => {
+        const [gx, gy] = s.split(',').map(Number);
+        return { gx, gy };
+      });
+    }
+    closed.add(cur.key);
+    const [cx, cy] = cur.key.split(',').map(Number);
+    const prevDir = cameDir.get(cur.key);
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < bounds.minGx || nx > bounds.maxGx ||
+          ny < bounds.minGy || ny > bounds.maxGy) continue;
+      const nKey = nx + ',' + ny;
+      if (closed.has(nKey) || obstacles.has(nKey)) continue;
+      const dirKey = dx + ',' + dy;
+      const turnCost = (prevDir && prevDir !== dirKey) ? 0.4 : 0;
+      // Occupancy penalty: if another wire (with a different source pin)
+      // already runs through this cell, prefer to route around it.  Cost
+      // is high but finite so A* will go through in worst cases rather
+      // than fail to find a path entirely.  Same-source (fan-out) wires
+      // pay no penalty since their signals are identical.
+      let occCost = 0;
+      if (occupied) {
+        const occ = occupied.get(nKey);
+        if (occ && occ !== mySourceKey) occCost = 30;
+      }
+      const tentG = (gScore.get(cur.key) ?? Infinity) + 1 + turnCost + occCost;
+      if (tentG < (gScore.get(nKey) ?? Infinity)) {
+        cameFrom.set(nKey, cur.key);
+        cameDir.set(nKey, dirKey);
+        gScore.set(nKey, tentG);
+        const f = tentG + Math.abs(egx - nx) + Math.abs(egy - ny);
+        open.push({ key: nKey, priority: f });
+      }
+    }
+  }
+  return null;
+}
+
+function _simplifyOrthoPath(p) {
+  if (p.length < 3) return p;
+  const out = [p[0]];
+  for (let i = 1; i < p.length - 1; i++) {
+    const prev = out[out.length - 1];
+    const cur = p[i], next = p[i + 1];
+    const d1x = Math.sign(cur.x - prev.x), d1y = Math.sign(cur.y - prev.y);
+    const d2x = Math.sign(next.x - cur.x), d2y = Math.sign(next.y - cur.y);
+    if (d1x === d2x && d1y === d2y) continue;   // collinear continuation
+    out.push(cur);
+  }
+  out.push(p[p.length - 1]);
+  return out;
+}
+
+// Per-draw cache so the many callers (drawWire, drawWireGhost,
+// computeWireCrossings, fanoutPins, hitTestWire) don't each re-run A*.
+let _pathCache = new Map();
+// Per-cell occupancy: gridKey -> sourceKey ('fromId:fromPort').  Wires
+// route in id order; each one marks its cells so subsequent wires with a
+// DIFFERENT source pin steer around them (rather than overlapping
+// longitudinally).  Same-source wires (fan-out) are free to share cells
+// since their carried signal is identical.
+let _wireOccupied = new Map();
+function invalidatePathCache() { _pathCache.clear(); _wireOccupied.clear(); }
+
+function wirePath(w) {
+  if (_pathCache.has(w.id)) return _pathCache.get(w.id);
+  const a = pinAbsPos(getComp(w.fromId), w.fromPort);
+  const b = pinAbsPos(getComp(w.toId), w.toPort);
+  const G = 10, stub = 12;
+  const aStubX = a.x + stub;
+  const bStubX = b.x - stub;
+
+  // Stub-end grid coordinates.  Snap Y to nearest grid line so A* works
+  // on whole-cell steps; we patch the real pin Y back in at the ends.
+  const sgx = Math.round(aStubX / G);
+  const sgy = Math.round(a.y    / G);
+  const egx = Math.round(bStubX / G);
+  const egy = Math.round(b.y    / G);
+  // Bounding box for the search — extend around both endpoints with
+  // generous margin so the router has room to detour.
+  const minX = Math.min(sgx, egx) - 30;
+  const maxX = Math.max(sgx, egx) + 30;
+  const minY = Math.min(sgy, egy) - 30;
+  const maxY = Math.max(sgy, egy) + 30;
+  const bounds = { minGx: minX, maxGx: maxX, minGy: minY, maxGy: maxY };
+
+  // Build obstacle set.  ALL components — including this wire's own source
+  // and destination — are obstacles, with a 2-cell padding so wires keep
+  // visible breathing room and don't touch component edges.  Without
+  // including the destination, A* would route the shortest path straight
+  // through the destination's body to reach its pin.
+  //
+  // The padding would also block the wire-approach corridor at each pin,
+  // so we then carve a 3-cell corridor at each endpoint pointing in the
+  // direction the pin faces ("left"-side pins carve leftward, etc.).
+  const padding = 2;
+  const obstacles = new Set();
+  for (const c of comps) {
+    const def = compDef(c);
+    const x0 = Math.floor(c.x / G) - padding, x1 = Math.ceil((c.x + def.w) / G) + padding;
+    const y0 = Math.floor(c.y / G) - padding, y1 = Math.ceil((c.y + def.h) / G) + padding;
+    for (let gy = y0; gy < y1; gy++)
+      for (let gx = x0; gx < x1; gx++)
+        obstacles.add(gx + ',' + gy);
+  }
+  // Pin-approach corridor: from stub-end cell, walk OUTWARD (away from
+  // the component centre, in the direction the pin faces) and clear those
+  // cells from obstacles so A* can enter / leave the padded zone.
+  const carveCorridor = (side, gx, gy) => {
+    const dx = side === 'left' ? -1 : side === 'right' ? 1 : 0;
+    const dy = side === 'top'  ? -1 : side === 'bottom' ? 1 : 0;
+    for (let i = 0; i <= padding; i++) {
+      obstacles.delete((gx + dx * i) + ',' + (gy + dy * i));
+    }
+  };
+  carveCorridor(a.side, sgx, sgy);
+  carveCorridor(b.side, egx, egy);
+
+  const sourceKey = w.fromId + ':' + w.fromPort;
+  const gridPath = _aStarRoute(sgx, sgy, egx, egy, obstacles, bounds,
+                               _wireOccupied, sourceKey);
+
+  let path;
+  if (gridPath) {
+    // Mark every cell along the routed path with this wire's source key so
+    // later wires (different source) get pushed onto alternate routes.
+    for (const cell of gridPath) {
+      const k = cell.gx + ',' + cell.gy;
+      if (!_wireOccupied.has(k)) _wireOccupied.set(k, sourceKey);
+    }
+    const cellsToPoints = gridPath.map(p => ({ x: p.gx * G, y: p.gy * G }));
+    const body = _simplifyOrthoPath(cellsToPoints);
+    // Assemble: pin → stub-end (at real pin Y) → vertical to grid Y →
+    // A*-routed body → vertical to real pin Y → stub-end → pin.
+    path = [{ x: a.x, y: a.y }, { x: aStubX, y: a.y }];
+    if (a.y !== sgy * G) path.push({ x: aStubX, y: sgy * G });
+    for (let i = 1; i < body.length - 1; i++) path.push(body[i]);
+    if (b.y !== egy * G) path.push({ x: bStubX, y: egy * G });
+    path.push({ x: bStubX, y: b.y });
+    path.push({ x: b.x, y: b.y });
+    path = _simplifyOrthoPath(path);
+  } else {
+    // No A* solution.  Defensive fallback to a centred L-shape.  This
+    // shouldn't normally happen with the wide bounding box; if it does
+    // the ghost-overlay pass will still surface the wire.
+    const ax = a.x + stub, bx = b.x - stub;
+    const baseX = Math.round((ax + bx) / 2);
+    path = [
+      { x: a.x, y: a.y }, { x: ax, y: a.y },
+      { x: baseX, y: a.y }, { x: baseX, y: b.y },
+      { x: bx, y: b.y }, { x: b.x, y: b.y },
+    ];
+  }
+  _pathCache.set(w.id, path);
+  return path;
+}
+
+// Junction dots: at any output pin with fan-out > 1, draw a dot.
+function fanoutPins() {
+  const count = {};
+  for (const w of wires) {
+    const key = `${w.fromId}:${w.fromPort}`;
+    count[key] = (count[key] || 0) + 1;
+  }
+  return Object.entries(count).filter(([_,n]) => n > 1).map(([k]) => k);
+}
+
+// ============================================================================
+//  SIMULATION
+// ============================================================================
+//
+//  Two phases.  Phase A is purely combinational: iterate components,
+//  recomputing each output from its inputs, until nothing changes.  Phase B
+//  ("step") is the sequential edge-triggered update, executed only when the
+//  user clicks Step or auto-play fires.  After Phase B we re-run Phase A.
+
+function inputValueFromWires(scope, compId, portName) {
+  const w = scope.wires.find(w => w.toId === compId && w.toPort === portName);
+  if (!w) return null;
+  return scope.outVals[`${w.fromId}:${w.fromPort}`] ?? null;
+}
+
+function simulateScope(scope) {
+  // Initialize: combinational outputs to null, sequential outputs to current
+  // state.  This means a DFF participates correctly as a source of its
+  // stored q.
+  for (const c of scope.comps) {
+    const def = compDef(c);
+    for (const port in def.pins) {
+      if (def.pins[port].kind === 'out') {
+        const key = `${c.id}:${port}`;
+        if (scope.outVals[key] === undefined) scope.outVals[key] = null;
+      }
+    }
+  }
+  let stable = false, iters = 0;
+  const maxIters = 300;
+  while (!stable && iters < maxIters) {
+    stable = true; iters++;
+    for (const c of scope.comps) {
+      const def = compDef(c);
+      const vIn = {};
+      for (const port in def.pins) {
+        if (def.pins[port].kind === 'in') vIn[port] = inputValueFromWires(scope, c.id, port);
+      }
+      let vOut;
+      try {
+        if (c.type.startsWith('SUB:')) vOut = simulateSubInstance(c, vIn);
+        else vOut = def.eval(c, vIn) || {};
+      } catch (err) {
+        // Don't let a single buggy eval take down the whole fixed-point
+        // iteration.  Outputs go to null so downstream gates see a clean
+        // "floating" signal, and we increment a counter the UI can show.
+        scope._evalErrors = (scope._evalErrors || 0) + 1;
+        if (!scope._evalLogged) {
+          scope._evalLogged = true;
+          console.warn(`eval error in ${c.type} #${c.id}:`, err);
+        }
+        vOut = {};
+        for (const port in def.pins) {
+          if (def.pins[port].kind === 'out') vOut[port] = null;
+        }
+      }
+      for (const port in vOut) {
+        const key = `${c.id}:${port}`;
+        if (scope.outVals[key] !== vOut[port]) {
+          scope.outVals[key] = vOut[port];
+          stable = false;
+        }
+      }
+    }
+  }
+  scope.lastIters = iters;
+  scope.stable = stable;
+  return { iters, stable };
+}
+
+function simulate() {
+  const root = { comps, wires, outVals };
+  const { iters, stable } = simulateScope(root);
+  outVals = root.outVals;
+  // Count floating (undriven) input pins.  Cheap O(C·W) scan; acceptable
+  // for circuits of the size this tool is meant for.
+  let floating = 0;
+  for (const c of comps) {
+    const def = compDef(c);
+    for (const port in def.pins) {
+      if (def.pins[port].kind === 'in' &&
+          !wires.some(w => w.toId === c.id && w.toPort === port)) {
+        floating++;
+      }
+    }
+  }
+  document.getElementById('stat-comp').textContent = comps.length;
+  document.getElementById('stat-wires').textContent = wires.length;
+  document.getElementById('stat-iter').textContent = iters;
+  document.getElementById('stat-stable').textContent = stable ? 'yes' : 'no (oscillating)';
+  document.getElementById('stat-tick').textContent = tick;
+  const floatEl = document.getElementById('stat-floating');
+  floatEl.textContent = floating;
+  // Tint the number amber when there's anything to warn about.
+  floatEl.style.color = floating > 0 ? '#e3a55a' : '';
+  // Eval-error count from the per-component try/catch in simulateScope.
+  const errs = root._evalErrors || 0;
+  const errEl = document.getElementById('stat-errors');
+  if (errEl) {
+    errEl.textContent = errs;
+    errEl.style.color = errs > 0 ? '#e35555' : '';
+  }
+}
+
+function stepSequential() {
+  // A correct synchronous step is FOUR phases, not one:
+  //
+  //   1. Tick every CLOCK (they are autonomous oscillators with no inputs).
+  //   2. Re-settle combinational logic so flip-flops can SEE the new clock
+  //      level on their clk pin.
+  //   3. Latch every flip-flop / sequential element using its inputs as they
+  //      stand now — this is the rising-edge sample point.
+  //   4. Re-settle combinational logic so any q output that just changed
+  //      propagates before we record waveforms.
+  //
+  //  Then record WAVE probes against the final post-settle values.
+  function tickClocks(scope) {
+    for (const c of scope.comps) {
+      if (c.type === 'CLOCK') {
+        const mode = c.state.mode || 'tri';
+        if (mode === 'bi') {
+          c.state.value = (c.state.value === 1) ? -1 : 1;
+        } else {
+          // Tri-state cycle: T(-1) → 0 → +1 → T → ...
+          c.state.value = (c.state.value === -1) ? 0
+                        : (c.state.value === 0)  ? 1
+                        : -1;
+        }
+      } else if (c.type.startsWith('SUB:') && c.subScope) {
+        tickClocks(c.subScope);
+      }
+    }
+  }
+  function latchFlops(scope) {
+    for (const c of scope.comps) {
+      if (c.type === 'CLOCK') continue;
+      if (c.type.startsWith('SUB:')) {
+        if (c.subScope) latchFlops(c.subScope);
+      } else {
+        const def = TYPES[c.type];
+        if (def && def.isSequential && def.latch) {
+          const vIn = {};
+          for (const port in def.pins) {
+            if (def.pins[port].kind === 'in') {
+              vIn[port] = inputValueFromWires(scope, c.id, port);
+            }
+          }
+          def.latch(c, vIn);
+        }
+      }
+    }
+  }
+  function recordWaves(scope) {
+    for (const c of scope.comps) {
+      if (c.type === 'WAVE') {
+        const v = inputValueFromWires(scope, c.id, 'in');
+        c.state.trace.push(v ?? null);
+        if (c.state.trace.length > 256) c.state.trace.shift();
+      } else if (c.type.startsWith('SUB:') && c.subScope) {
+        recordWaves(c.subScope);
+      }
+    }
+  }
+
+  // NB: the scope MUST include outVals or inputValueFromWires will throw
+  // (it does `scope.outVals[key]`).  Build a fresh scope before each helper
+  // so a reassignment of the global `outVals` (e.g. from Reset) doesn't
+  // leave us holding a stale reference.
+  tickClocks({ comps });                       // doesn't touch wires/outVals
+  simulate();                                  // phase 2 settle
+  latchFlops({ comps, wires, outVals });
+  simulate();                                  // phase 4 settle
+  recordWaves({ comps, wires, outVals });
+  tick++;
+  document.getElementById('stat-tick').textContent = tick;
+  drawWaves();
+  draw();
+}
+
+// ============================================================================
+//  SUBCIRCUITS
+// ============================================================================
+//
+//  A subcircuit definition is stored in `subcircuitDefs[name]`.  When a
+//  subcircuit instance is placed, we deep-clone the definition's internal
+//  comps and wires into `c.subScope`, so each instance has independent
+//  flip-flop state and waveform traces.
+//
+//  The instance's outward-facing pin layout is derived from the input/output
+//  components inside, ordered by their y coordinate at pack time.
+
+function subInstanceDef(c) {
+  // Build a TYPES-like def on the fly from the instance's definition.
+  const defName = c.type.slice(4);
+  const def = subcircuitDefs[defName];
+  if (!def) {
+    return { w: 80, h: 60, pins: {}, defaults: () => ({}), eval: () => ({}),
+             draw: (cc) => drawSubMissing(cc, defName) };
+  }
+  const pins = {};
+  def.inputs.forEach((p, i) => {
+    pins[p.name] = { side: 'left', dx: 0, dy: 20 + i * 18, kind: 'in' };
+  });
+  def.outputs.forEach((p, i) => {
+    pins[p.name] = { side: 'right', dx: 96, dy: 20 + i * 18, kind: 'out' };
+  });
+  const h = Math.max(48, 20 + Math.max(def.inputs.length, def.outputs.length) * 18);
+  return {
+    w: 96, h,
+    pins,
+    defaults: () => ({}),
+    eval: () => ({}),  // unused — simulator special-cases SUB: types
+    draw: (cc) => drawSubInstance(cc, defName, def),
+  };
+}
+
+// Module-level counter so a runaway recursion (subcircuit cycle) doesn't
+// blow the JS stack with a confusing trace — we bail at a sensible depth.
+let _subDepth = 0;
+function simulateSubInstance(instance, vIn) {
+  const def = subcircuitDefs[instance.type.slice(4)];
+  if (!def) return {};
+  if (_subDepth > 32) {
+    // Cycle detected (or just very deep nesting).  Return floating outputs
+    // and log once — the validator should have caught this at load time.
+    if (!simulateSubInstance._warned) {
+      simulateSubInstance._warned = true;
+      console.warn(`subcircuit recursion exceeded depth 32 at instance #${instance.id} (${instance.type}); aborting this branch`);
+    }
+    const out = {};
+    for (const p of def.outputs) out[p.name] = null;
+    return out;
+  }
+  if (!instance.subScope) instance.subScope = cloneSubScope(def);
+  // Push inputs
+  for (const p of def.inputs) {
+    const v = vIn[p.name];
+    const ic = instance.subScope.comps.find(
+      c => c.type === 'INPUT' && (c.state.name || '') === p.name);
+    if (ic) ic.state.value = (v == null) ? 0 : v;
+  }
+  _subDepth++;
+  try { simulateScope(instance.subScope); }
+  finally { _subDepth--; }
+  // Pull outputs
+  const out = {};
+  for (const p of def.outputs) {
+    const oc = instance.subScope.comps.find(
+      c => c.type === 'OUTPUT' && (c.state.name || '') === p.name);
+    if (oc) {
+      const wire = instance.subScope.wires.find(w => w.toId === oc.id && w.toPort === 'in');
+      out[p.name] = wire ? (instance.subScope.outVals[`${wire.fromId}:${wire.fromPort}`] ?? null) : null;
+    }
+  }
+  return out;
+}
+
+function cloneSubScope(def) {
+  return {
+    comps: deepClone(def.comps),
+    wires: deepClone(def.wires),
+    outVals: {},
+  };
+}
+
+// Pack the currently-selected components into a new subcircuit.
+function packSelection(name, pinRenames) {
+  const sel = Array.from(selection);
+  if (sel.length === 0) return;
+  const inSelComps = sel.map(getComp).filter(Boolean);
+  const ids = new Set(inSelComps.map(c => c.id));
+  const inSelWires = wires.filter(w => ids.has(w.fromId) && ids.has(w.toId));
+
+  // Find external connections — wires that cross the selection boundary.
+  // These need to be re-routed to the new subcircuit instance.
+  const inboundWires  = wires.filter(w => !ids.has(w.fromId) && ids.has(w.toId));
+  const outboundWires = wires.filter(w => ids.has(w.fromId) && !ids.has(w.toId));
+
+  // Refuse to pack if any crossing wire bypasses an INPUT/OUTPUT boundary.
+  // Otherwise those wires would silently disappear because the new
+  // subcircuit instance has no pin to attach them to.
+  const inputIds  = new Set(inSelComps.filter(c => c.type === 'INPUT').map(c => c.id));
+  const outputIds = new Set(inSelComps.filter(c => c.type === 'OUTPUT').map(c => c.id));
+  const badIn  = inboundWires.filter(w => !inputIds.has(w.toId));
+  const badOut = outboundWires.filter(w => !outputIds.has(w.fromId));
+  if (badIn.length || badOut.length) {
+    const detail = [
+      ...badIn.map(w  => `into #${w.toId}.${w.toPort}`),
+      ...badOut.map(w => `out of #${w.fromId}.${w.fromPort}`),
+    ].slice(0, 6).join(', ');
+    alert(
+      `${badIn.length + badOut.length} wire(s) cross the selection boundary but ` +
+      `do not enter via an INPUT or leave via an OUTPUT component:\n\n  ${detail}` +
+      (badIn.length + badOut.length > 6 ? '\n  …' : '') +
+      `\n\nAdd INPUT/OUTPUT pseudocomponents on those boundary wires, ` +
+      `or delete the wires, then try Pack again.`
+    );
+    return;
+  }
+
+  // Inputs/outputs of the subcircuit are the INPUT and OUTPUT components
+  // already in the selection.  Sort top-to-bottom for stable pin order.
+  const inputs = inSelComps
+    .filter(c => c.type === 'INPUT')
+    .sort((a, b) => a.y - b.y)
+    .map((c, i) => ({ name: pinRenames?.['in_' + c.id] || c.state.name || `in${i}`, srcId: c.id }));
+  const outputs = inSelComps
+    .filter(c => c.type === 'OUTPUT')
+    .sort((a, b) => a.y - b.y)
+    .map((c, i) => ({ name: pinRenames?.['out_' + c.id] || c.state.name || `out${i}`, srcId: c.id }));
+
+  if (inputs.length === 0 && outputs.length === 0) {
+    alert('Selection must contain at least one INPUT or OUTPUT component to define pins.');
+    return;
+  }
+  // De-duplicate pin names so two INPUTs (or two OUTPUTs) named "a" don't
+  // both collapse to a single pin in the resulting subcircuit.  The first
+  // occurrence keeps its name; subsequent duplicates get an "_2", "_3" suffix.
+  function dedupePins(arr, kind) {
+    const seen = new Set();
+    const renamed = [];
+    for (const p of arr) {
+      const original = p.name;
+      let name = original;
+      let i = 1;
+      while (seen.has(name)) { i++; name = `${original}_${i}`; }
+      if (name !== original) renamed.push(`${kind} "${original}" → "${name}"`);
+      p.name = name;
+      seen.add(name);
+    }
+    return renamed;
+  }
+  const renamedIns  = dedupePins(inputs,  'input');
+  const renamedOuts = dedupePins(outputs, 'output');
+  if (renamedIns.length || renamedOuts.length) {
+    setStatus(`Renamed duplicates: ${[...renamedIns, ...renamedOuts].join(', ')}`);
+  }
+
+  // Build def with renamed INPUTs/OUTPUTs so eval can locate them.
+  const compsCopy = JSON.parse(JSON.stringify(inSelComps));
+  for (const c of compsCopy) {
+    const inp = inputs.find(p => p.srcId === c.id);
+    const oup = outputs.find(p => p.srcId === c.id);
+    if (inp) c.state.name = inp.name;
+    if (oup) c.state.name = oup.name;
+  }
+  const wiresCopy = JSON.parse(JSON.stringify(inSelWires));
+  subcircuitDefs[name] = {
+    inputs: inputs.map(p => ({ name: p.name })),
+    outputs: outputs.map(p => ({ name: p.name })),
+    comps: compsCopy,
+    wires: wiresCopy,
+  };
+
+  // Replace selection in the main canvas with a single subcircuit instance.
+  const bbox = boundingBox(inSelComps);
+  const instance = {
+    id: nextCompId++,
+    type: 'SUB:' + name,
+    x: snap(bbox.x),
+    y: snap(bbox.y),
+    state: {},
+  };
+  comps = comps.filter(c => !ids.has(c.id));
+  wires = wires.filter(w => !ids.has(w.fromId) && !ids.has(w.toId));
+  comps.push(instance); syncCompMap();
+
+  // Re-route external wires.  Inbound (... → input) become wires from the
+  // external source to the instance's matching input pin.  Outbound similarly.
+  for (const w of inboundWires) {
+    const target = inSelComps.find(c => c.id === w.toId);
+    const inputPin = inputs.find(p => p.srcId === target.id);
+    if (inputPin) {
+      wires.push({ id: nextWireId++, fromId: w.fromId, fromPort: w.fromPort,
+                   toId: instance.id, toPort: inputPin.name });
+    }
+  }
+  for (const w of outboundWires) {
+    const source = inSelComps.find(c => c.id === w.fromId);
+    const outputPin = outputs.find(p => p.srcId === source.id);
+    if (outputPin) {
+      wires.push({ id: nextWireId++, fromId: instance.id, fromPort: outputPin.name,
+                   toId: w.toId, toPort: w.toPort });
+    }
+  }
+
+  selection.clear(); selectedWire = null;
+  refreshSubLib();
+  simulate(); draw();
+  setStatus(`Packed ${inSelComps.length} components into subcircuit "${name}"`);
+}
+
+function boundingBox(items) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of items) {
+    const def = compDef(c);
+    minX = Math.min(minX, c.x);
+    minY = Math.min(minY, c.y);
+    maxX = Math.max(maxX, c.x + def.w);
+    maxY = Math.max(maxY, c.y + def.h);
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+function refreshSubLib() {
+  const lib = document.getElementById('sub-lib');
+  lib.innerHTML = '';
+  for (const name in subcircuitDefs) {
+    const def = subcircuitDefs[name];
+    const el = document.createElement('div');
+    el.className = 'sub-entry';
+    el.innerHTML = `<div class="icon" style="width:24px;height:18px;
+        display:flex;align-items:center;justify-content:center;
+        border:1px solid var(--border);border-radius:3px;background:#1a1d23;font-size:10px;">⌬</div>
+      <div>${escapeHtml(name)}</div>
+      <span class="pin-counts">${def.inputs.length}→${def.outputs.length}</span>
+      <button data-del="${escapeHtml(name)}" title="Delete subcircuit">✕</button>`;
+    el.addEventListener('click', (e) => {
+      if (e.target.tagName === 'BUTTON') {
+        const n = e.target.dataset.del;
+        if (confirm(`Delete subcircuit "${n}"? Existing instances will become broken.`)) {
+          delete subcircuitDefs[n];
+          if (placeType === 'SUB:' + n) setTool('select');
+          refreshSubLib();
+          simulate(); draw();    // same reason as the GATE: deletion above
+        }
+        return;
+      }
+      setTool('place', 'SUB:' + name);
+    });
+    lib.appendChild(el);
+  }
+}
+function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ============================================================================
+//  CUSTOM GATES (Gate Builder)
+// ============================================================================
+//
+//  A custom gate is a behavioural component defined by a truth table.  The
+//  user fills in the 3^n output cells in a modal; we store the resulting
+//  function as { numInputs, table } where `table` is a plain object keyed
+//  by the comma-joined input trits (e.g. "-1,1") to the output trit.
+//
+//  Custom gates are instantiated like any built-in component; their `type`
+//  string is "GATE:<name>".  compDef() routes them to customGateDef() which
+//  synthesises a TYPES-like def on the fly.
+
+let customGates = {};   // name -> { numInputs, table }
+
+// Generate every input combination for n inputs in {-1,0,1}^n, in a stable
+// order so the UI and the storage agree.  Returns an array of arrays.
+function enumerateInputs(n) {
+  const result = [];
+  const vals = [-1, 0, 1];
+  function recur(prefix) {
+    if (prefix.length === n) { result.push(prefix.slice()); return; }
+    for (const v of vals) { prefix.push(v); recur(prefix); prefix.pop(); }
+  }
+  recur([]);
+  return result;
+}
+function inputKey(arr) { return arr.join(','); }
+
+function customGateDef(c) {
+  const name = c.type.slice(5);
+  const def = customGates[name];
+  if (!def) {
+    return { w: 80, h: 60, pins: {}, defaults: () => ({}), eval: () => ({}),
+             draw: (cc) => drawCustomGateMissing(cc, name) };
+  }
+  const pins = {};
+  for (let i = 0; i < def.numInputs; i++) {
+    pins['in' + i] = { side: 'left', dx: 0, dy: 18 + i * 18, kind: 'in' };
+  }
+  const outY = Math.max(20, (16 + def.numInputs * 18) / 2);
+  pins.out = { side: 'right', dx: 80, dy: outY, kind: 'out' };
+  const h = Math.max(40, 16 + def.numInputs * 18);
+  return {
+    w: 80, h,
+    pins,
+    defaults: () => ({}),
+    eval: (_, v) => {
+      const parts = [];
+      for (let i = 0; i < def.numInputs; i++) {
+        if (v['in' + i] == null) return { out: null };
+        parts.push(v['in' + i]);
+      }
+      const key = parts.join(',');
+      const r = def.table[key];
+      return { out: (r === undefined ? 0 : r) };
+    },
+    draw: (cc) => drawCustomGate(cc, name, def),
+  };
+}
+
+function drawCustomGate(c, name, def) {
+  // Geometry is the same as customGateDef; compute inline rather than
+  // re-entering compDef from inside a draw call.
+  const w = 80;
+  const h = Math.max(40, 16 + def.numInputs * 18);
+  const outDy = Math.max(20, (16 + def.numInputs * 18) / 2);
+  ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#e3a55a';                // amber border = custom gate
+  ctx.lineWidth = 1.5 / view.scale;
+  ctx.strokeRect(0.5, 0.5, w-1, h-1);
+  ctx.fillStyle = '#d8dde6';
+  ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const shown = name.length > 9 ? name.slice(0, 8) + '…' : name;
+  ctx.fillText(shown, w / 2, h / 2);
+  ctx.font = '8px monospace';
+  ctx.fillStyle = '#8a92a1';
+  ctx.textAlign = 'left';
+  for (let i = 0; i < def.numInputs; i++) {
+    ctx.fillText('in' + i, 4, 18 + i * 18);
+  }
+  ctx.textAlign = 'right';
+  ctx.fillText('out', w - 4, outDy);
+}
+function drawCustomGateMissing(c, name) {
+  ctx.fillStyle = '#3a2226'; ctx.fillRect(0, 0, 80, 60);
+  ctx.strokeStyle = '#e35555'; ctx.strokeRect(0.5, 0.5, 79, 59);
+  ctx.fillStyle = '#e35555'; ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('!' + name, 40, 30);
+}
+
+// ---- modal ----------------------------------------------------------------
+
+// Working state for the modal (the table being edited).  Stored separately
+// from `customGates` so that closing without saving discards changes.
+let gbDraft = { numInputs: 2, table: {} };
+
+function renderGateTable() {
+  const host = document.getElementById('gate-table');
+  host.innerHTML = '';
+  const n = gbDraft.numInputs;
+
+  function cellEl(key) {
+    const v = gbDraft.table[key] ?? 0;
+    const el = document.createElement('div');
+    el.className = 'gb-cell ' + (v === -1 ? 'trit-T' : v === 1 ? 'trit-P' : 'trit-0');
+    el.textContent = tritLabel(v);
+    el.addEventListener('click', () => {
+      const cur = gbDraft.table[key] ?? 0;
+      gbDraft.table[key] = cur === -1 ? 0 : cur === 0 ? 1 : -1;
+      renderGateTable();
+    });
+    return el;
+  }
+
+  if (n === 1) {
+    const block = document.createElement('div');
+    block.className = 'gb-block';
+    const h = document.createElement('h4');
+    h.textContent = 'out = f(in0)';
+    block.appendChild(h);
+    const row = document.createElement('div');
+    row.className = 'gb-row';
+    row.style.gap = '8px';
+    for (const v of [-1, 0, 1]) {
+      const wrap = document.createElement('div');
+      wrap.style.textAlign = 'center';
+      const lbl = document.createElement('div');
+      lbl.className = 'gb-axis';
+      lbl.style.textAlign = 'center';
+      lbl.textContent = `in0=${tritLabel(v)}`;
+      wrap.appendChild(lbl);
+      wrap.appendChild(cellEl(inputKey([v])));
+      row.appendChild(wrap);
+    }
+    block.appendChild(row);
+    host.appendChild(block);
+    return;
+  }
+
+  if (n === 2) {
+    const block = document.createElement('div');
+    block.className = 'gb-block';
+    const h = document.createElement('h4');
+    h.textContent = 'rows = in0 (a), columns = in1 (b)';
+    block.appendChild(h);
+    // Header row
+    const header = document.createElement('div');
+    header.className = 'gb-row';
+    header.appendChild(Object.assign(document.createElement('div'), { className: 'gb-corner' }));
+    for (const b of [-1, 0, 1]) {
+      const lab = document.createElement('div');
+      lab.className = 'gb-axis';
+      lab.textContent = `b=${tritLabel(b)}`;
+      header.appendChild(lab);
+    }
+    block.appendChild(header);
+    for (const a of [-1, 0, 1]) {
+      const row = document.createElement('div');
+      row.className = 'gb-row';
+      const lab = document.createElement('div');
+      lab.className = 'gb-axis';
+      lab.textContent = `a=${tritLabel(a)}`;
+      row.appendChild(lab);
+      for (const b of [-1, 0, 1]) row.appendChild(cellEl(inputKey([a, b])));
+      block.appendChild(row);
+    }
+    host.appendChild(block);
+    return;
+  }
+
+  if (n === 3) {
+    // Show three 3×3 grids, one per cin value.
+    for (const c of [-1, 0, 1]) {
+      const block = document.createElement('div');
+      block.className = 'gb-block';
+      const h = document.createElement('h4');
+      h.textContent = `cin = ${tritLabel(c)}    (rows = a, cols = b)`;
+      block.appendChild(h);
+      const header = document.createElement('div');
+      header.className = 'gb-row';
+      header.appendChild(Object.assign(document.createElement('div'), { className: 'gb-corner' }));
+      for (const b of [-1, 0, 1]) {
+        const lab = document.createElement('div');
+        lab.className = 'gb-axis';
+        lab.textContent = `b=${tritLabel(b)}`;
+        header.appendChild(lab);
+      }
+      block.appendChild(header);
+      for (const a of [-1, 0, 1]) {
+        const row = document.createElement('div');
+        row.className = 'gb-row';
+        const lab = document.createElement('div');
+        lab.className = 'gb-axis';
+        lab.textContent = `a=${tritLabel(a)}`;
+        row.appendChild(lab);
+        for (const b of [-1, 0, 1]) row.appendChild(cellEl(inputKey([a, b, c])));
+        block.appendChild(row);
+      }
+      host.appendChild(block);
+    }
+  }
+}
+
+function openGateBuilder() {
+  // Reset draft.  Default to a 2-input, all-zero gate.
+  gbDraft = { numInputs: parseInt(document.getElementById('gate-inputs').value, 10), table: {} };
+  document.getElementById('gate-name').value = 'MyGate' + (Object.keys(customGates).length + 1);
+  document.getElementById('gate-status').textContent = '';
+  renderGateTable();
+  openModal('gate-modal');
+}
+
+document.getElementById('btn-gate').addEventListener('click', openGateBuilder);
+document.getElementById('gate-close').addEventListener('click', () => closeModal('gate-modal'));
+document.getElementById('gate-inputs').addEventListener('change', (e) => {
+  gbDraft.numInputs = parseInt(e.target.value, 10);
+  gbDraft.table = {};   // wipe — old table doesn't map onto new arity
+  renderGateTable();
+});
+document.getElementById('gate-clear-table').addEventListener('click', () => {
+  gbDraft.table = {};
+  renderGateTable();
+});
+document.getElementById('gate-add').addEventListener('click', () => {
+  const name = document.getElementById('gate-name').value.trim();
+  if (!name) { document.getElementById('gate-status').textContent = 'name required'; return; }
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
+    document.getElementById('gate-status').textContent = 'name must start with a letter, then letters/digits/_';
+    return;
+  }
+  if (TYPES.hasOwnProperty(name)) {
+    document.getElementById('gate-status').textContent =
+      `name "${name}" shadows a built-in component type; choose another name`;
+    return;
+  }
+  if (customGates[name]) {
+    if (!confirm(`Overwrite existing gate "${name}"?`)) return;
+  }
+  // Fill any missing cells with 0 so the table is total.
+  const table = {};
+  for (const combo of enumerateInputs(gbDraft.numInputs)) {
+    const k = inputKey(combo);
+    table[k] = gbDraft.table[k] ?? 0;
+  }
+  customGates[name] = { numInputs: gbDraft.numInputs, table };
+  refreshGateLib();
+  closeModal('gate-modal');
+  setStatus(`gate "${name}" added (${gbDraft.numInputs}-input)`);
+});
+
+function refreshGateLib() {
+  const lib = document.getElementById('gate-lib');
+  lib.innerHTML = '';
+  const names = Object.keys(customGates);
+  if (names.length === 0) {
+    lib.innerHTML = `<div style="color: var(--muted); font-size: 11px; padding: 4px 2px;">
+      Click <b>Build Gate</b> in the header to define one.</div>`;
+    return;
+  }
+  for (const name of names) {
+    const def = customGates[name];
+    const el = document.createElement('div');
+    el.className = 'sub-entry';
+    el.style.borderColor = '#e3a55a33';
+    el.innerHTML = `<div class="icon" style="width:24px;height:18px;
+        display:flex;align-items:center;justify-content:center;
+        border:1px solid var(--border);border-radius:3px;background:#1a1d23;font-size:10px;color:#e3a55a">▦</div>
+      <div>${escapeHtml(name)}</div>
+      <span class="pin-counts">${def.numInputs}→1</span>
+      <button data-del="${escapeHtml(name)}" title="Delete gate">✕</button>`;
+    el.addEventListener('click', (e) => {
+      if (e.target.tagName === 'BUTTON') {
+        const n = e.target.dataset.del;
+        if (confirm(`Delete custom gate "${n}"? Existing instances will become broken.`)) {
+          delete customGates[n];
+          // If the deleted gate was the active place tool, fall back to select.
+          if (placeType === 'GATE:' + n) setTool('select');
+          refreshGateLib();
+          simulate(); draw();    // outVals for deleted instances must be reset
+        }
+        return;
+      }
+      setTool('place', 'GATE:' + name);
+    });
+    lib.appendChild(el);
+  }
+}
+
+// ============================================================================
+//  DRAWING
+// ============================================================================
+
+function draw() {
+  invalidatePathCache();
+  // Pre-route every wire in id order so that occupancy buildup is
+  // deterministic and the same regardless of which caller hits wirePath()
+  // first later in the frame.
+  const _orderedWires = [...wires].sort((a, b) => a.id - b.id);
+  for (const _w of _orderedWires) wirePath(_w);
+  ctx.fillStyle = '#14171c';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.save();
+  ctx.translate(view.tx, view.ty);
+  ctx.scale(view.scale, view.scale);
+
+  drawGrid();
+  // Pre-compute wire crossings so drawWire() can render arc jumps where
+  // perpendicular wires meet without connecting.
+  computeWireCrossings();
+  // Wires go UNDER components in the normal case so a wire passing
+  // alongside a gate doesn't visibly overlap the gate's labels.
+  for (const w of wires) drawWire(w);
+  if (pendingWire) drawPendingWire();
+  for (const c of comps) drawComp(c);
+  // X-ray pass: for any wire segment that the obstacle-aware router
+  // couldn't avoid (i.e. it actually does pass through a non-endpoint
+  // component), redraw just that segment as a thin overlay on top.  This
+  // keeps the wire visible in fallback-routing cases without making every
+  // wire sit on top of every component.
+  for (const w of wires) drawWireGhost(w);
+  // Junction dots
+  ctx.fillStyle = '#d8dde6';
+  for (const key of fanoutPins()) {
+    const [id, port] = key.split(':');
+    const c = getComp(parseInt(id, 10));
+    if (!c) continue;
+    const p = pinAbsPos(c, port);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Selection rectangle (during drag)
+  if (drag && drag.kind === 'rect') {
+    ctx.save();
+    ctx.strokeStyle = '#6ea8ff';
+    ctx.fillStyle = 'rgba(110, 168, 255, 0.08)';
+    ctx.lineWidth = 1 / view.scale;
+    ctx.setLineDash([4, 3]);
+    const x0 = Math.min(drag.x0, mouse.wx), y0 = Math.min(drag.y0, mouse.wy);
+    const w0 = Math.abs(mouse.wx - drag.x0), h0 = Math.abs(mouse.wy - drag.y0);
+    ctx.fillRect(x0, y0, w0, h0);
+    ctx.strokeRect(x0, y0, w0, h0);
+    ctx.restore();
+  }
+  // Highlight selection
+  for (const id of selection) {
+    const c = getComp(id);
+    if (!c) continue;
+    const def = compDef(c);
+    ctx.save();
+    ctx.strokeStyle = '#6ea8ff';
+    ctx.lineWidth = 2 / view.scale;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(c.x - 4, c.y - 4, def.w + 8, def.h + 8);
+    ctx.restore();
+  }
+  if (hoverPin) {
+    ctx.beginPath();
+    ctx.arc(hoverPin.x, hoverPin.y, 7, 0, Math.PI * 2);
+    ctx.strokeStyle = '#6ea8ff';
+    ctx.lineWidth = 1.5 / view.scale;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawGrid() {
+  const g = 10;
+  const w0 = screenToWorld(0, 0), w1 = screenToWorld(cv.width, cv.height);
+  const x0 = Math.floor(w0.x / g) * g, y0 = Math.floor(w0.y / g) * g;
+  ctx.strokeStyle = '#1f232b';
+  ctx.lineWidth = 1 / view.scale;
+  ctx.beginPath();
+  for (let x = x0; x < w1.x; x += g) { ctx.moveTo(x, w0.y); ctx.lineTo(x, w1.y); }
+  for (let y = y0; y < w1.y; y += g) { ctx.moveTo(w0.x, y); ctx.lineTo(w1.x, y); }
+  ctx.stroke();
+}
+
+function drawComp(c) {
+  const def = compDef(c);
+  ctx.save();
+  ctx.translate(c.x, c.y);
+  ctx.lineWidth = 1.5 / view.scale;
+  ctx.fillStyle = '#262a32';
+  ctx.strokeStyle = '#525a6b';
+  def.draw(c);
+  ctx.restore();
+
+  // Pins.  An input pin with no incoming wire is visually distinct from one
+  // that's driven-but-floating (i.e. the upstream gate is producing null) —
+  // we draw the former as a hollow amber ring, the latter as a normal dot
+  // in the "undef" colour.  This separates "I forgot to wire this" from
+  // "this is null because of cascading uncertainty."
+  for (const port in def.pins) {
+    const p = pinAbsPos(c, port);
+    const isOut = def.pins[port].kind === 'out';
+    if (!isOut) {
+      const driven = wires.some(w => w.toId === c.id && w.toPort === port);
+      if (!driven) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+        ctx.strokeStyle = '#e3a55a';   // amber
+        ctx.lineWidth = 1.5 / view.scale;
+        ctx.stroke();
+        continue;
+      }
+    }
+    const v = isOut ? outVals[`${c.id}:${port}`] : inputValueFromWires({comps, wires, outVals}, c.id, port);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = tritColor(v);
+    ctx.fill();
+  }
+}
+
+function drawInput(c) {
+  const t = TYPES.INPUT;
+  ctx.fillStyle = '#1d2026'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  ctx.fillStyle = tritColor(c.state.value); ctx.fillRect(8, 8, t.w-16, t.h-16);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(tritLabel(c.state.value), t.w/2, t.h/2);
+  if (c.state.name) {
+    ctx.font = '9px monospace'; ctx.fillStyle = '#8a92a1';
+    ctx.fillText(c.state.name, t.w/2, -8);
+  }
+}
+function drawConst(c) {
+  const t = TYPES.CONST;
+  ctx.fillStyle = '#1d2026'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  ctx.fillStyle = tritColor(c.state.value);
+  ctx.fillRect(4, 4, t.w-8, t.h-8);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(tritLabel(c.state.value), t.w/2, t.h/2);
+}
+function drawTryteIn(c) {
+  const t = TYPES.TRYTE_IN;
+  ctx.fillStyle = '#1d2026'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  const trits = intToTrits(c.state.value, 6);
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let i = 0; i < 6; i++) {
+    const y = 18 + i * 14;
+    ctx.fillStyle = tritColor(trits[i]);
+    ctx.fillRect(8, y - 5, 18, 10);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(tritLabel(trits[i]), 17, y);
+  }
+  ctx.fillStyle = '#d8dde6';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(String(c.state.value), 32, 12);
+}
+function drawClock(c) {
+  const t = TYPES.CLOCK;
+  ctx.fillStyle = '#1d2026'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  // Three rails for the three states; the current level is highlighted in
+  // the matching trit colour.
+  const Y = { '1': 12, '0': 20, '-1': 28 };
+  ctx.strokeStyle = '#2c3038';
+  ctx.lineWidth = 1 / view.scale;
+  for (const k of ['1','0','-1']) {
+    ctx.beginPath(); ctx.moveTo(6, Y[k]); ctx.lineTo(42, Y[k]); ctx.stroke();
+  }
+  const y = Y[String(c.state.value)] ?? 20;
+  ctx.fillStyle = tritColor(c.state.value);
+  ctx.fillRect(6, y - 2, 36, 4);
+  ctx.fillStyle = '#d8dde6';
+  ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText('CLK', 4, 2);
+  ctx.textAlign = 'right';
+  ctx.font = '9px monospace';
+  ctx.fillStyle = '#8a92a1';
+  ctx.fillText((c.state.mode || 'tri'), t.w - 4, 2);
+}
+function drawOutput(c) {
+  const t = TYPES.OUTPUT;
+  ctx.fillStyle = '#1d2026'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  const v = inputValueFromWires({comps, wires, outVals}, c.id, 'in');
+  ctx.beginPath(); ctx.arc(t.w/2, t.h/2, 11, 0, Math.PI*2);
+  ctx.fillStyle = tritColor(v); ctx.fill();
+  ctx.strokeStyle = '#11141a'; ctx.lineWidth = 2 / view.scale; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(tritLabel(v), t.w/2, t.h/2);
+  if (c.state.name) {
+    ctx.font = '9px monospace'; ctx.fillStyle = '#8a92a1';
+    ctx.fillText(c.state.name, t.w/2, -8);
+  }
+}
+function drawTryteOut(c) {
+  const t = TYPES.TRYTE_OUT;
+  ctx.fillStyle = '#1d2026'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  // Read 6 inputs, display decoded
+  const trits = [];
+  for (let i = 0; i < 6; i++) {
+    const v = inputValueFromWires({comps, wires, outVals}, c.id, 't' + i);
+    trits.push(v ?? null);
+  }
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let i = 0; i < 6; i++) {
+    const y = 18 + i * 14;
+    ctx.fillStyle = tritColor(trits[i]);
+    ctx.fillRect(28, y - 5, 18, 10);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(tritLabel(trits[i]), 37, y);
+  }
+  ctx.fillStyle = '#d8dde6';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'left';
+  if (!trits.includes(null)) {
+    ctx.fillText(String(tritsToInt(trits)), 52, t.h/2);
+  } else {
+    ctx.fillText('—', 56, t.h/2);
+  }
+}
+function drawWave(c) {
+  const t = TYPES.WAVE;
+  ctx.fillStyle = '#1d2026'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  // Tiny waveform preview inside the component
+  ctx.strokeStyle = '#6ea8ff';
+  ctx.lineWidth = 1 / view.scale;
+  ctx.beginPath();
+  const trace = c.state.trace || [];
+  const cells = 12;
+  for (let i = 0; i < cells; i++) {
+    const v = trace[Math.max(0, trace.length - cells + i)] ?? 0;
+    const x = 8 + i * 3.5;
+    const y = 20 - v * 8;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#d8dde6';
+  ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText('WAVE', 4, 2);
+}
+function drawInverterShape(c, label) {
+  const t = TYPES.STI;
+  ctx.beginPath();
+  ctx.moveTo(0, 0); ctx.lineTo(t.w - 12, t.h / 2); ctx.lineTo(0, t.h); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(t.w - 6, t.h/2, 5, 0, Math.PI*2);
+  ctx.fillStyle = '#262a32'; ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#d8dde6'; ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, (t.w-12)/2, t.h/2);
+}
+function drawBinaryShape(c, label) {
+  const t = TYPES.MIN;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.quadraticCurveTo(14, t.h/2, 0, t.h);
+  ctx.lineTo(t.w-14, t.h);
+  ctx.quadraticCurveTo(t.w+2, t.h/2, t.w-14, 0);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#d8dde6'; ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, t.w/2 - 6, t.h/2);
+}
+function drawAdder(c) {
+  const t = TYPES.ADDER;
+  ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  ctx.fillStyle = '#d8dde6'; ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('+', t.w/2, t.h/2);
+  ctx.font = '9px monospace'; ctx.fillStyle = '#8a92a1';
+  ctx.textAlign = 'left';
+  ctx.fillText('a', 4, 18); ctx.fillText('b', 4, 44); ctx.fillText('cin', 4, 70);
+  ctx.textAlign = 'right';
+  ctx.fillText('sum', t.w-4, 26); ctx.fillText('cout', t.w-4, 62);
+}
+function drawDFF(c) {
+  const t = TYPES.DFF;
+  ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  // Stored value display
+  ctx.fillStyle = tritColor(c.state.q);
+  ctx.fillRect(t.w/2 - 10, t.h/2 - 10, 20, 20);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 12px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(tritLabel(c.state.q), t.w/2, t.h/2);
+  ctx.fillStyle = '#8a92a1'; ctx.font = '9px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('D', 4, 18); ctx.fillText('CLK', 4, 44);
+  ctx.textAlign = 'right';
+  ctx.fillText('Q', t.w-4, 30);
+  // clock triangle marker
+  ctx.beginPath();
+  ctx.moveTo(2, 40); ctx.lineTo(10, 44); ctx.lineTo(2, 48); ctx.closePath();
+  ctx.strokeStyle = '#525a6b'; ctx.stroke();
+}
+function drawSubInstance(c, name, def) {
+  const cdef = compDef(c);
+  ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, cdef.w, cdef.h);
+  ctx.strokeStyle = '#8effb0'; ctx.lineWidth = 2 / view.scale;
+  ctx.strokeRect(0.5, 0.5, cdef.w-1, cdef.h-1);
+  ctx.fillStyle = '#d8dde6'; ctx.font = 'bold 11px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(name, cdef.w/2, cdef.h/2);
+  ctx.font = '8px monospace'; ctx.fillStyle = '#8a92a1';
+  def.inputs.forEach((p, i) => {
+    ctx.textAlign = 'left'; ctx.fillText(p.name, 4, 20 + i*18);
+  });
+  def.outputs.forEach((p, i) => {
+    ctx.textAlign = 'right'; ctx.fillText(p.name, cdef.w-4, 20 + i*18);
+  });
+}
+function drawSubMissing(c, name) {
+  ctx.fillStyle = '#3a2226'; ctx.fillRect(0, 0, 80, 60);
+  ctx.strokeStyle = '#e35555'; ctx.strokeRect(0.5, 0.5, 79, 59);
+  ctx.fillStyle = '#e35555'; ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('!' + name, 40, 30);
+}
+
+// Per-wire list of crossing points where this wire (horizontal segment)
+// passes over another wire (vertical segment).  Recomputed once per draw
+// frame in draw() — O(W^2 * S^2) where S is the small segments-per-wire
+// (5–6) so it's fine for everyday circuit sizes.
+let _wireCrossings = new Map();
+function computeWireCrossings() {
+  _wireCrossings = new Map();
+  // Cache paths so we don't recompute wirePath() for each pair.
+  const paths = wires.map(w => wirePath(w));
+  for (let i = 0; i < wires.length; i++) {
+    const pA = paths[i];
+    for (let j = i + 1; j < wires.length; j++) {
+      const pB = paths[j];
+      for (let si = 1; si < pA.length; si++) {
+        const a1 = pA[si-1], a2 = pA[si];
+        const aH = (a1.y === a2.y && a1.x !== a2.x);
+        const aV = (a1.x === a2.x && a1.y !== a2.y);
+        if (!aH && !aV) continue;
+        for (let sj = 1; sj < pB.length; sj++) {
+          const b1 = pB[sj-1], b2 = pB[sj];
+          const bH = (b1.y === b2.y && b1.x !== b2.x);
+          const bV = (b1.x === b2.x && b1.y !== b2.y);
+          if (!bH && !bV) continue;
+          if (aH === bH) continue;  // parallel, no crossing
+          const h = aH ? { p1: a1, p2: a2, id: wires[i].id } : { p1: b1, p2: b2, id: wires[j].id };
+          const v = aH ? { p1: b1, p2: b2 }                  : { p1: a1, p2: a2 };
+          const cx = v.p1.x, cy = h.p1.y;
+          const hLo = Math.min(h.p1.x, h.p2.x), hHi = Math.max(h.p1.x, h.p2.x);
+          const vLo = Math.min(v.p1.y, v.p2.y), vHi = Math.max(v.p1.y, v.p2.y);
+          // Strict interior intersection — avoids flagging pin endpoints
+          // and segment elbows as crossings.
+          if (cx > hLo + 1 && cx < hHi - 1 && cy > vLo + 1 && cy < vHi - 1) {
+            const list = _wireCrossings.get(h.id);
+            if (list) list.push({ x: cx, y: cy });
+            else _wireCrossings.set(h.id, [{ x: cx, y: cy }]);
+          }
+        }
+      }
+    }
+  }
+}
+
+function drawWire(w) {
+  const path = wirePath(w);
+  const v = outVals[`${w.fromId}:${w.fromPort}`] ?? null;
+  ctx.strokeStyle = tritColor(v);
+  ctx.lineWidth = (selectedWire === w.id ? 3 : 2) / view.scale;
+  // Live wires get a dashed pattern whose offset advances each animation
+  // tick, producing a slow "marching ants" toward the destination.
+  // Floating wires stay solid — visually flagging the dead segment.
+  const animated = (v != null);
+  if (animated) {
+    ctx.setLineDash([6, 4]);
+    ctx.lineDashOffset = -animTime % 10;
+  } else {
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+  }
+  // Pull the crossings list for this wire (horizontal-segment crossings
+  // only — by convention horizontal wires hump over vertical wires).
+  const crossings = _wireCrossings.get(w.id) || [];
+  const jumpR = 5;
+  ctx.beginPath();
+  ctx.moveTo(path[0].x, path[0].y);
+  for (let i = 1; i < path.length; i++) {
+    const p1 = path[i-1], p2 = path[i];
+    if (p1.y === p2.y && p1.x !== p2.x) {
+      // Horizontal segment.  Find any crossings that fall strictly inside
+      // it, sorted in the direction of travel, and render line→arc→line.
+      const dir = p1.x < p2.x ? 1 : -1;
+      const segCrossings = crossings
+        .filter(c => Math.abs(c.y - p1.y) < 0.5 &&
+                     c.x > Math.min(p1.x, p2.x) + jumpR &&
+                     c.x < Math.max(p1.x, p2.x) - jumpR)
+        .sort((a, b) => dir * (a.x - b.x));
+      for (const c of segCrossings) {
+        ctx.lineTo(c.x - dir * jumpR, p1.y);
+        // Arc the line UP (negative y) over the crossing.
+        if (dir > 0) ctx.arc(c.x, p1.y, jumpR, Math.PI, 0, true);
+        else         ctx.arc(c.x, p1.y, jumpR, 0, Math.PI, true);
+      }
+      ctx.lineTo(p2.x, p2.y);
+    } else {
+      // Vertical (or degenerate) segment — just draw straight.  The
+      // perpendicular horizontal wire is the one that humps over us.
+      ctx.lineTo(p2.x, p2.y);
+    }
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);  // reset state for other shapes
+}
+function drawWireGhost(w) {
+  // Overlay wire segments that pass through a non-endpoint component, so
+  // the wire isn't fully invisible when the router couldn't route around.
+  // 1 px width, partial alpha — visible but subordinate to the main wire
+  // beneath, so the canvas doesn't get visually busy.
+  const path = wirePath(w);
+  const v = outVals[`${w.fromId}:${w.fromPort}`] ?? null;
+  const exclude = new Set([w.fromId, w.toId]);
+  ctx.strokeStyle = tritColor(v);
+  ctx.lineWidth = 1 / view.scale;
+  ctx.globalAlpha = 0.7;
+  ctx.setLineDash([]);
+  for (let i = 1; i < path.length; i++) {
+    const p1 = path[i-1], p2 = path[i];
+    let hits = false;
+    for (const c of comps) {
+      if (exclude.has(c.id)) continue;
+      const def = compDef(c);
+      if (segHitsBox(p1.x, p1.y, p2.x, p2.y, c.x, c.y, def.w, def.h)) { hits = true; break; }
+    }
+    if (hits) {
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawPendingWire() {
+  ctx.save();
+  ctx.strokeStyle = '#6ea8ff';
+  ctx.setLineDash([4,4]);
+  ctx.lineWidth = 1.5 / view.scale;
+  ctx.beginPath();
+  ctx.moveTo(pendingWire.fromXY.x, pendingWire.fromXY.y);
+  const mid = (pendingWire.fromXY.x + mouse.wx) / 2;
+  ctx.lineTo(mid, pendingWire.fromXY.y);
+  ctx.lineTo(mid, mouse.wy);
+  ctx.lineTo(mouse.wx, mouse.wy);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---- Waveform panel -------------------------------------------------------
+// Mouse-tracked tick column in the waveform panel.  When the user hovers
+// over a probe row, _waveCursorTick holds the tick index nearest the
+// cursor; drawWaves uses it to draw a vertical guide and value labels.
+let _waveCursorTick = -1;
+let _waveCursorX = -1;
+function drawWaves() {
+  if (!document.body.classList.contains('wave-open')) return;
+  const c = waveCv, x = waveCtx;
+  const cssBg = getComputedStyle(document.body).getPropertyValue('--panel') || '#1d2026';
+  x.fillStyle = cssBg.trim() || '#1d2026'; x.fillRect(0, 0, c.width, c.height);
+  // Collect WAVE probes (including those inside subcircuit instances)
+  const probes = [];
+  function gather(scope, prefix) {
+    for (const cc of scope.comps) {
+      if (cc.type === 'WAVE') {
+        probes.push({ name: prefix + (cc.state.name || `wave${cc.id}`), trace: cc.state.trace || [] });
+      } else if (cc.type.startsWith('SUB:') && cc.subScope) {
+        gather(cc.subScope, prefix + cc.type.slice(4) + '/');
+      }
+    }
+  }
+  gather({comps}, '');
+  if (probes.length === 0) {
+    x.fillStyle = '#8a92a1'; x.font = '12px monospace';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText('Place WAVE components and step the clock to record traces.', c.width/2, c.height/2);
+    return;
+  }
+  const labelW = 80;
+  const plotW = c.width - labelW - 12;
+  const rowH = Math.min(40, (c.height - 8) / probes.length);
+  // Tick-number ruler at the very top (a thin row above the probes).
+  if (probes.length > 0 && probes[0].trace.length > 1) {
+    x.strokeStyle = '#2c3038';
+    x.fillStyle = '#8a92a1';
+    x.font = '9px monospace';
+    x.textAlign = 'center';
+    x.textBaseline = 'top';
+    const trace0 = probes[0].trace;
+    const dx0 = (c.width - labelW - 12) / Math.max(1, trace0.length - 1);
+    const baseTick = Math.max(0, tick - trace0.length + 1);
+    // Pick a tick step that fits visibly (~50 px between labels).
+    let step = 1;
+    while (dx0 * step < 36) step *= 2;
+    for (let k = 0; k < trace0.length; k += step) {
+      const xx = labelW + k * dx0;
+      x.beginPath(); x.moveTo(xx, 0); x.lineTo(xx, 4); x.stroke();
+      x.fillText(String(baseTick + k), xx, 5);
+    }
+  }
+  probes.forEach((p, i) => {
+    const y0 = 4 + i * rowH;
+    x.fillStyle = '#d8dde6'; x.font = '11px monospace';
+    x.textAlign = 'left'; x.textBaseline = 'top';
+    x.fillText(p.name, 6, y0 + 2);
+    // 3 horizontal guide lines
+    x.strokeStyle = '#2c3038'; x.lineWidth = 1;
+    [0.2, 0.5, 0.8].forEach(f => {
+      x.beginPath();
+      x.moveTo(labelW, y0 + rowH * f);
+      x.lineTo(labelW + plotW, y0 + rowH * f);
+      x.stroke();
+    });
+    // Trace as a step plot
+    const trace = p.trace;
+    if (trace.length < 2) return;
+    const dx = plotW / Math.max(1, trace.length - 1);
+    let prevX = labelW, prevY = y0 + rowH * 0.5;
+    for (let k = 0; k < trace.length; k++) {
+      const v = trace[k];
+      const yy = y0 + rowH * (v === 1 ? 0.2 : v === 0 ? 0.5 : v === -1 ? 0.8 : 0.5);
+      const xx = labelW + k * dx;
+      x.strokeStyle = tritColor(v);
+      x.lineWidth = 2;
+      x.beginPath();
+      x.moveTo(prevX, prevY);
+      x.lineTo(xx, prevY);
+      x.lineTo(xx, yy);
+      x.stroke();
+      prevX = xx; prevY = yy;
+    }
+  });
+  // Hover cursor — vertical line + per-probe value label at the cursor tick.
+  if (_waveCursorTick >= 0 && probes.length > 0 && _waveCursorX >= labelW) {
+    x.strokeStyle = '#6ea8ff';
+    x.lineWidth = 1;
+    x.setLineDash([3, 2]);
+    x.beginPath();
+    x.moveTo(_waveCursorX, 0);
+    x.lineTo(_waveCursorX, c.height);
+    x.stroke();
+    x.setLineDash([]);
+    x.font = 'bold 10px monospace';
+    x.textAlign = 'left';
+    x.textBaseline = 'top';
+    probes.forEach((p, i) => {
+      const v = p.trace[_waveCursorTick];
+      if (v === undefined) return;
+      x.fillStyle = tritColor(v);
+      const labelText = tritLabel(v);
+      x.fillText(labelText, _waveCursorX + 4, 4 + i * rowH + 2);
+    });
+  }
+}
+
+// Mouse tracking on the waveform canvas to update _waveCursorTick.
+waveCv.addEventListener('mousemove', (e) => {
+  const r = waveCv.getBoundingClientRect();
+  const x = e.clientX - r.left;
+  const labelW = 80;
+  const plotW = waveCv.width - labelW - 12;
+  if (x < labelW || plotW <= 0) { _waveCursorTick = -1; _waveCursorX = -1; drawWaves(); return; }
+  // Find a representative probe to anchor the tick computation.
+  let firstTrace = null;
+  function findFirst(scope) {
+    for (const c of scope.comps) {
+      if (c.type === 'WAVE') { firstTrace = c.state.trace; return; }
+      if (c.type.startsWith('SUB:') && c.subScope) { findFirst(c.subScope); if (firstTrace) return; }
+    }
+  }
+  findFirst({comps});
+  if (!firstTrace || firstTrace.length < 2) { _waveCursorTick = -1; _waveCursorX = -1; drawWaves(); return; }
+  const dx = plotW / Math.max(1, firstTrace.length - 1);
+  _waveCursorTick = Math.round((x - labelW) / dx);
+  _waveCursorTick = Math.max(0, Math.min(firstTrace.length - 1, _waveCursorTick));
+  _waveCursorX = labelW + _waveCursorTick * dx;
+  drawWaves();
+});
+waveCv.addEventListener('mouseleave', () => {
+  _waveCursorTick = -1; _waveCursorX = -1; drawWaves();
+});
+
+// ============================================================================
+//  INSPECTOR
+// ============================================================================
+
+function updateInspector() {
+  if (selectedWire) {
+    const w = wires.find(w => w.id === selectedWire);
+    if (!w) { selInfo.textContent = 'nothing selected'; return; }
+    const v = outVals[`${w.fromId}:${w.fromPort}`] ?? null;
+    selInfo.innerHTML = `<b>Wire</b> #${w.id}<br>
+      <span style="color:var(--muted)">${w.fromId}.${w.fromPort} → ${w.toId}.${w.toPort}</span>
+      <div class="kv"><span>value</span><b style="color:${tritColor(v)}">${tritLabel(v)}</b></div>`;
+    return;
+  }
+  if (selection.size === 0) { selInfo.textContent = 'nothing selected'; return; }
+  if (selection.size > 1) {
+    selInfo.innerHTML = `<b>${selection.size} components selected</b><br>
+      <span style="color:var(--muted)">Press Pack to bundle them into a subcircuit, or drag to move.</span>`;
+    return;
+  }
+  const c = getComp(Array.from(selection)[0]);
+  if (!c) { selInfo.textContent = 'nothing selected'; return; }
+  const def = compDef(c);
+  let html = `<b>${c.type}</b> #${c.id}<br>
+    <span style="color:var(--muted)">at (${c.x}, ${c.y})</span><br>`;
+  for (const port in def.pins) {
+    const isOut = def.pins[port].kind === 'out';
+    const v = isOut ? outVals[`${c.id}:${port}`] : inputValueFromWires({comps,wires,outVals}, c.id, port);
+    html += `<div class="kv"><span>${port} (${isOut ? 'out' : 'in'})</span>
+             <b style="color:${tritColor(v)}">${tritLabel(v)}</b></div>`;
+  }
+  // Editable state fields, if the type defines an inspector
+  const tdef = TYPES[c.type];
+  if (tdef && tdef.inspector) {
+    html += `<div class="inspector-form" id="insp-form"></div>`;
+  }
+  selInfo.innerHTML = html;
+  if (tdef && tdef.inspector) {
+    const form = document.getElementById('insp-form');
+    const fields = tdef.inspector(c);
+    for (const f of fields) {
+      const labelEl = document.createElement('label');
+      labelEl.textContent = f.label;
+      form.appendChild(labelEl);
+      let inputEl;
+      if (f.kind === 'select') {
+        inputEl = document.createElement('select');
+        for (const [val, lab] of f.options) {
+          const opt = document.createElement('option');
+          opt.value = val; opt.textContent = lab;
+          if (val === f.get()) opt.selected = true;
+          inputEl.appendChild(opt);
+        }
+        inputEl.addEventListener('change', () => { f.set(inputEl.value); simulate(); draw(); updateInspector(); });
+      } else {
+        inputEl = document.createElement('input');
+        inputEl.type = (f.kind === 'number') ? 'number' : 'text';
+        inputEl.value = f.get();
+        inputEl.addEventListener('change', () => { f.set(inputEl.value); simulate(); draw(); updateInspector(); });
+      }
+      form.appendChild(inputEl);
+    }
+  }
+}
+
+// ============================================================================
+//  INTERACTION
+// ============================================================================
+
+function setStatus(s) { statusEl.textContent = s; }
+function setTool(t, type = null) {
+  tool = t; placeType = type;
+  document.querySelectorAll('.pal-item').forEach(el => el.classList.remove('active'));
+  // SUB: and GATE: types come from the library panels, not the static palette,
+  // so there's no palette item to highlight.  Skip the data-type filter and
+  // skip the activation entirely for those — otherwise a generic
+  // .pal-item[data-tool="place"] selector matches the first place tool
+  // (INPUT) and lights up the wrong row.
+  if (!type || (!type.startsWith('SUB:') && !type.startsWith('GATE:'))) {
+    let sel = `.pal-item[data-tool="${t}"]`;
+    if (type) sel += `[data-type="${type}"]`;
+    const target = document.querySelector(sel);
+    if (target) target.classList.add('active');
+  }
+  pendingWire = null;
+  setStatus(`tool: ${t}${type ? ' / ' + type : ''}`);
+  draw();
+}
+document.querySelectorAll('.pal-item').forEach(el => {
+  el.addEventListener('click', () => setTool(el.dataset.tool, el.dataset.type || null));
+});
+
+cv.addEventListener('mousemove', (e) => {
+  const r = cv.getBoundingClientRect();
+  mouse.x = e.clientX - r.left;
+  mouse.y = e.clientY - r.top;
+  const w = screenToWorld(mouse.x, mouse.y);
+  mouse.wx = w.x; mouse.wy = w.y;
+
+  if (drag && drag.kind === 'pan') {
+    view.tx = drag.tx0 + (mouse.x - drag.mx0);
+    view.ty = drag.ty0 + (mouse.y - drag.my0);
+  } else if (drag && drag.kind === 'comp') {
+    const dx = snap(mouse.wx - drag.startWX);
+    const dy = snap(mouse.wy - drag.startWY);
+    for (const item of drag.items) {
+      const c = getComp(item.id);
+      if (c) { c.x = item.x0 + dx; c.y = item.y0 + dy; }
+    }
+  }
+  hoverPin = hitTestPin(mouse.wx, mouse.wy);
+  if (hoverPin) hoverPin = { compId: hoverPin.comp.id, port: hoverPin.port,
+                             kind: hoverPin.kind, x: hoverPin.x, y: hoverPin.y };
+  draw();
+});
+
+cv.addEventListener('mousedown', (e) => {
+  const r = cv.getBoundingClientRect();
+  mouse.x = e.clientX - r.left;
+  mouse.y = e.clientY - r.top;
+  const w = screenToWorld(mouse.x, mouse.y);
+  mouse.wx = w.x; mouse.wy = w.y;
+
+  // Pan
+  if (e.button === 1 || (e.button === 0 && mouse.spaceDown)) {
+    drag = { kind: 'pan', mx0: mouse.x, my0: mouse.y, tx0: view.tx, ty0: view.ty };
+    return;
+  }
+  if (e.button !== 0) return;
+
+  // Place mode
+  if (tool === 'place' && placeType) {
+    const tdef = placeType.startsWith('SUB:') ? subInstanceDef({type: placeType}) : TYPES[placeType];
+    const state = (tdef.defaults || (() => ({})))();
+    // If WAVE, ensure trace is a fresh array (defaults() already does it)
+    const c = {
+      id: nextCompId++,
+      type: placeType,
+      x: snap(mouse.wx - tdef.w/2),
+      y: snap(mouse.wy - tdef.h/2),
+      state,
+    };
+    comps.push(c); syncCompMap();
+    simulate(); draw();
+    return;
+  }
+
+  // Delete mode
+  if (tool === 'delete') {
+    const p = hitTestComp(mouse.wx, mouse.wy);
+    if (p) { deleteComp(p.id); return; }
+    const wr = hitTestWire(mouse.wx, mouse.wy);
+    if (wr) { deleteWire(wr.id); return; }
+    return;
+  }
+
+  // Select-tool path
+  const pin = hitTestPin(mouse.wx, mouse.wy);
+  if (pin) {
+    handlePinClick(pin);
+    return;
+  }
+  const c = hitTestComp(mouse.wx, mouse.wy);
+  if (c) {
+    // Start a drag.  We delay any "click input cycle" decision until mouseup,
+    // distinguishing click vs drag by total mouse movement.
+    if (!selection.has(c.id)) {
+      if (!e.shiftKey) selection.clear();
+      selection.add(c.id);
+    }
+    selectedWire = null;
+    const items = Array.from(selection).map(id => {
+      const cc = getComp(id);
+      return { id, x0: cc.x, y0: cc.y };
+    });
+    drag = { kind: 'comp', startWX: mouse.wx, startWY: mouse.wy, items,
+             clickComp: c, startMX: mouse.x, startMY: mouse.y };
+    updateInspector(); draw();
+    return;
+  }
+  // Wire?
+  const wr = hitTestWire(mouse.wx, mouse.wy);
+  if (wr) {
+    selection.clear();
+    selectedWire = wr.id;
+    updateInspector(); draw();
+    return;
+  }
+  // Empty space — drag pans the canvas by default, Shift+drag rect-selects.
+  // (Space+drag and middle-mouse-drag also pan, handled in the early-return
+  // branch above.)
+  if (e.shiftKey) {
+    drag = { kind: 'rect', x0: mouse.wx, y0: mouse.wy };
+    updateInspector(); draw();
+  } else {
+    selection.clear();
+    selectedWire = null;
+    drag = { kind: 'pan', mx0: mouse.x, my0: mouse.y, tx0: view.tx, ty0: view.ty };
+    cv.style.cursor = 'grabbing';
+    updateInspector(); draw();
+  }
+});
+
+cv.addEventListener('mouseup', (e) => {
+  if (drag && drag.kind === 'pan') cv.style.cursor = '';
+  if (!drag) return;
+  if (drag.kind === 'comp') {
+    // Was this actually a click (no movement)?
+    const dx = Math.abs(mouse.x - drag.startMX), dy = Math.abs(mouse.y - drag.startMY);
+    if (dx < 3 && dy < 3) {
+      const c = drag.clickComp;
+      if (c.type === 'INPUT') {
+        const order = [-1, 0, 1];
+        c.state.value = order[(order.indexOf(c.state.value) + 1) % 3];
+        simulate();
+      } else if (c.type === 'CONST') {
+        const order = [-1, 0, 1];
+        c.state.value = order[(order.indexOf(c.state.value) + 1) % 3];
+        simulate();
+      }
+    }
+    updateInspector();
+  } else if (drag.kind === 'rect') {
+    const x0 = Math.min(drag.x0, mouse.wx), y0 = Math.min(drag.y0, mouse.wy);
+    const x1 = Math.max(drag.x0, mouse.wx), y1 = Math.max(drag.y0, mouse.wy);
+    if (Math.abs(x1 - x0) > 3 && Math.abs(y1 - y0) > 3) {
+      if (!e.shiftKey) selection.clear();
+      for (const c of comps) {
+        const def = compDef(c);
+        if (c.x >= x0 && c.x + def.w <= x1 && c.y >= y0 && c.y + def.h <= y1) {
+          selection.add(c.id);
+        }
+      }
+    }
+    updateInspector();
+  }
+  drag = null;
+  draw();
+});
+
+function handlePinClick(pin) {
+  if (pendingWire) {
+    // Complete the wire if pin kinds are compatible.
+    let fromId, fromPort, toId, toPort;
+    if (pendingWire.fromKind === 'out' && pin.kind === 'in') {
+      fromId = pendingWire.compId; fromPort = pendingWire.port;
+      toId = pin.comp.id; toPort = pin.port;
+    } else if (pendingWire.fromKind === 'in' && pin.kind === 'out') {
+      fromId = pin.comp.id; fromPort = pin.port;
+      toId = pendingWire.compId; toPort = pendingWire.port;
+    } else {
+      // Restart from new pin
+      pendingWire = { compId: pin.comp.id, port: pin.port, fromKind: pin.kind,
+                      fromXY: { x: pin.x, y: pin.y } };
+      setStatus('wire start (click an opposite-kind pin)');
+      draw(); return;
+    }
+    addWire(fromId, fromPort, toId, toPort);
+    pendingWire = null;
+    setStatus('wire placed');
+  } else {
+    pendingWire = { compId: pin.comp.id, port: pin.port, fromKind: pin.kind,
+                    fromXY: { x: pin.x, y: pin.y } };
+    setStatus(`wire start (${pin.kind}) — click an opposite-kind pin`);
+  }
+  draw();
+}
+
+function deleteComp(id) {
+  comps = comps.filter(c => c.id !== id);
+  syncCompMap();
+  wires = wires.filter(w => w.fromId !== id && w.toId !== id);
+  selection.delete(id);
+  if (selectedWire) {
+    const w = wires.find(w => w.id === selectedWire);
+    if (!w) selectedWire = null;
+  }
+  simulate(); draw(); updateInspector();
+}
+function deleteWire(id) {
+  wires = wires.filter(w => w.id !== id);
+  if (selectedWire === id) selectedWire = null;
+  simulate(); draw(); updateInspector();
+}
+function deleteSelection() {
+  for (const id of Array.from(selection)) deleteComp(id);
+  if (selectedWire) deleteWire(selectedWire);
+}
+
+function addWire(fromId, fromPort, toId, toPort) {
+  // Reject if from-pin is not actually an output of its component (and vice versa).
+  const fc = getComp(fromId), tc = getComp(toId);
+  if (!fc || !tc) return;
+  const fdef = compDef(fc), tdef = compDef(tc);
+  if (!fdef.pins[fromPort] || fdef.pins[fromPort].kind !== 'out') return;
+  if (!tdef.pins[toPort] || tdef.pins[toPort].kind !== 'in') return;
+  // Replace any existing wire driving the same input.
+  wires = wires.filter(w => !(w.toId === toId && w.toPort === toPort));
+  wires.push({ id: nextWireId++, fromId, fromPort, toId, toPort });
+  simulate(); draw();
+}
+
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const dz = e.deltaY > 0 ? 1/1.1 : 1.1;
+  const wx = (mouse.x - view.tx) / view.scale;
+  const wy = (mouse.y - view.ty) / view.scale;
+  view.scale = Math.max(0.3, Math.min(3, view.scale * dz));
+  view.tx = mouse.x - wx * view.scale;
+  view.ty = mouse.y - wy * view.scale;
+  draw();
+}, { passive: false });
+
+window.addEventListener('keydown', (e) => {
+  // Don't hijack keys when typing in an input field.
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+  if (document.activeElement && document.activeElement.tagName === 'SELECT') return;
+  if (e.code === 'Space') { mouse.spaceDown = true; cv.style.cursor = 'grab'; }
+  if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); }
+  if (e.key === 'Escape') {
+    pendingWire = null; selection.clear(); selectedWire = null;
+    updateInspector(); draw();
+  }
+});
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') { mouse.spaceDown = false; cv.style.cursor = ''; }
+});
+
+// ============================================================================
+//  TOOLBAR ACTIONS
+// ============================================================================
+
+document.getElementById('btn-step').addEventListener('click', stepSequential);
+
+document.getElementById('btn-play').addEventListener('click', () => {
+  const btn = document.getElementById('btn-play');
+  if (autoPlay) {
+    clearInterval(autoPlay); autoPlay = null;
+    btn.classList.remove('active'); btn.textContent = '▶ Play';
+  } else {
+    autoPlay = setInterval(stepSequential, 250);
+    btn.classList.add('active'); btn.textContent = '⏸ Pause';
+  }
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  // Reset every flip-flop's stored state and every clock's value; clear waves.
+  function resetScope(scope) {
+    for (const c of scope.comps) {
+      if (c.type === 'DFF') { c.state.q = 0; c.state.clkPrev = 0; }
+      else if (c.type === 'CLOCK') { c.state.value = -1; }
+      else if (c.type === 'WAVE') { c.state.trace = []; }
+      else if (c.type.startsWith('SUB:') && c.subScope) resetScope(c.subScope);
+    }
+  }
+  resetScope({comps, wires});
+  tick = 0; outVals = {};
+  simulate(); drawWaves(); draw();
+});
+
+document.getElementById('btn-wave').addEventListener('click', () => {
+  document.body.classList.toggle('wave-open');
+  resize();
+});
+document.getElementById('btn-wave-close').addEventListener('click', () => {
+  document.body.classList.remove('wave-open'); resize();
+});
+document.getElementById('btn-wave-clear').addEventListener('click', () => {
+  function clr(scope) {
+    for (const c of scope.comps) {
+      if (c.type === 'WAVE') c.state.trace = [];
+      else if (c.type.startsWith('SUB:') && c.subScope) clr(c.subScope);
+    }
+  }
+  clr({comps, wires}); drawWaves();
+});
+
+document.getElementById('btn-tt').addEventListener('click', openTruthTable);
+document.getElementById('tt-close').addEventListener('click', () => closeModal('tt-modal'));
+document.getElementById('btn-pack').addEventListener('click', openPackModal);
+document.getElementById('pack-close').addEventListener('click', () => closeModal('pack-modal'));
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+// Click on the dimmed background (but not on any of its children) closes
+// the modal — matches standard UX.  Applied once to every .modal-bg.
+document.querySelectorAll('.modal-bg').forEach(bg => {
+  bg.addEventListener('click', (e) => { if (e.target === bg) bg.classList.remove('open'); });
+});
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (!confirm('Clear the entire circuit? (Subcircuit library is preserved.)')) return;
+  comps = []; wires = []; nextCompId = 1; nextWireId = 1; syncCompMap();
+  outVals = {}; selection.clear(); selectedWire = null; tick = 0;
+  simulate(); draw(); drawWaves(); updateInspector();
+});
+document.getElementById('btn-save').addEventListener('click', () => {
+  // Deep-copy comps but strip non-serializable subScope (will be rebuilt on load).
+  const cleanComps = comps.map(c => {
+    const cc = { ...c, state: deepClone(c.state) };
+    delete cc.subScope;
+    return cc;
+  });
+  const data = { version: SAVE_FORMAT_VERSION,
+                 comps: cleanComps, wires, nextCompId, nextWireId, view, tick,
+                 subcircuitDefs, customGates };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'tritlogic_circuit.json'; a.click();
+  URL.revokeObjectURL(url);
+});
+document.getElementById('btn-load').addEventListener('click', () => {
+  document.getElementById('file-input').click();
+});
+document.getElementById('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      // Version check.  Missing field = legacy save (treat as version 0 and
+      // accept).  Newer version than we know about = warn but load anyway.
+      const v = data.version;
+      if (typeof v === 'number' && v > SAVE_FORMAT_VERSION) {
+        if (!confirm(`Save file is format version ${v}; this build only knows up to ${SAVE_FORMAT_VERSION}. Load anyway?`)) return;
+      }
+      comps = data.comps || [];
+      wires = data.wires || [];
+      syncCompMap();
+      nextCompId = data.nextCompId || (comps.reduce((m,c) => Math.max(m,c.id), 0) + 1);
+      nextWireId = data.nextWireId || (wires.reduce((m,w) => Math.max(m,w.id), 0) + 1);
+      view = data.view || { tx: 40, ty: 40, scale: 1 };
+      tick = data.tick || 0;
+      subcircuitDefs = data.subcircuitDefs || {};
+      customGates    = data.customGates    || {};
+      selection.clear(); selectedWire = null;
+      outVals = {};
+      refreshSubLib();
+      refreshGateLib();
+      simulate(); draw(); updateInspector();
+      const warnings = validateCircuit();
+      if (warnings.length) {
+        console.warn('Loaded circuit produced ' + warnings.length + ' validation warning(s):');
+        for (const w of warnings) console.warn('  ' + w);
+        setStatus(`loaded with ${warnings.length} validation warning(s) — see console`);
+      }
+    } catch (err) { alert('Could not load file: ' + err.message); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// ============================================================================
+//  TRUTH TABLE
+// ============================================================================
+
+function openTruthTable() {
+  // Populate sweep lists from current top-level comps.
+  const inputs = comps.filter(c => c.type === 'INPUT' || c.type === 'CONST');
+  const outputs = comps.filter(c => c.type === 'OUTPUT');
+  const inEl = document.getElementById('tt-inputs');
+  const outEl = document.getElementById('tt-outputs');
+  inEl.innerHTML = ''; outEl.innerHTML = '';
+  if (inputs.length === 0) inEl.innerHTML = '<span style="color:var(--muted)">No INPUT or CONST components.</span>';
+  if (outputs.length === 0) outEl.innerHTML = '<span style="color:var(--muted)">No OUTPUT components.</span>';
+  for (const c of inputs) {
+    const id = 'tt-in-' + c.id;
+    const lbl = document.createElement('label');
+    lbl.innerHTML = `<input type="checkbox" id="${id}" data-id="${c.id}" />
+                     ${c.type} #${c.id}${c.state.name ? ' ('+escapeHtml(c.state.name)+')' : ''}`;
+    inEl.appendChild(lbl);
+  }
+  for (const c of outputs) {
+    const id = 'tt-out-' + c.id;
+    const lbl = document.createElement('label');
+    lbl.innerHTML = `<input type="checkbox" id="${id}" data-id="${c.id}" checked />
+                     ${c.type} #${c.id}${c.state.name ? ' ('+escapeHtml(c.state.name)+')' : ''}`;
+    outEl.appendChild(lbl);
+  }
+  // Auto-check first few inputs
+  inEl.querySelectorAll('input').forEach((el, i) => { if (i < 3) el.checked = true; });
+  document.getElementById('tt-result').innerHTML = '';
+  openModal('tt-modal');
+}
+
+document.getElementById('tt-generate').addEventListener('click', () => {
+  const swept = Array.from(document.querySelectorAll('#tt-inputs input:checked'))
+    .map(el => parseInt(el.dataset.id, 10)).map(getComp).filter(Boolean);
+  const shown = Array.from(document.querySelectorAll('#tt-outputs input:checked'))
+    .map(el => parseInt(el.dataset.id, 10)).map(getComp).filter(Boolean);
+  if (swept.length === 0) { alert('Select at least one input to sweep.'); return; }
+  if (swept.length > 7) { alert('At most 7 swept inputs (limit: 2,187 rows).'); return; }
+  // Save state — wrapped in try/finally below so a throw inside simulate()
+  // can't leave the user's INPUT components stuck at sweep values.
+  const savedValues = swept.map(c => c.state.value);
+  const rows = Math.pow(3, swept.length);
+  const tritOrder = [-1, 0, 1];
+  let html = '<table><thead><tr>';
+  for (const c of swept) html += `<th>${c.state.name || (c.type + '#' + c.id)}</th>`;
+  for (const c of shown) html += `<th>${c.state.name || (c.type + '#' + c.id)}</th>`;
+  html += '</tr></thead><tbody>';
+  try {
+  for (let r = 0; r < rows; r++) {
+    let n = r;
+    for (let i = 0; i < swept.length; i++) {
+      swept[i].state.value = tritOrder[n % 3];
+      n = Math.floor(n / 3);
+    }
+    simulate();
+    html += '<tr>';
+    for (const c of swept) {
+      const v = c.state.value;
+      html += `<td class="input-cell ${tritClass(v)}">${tritLabel(v)}</td>`;
+    }
+    for (const c of shown) {
+      const v = inputValueFromWires({comps,wires,outVals}, c.id, 'in');
+      html += `<td class="${tritClass(v)}">${tritLabel(v)}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  document.getElementById('tt-result').innerHTML = html;
+  } finally {
+    // Restore state.  Runs even if simulate() threw inside the loop above.
+    swept.forEach((c, i) => c.state.value = savedValues[i]);
+    simulate(); draw();
+  }
+});
+
+// ============================================================================
+//  PACK MODAL
+// ============================================================================
+
+function openPackModal() {
+  if (selection.size === 0) {
+    alert('Select components first (drag a rectangle on empty space).');
+    return;
+  }
+  const inSelComps = Array.from(selection).map(getComp).filter(Boolean);
+  const ins = inSelComps.filter(c => c.type === 'INPUT').sort((a,b)=>a.y-b.y);
+  const outs = inSelComps.filter(c => c.type === 'OUTPUT').sort((a,b)=>a.y-b.y);
+  if (ins.length === 0 && outs.length === 0) {
+    alert('Selection must contain at least one INPUT or OUTPUT for pin definitions.');
+    return;
+  }
+  const form = document.getElementById('pack-form');
+  form.innerHTML = `
+    <label>Subcircuit name</label>
+    <input id="pack-name" type="text" value="MyBlock${Object.keys(subcircuitDefs).length+1}" />
+    <h4 style="font-size:11px; color: var(--muted); margin: 12px 0 4px 0;">Input pins</h4>
+    ${ins.map((c,i) => `
+      <label>INPUT #${c.id} → pin name</label>
+      <input data-pinkey="in_${c.id}" type="text" value="${escapeHtml(c.state.name || ('in' + i))}" />
+    `).join('')}
+    <h4 style="font-size:11px; color: var(--muted); margin: 12px 0 4px 0;">Output pins</h4>
+    ${outs.map((c,i) => `
+      <label>OUTPUT #${c.id} → pin name</label>
+      <input data-pinkey="out_${c.id}" type="text" value="${escapeHtml(c.state.name || ('out' + i))}" />
+    `).join('')}
+  `;
+  openModal('pack-modal');
+}
+document.getElementById('pack-confirm').addEventListener('click', () => {
+  const name = document.getElementById('pack-name').value.trim();
+  if (!name) { alert('Name required.'); return; }
+  if (subcircuitDefs[name]) {
+    if (!confirm(`Subcircuit "${name}" already exists. Overwrite?`)) return;
+  }
+  const renames = {};
+  document.querySelectorAll('#pack-form input[data-pinkey]').forEach(el => {
+    renames[el.dataset.pinkey] = el.value.trim();
+  });
+  packSelection(name, renames);
+  closeModal('pack-modal');
+});
+
+// ============================================================================
+//  EXAMPLES
+// ============================================================================
+//
+//  Each example is a builder that returns {comps, wires}.  We assign IDs
+//  by passing a small "id" closure so wires can reference comps by their
+//  builder-local labels rather than hard-coded numbers — far easier to
+//  edit and reorder than the original example.
+
+function buildExample(buildFn) {
+  let nextId = 1;
+  const labels = {};
+  function comp(label, type, x, y, state = {}) {
+    const c = { id: nextId++, type, x, y, state };
+    labels[label] = c.id;
+    return c;
+  }
+  function wire(fromLabel, fromPort, toLabel, toPort) {
+    return { id: 0, fromId: labels[fromLabel], fromPort, toId: labels[toLabel], toPort };
+  }
+  const result = buildFn(comp, wire);
+  result.wires.forEach((w, i) => { w.id = i + 1; });
+  return result;
+}
+
+const EXAMPLES = {
+  'sti-inverter': {
+    label: 'STI inverter (NEG)',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        c('a', 'INPUT',  100, 150, { value: 1, name: 'a' }),
+        c('n', 'STI',    240, 145),
+        c('y', 'OUTPUT', 360, 150, { name: 'y' }),
+      ],
+      wires: [
+        w('a', 'out', 'n', 'in'),
+        w('n', 'out', 'y', 'in'),
+      ],
+    })),
+  },
+  'sti-chain': {
+    label: 'STI chain (double-negation is identity)',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        c('a',  'INPUT',  100, 150, { value: 1, name: 'a' }),
+        c('n1', 'STI',    240, 145),
+        c('n2', 'STI',    360, 145),
+        c('y',  'OUTPUT', 480, 150, { name: 'y' }),
+      ],
+      wires: [
+        w('a',  'out', 'n1', 'in'),
+        w('n1', 'out', 'n2', 'in'),
+        w('n2', 'out', 'y',  'in'),
+      ],
+    })),
+  },
+  'min-max': {
+    label: 'MIN / MAX (ternary AND / OR)',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        c('a',   'INPUT',  100, 150, { value: -1, name: 'a' }),
+        c('b',   'INPUT',  100, 230, { value:  1, name: 'b' }),
+        c('mn',  'MIN',    260, 150),
+        c('mx',  'MAX',    260, 250),
+        c('ymn', 'OUTPUT', 400, 160, { name: 'min' }),
+        c('ymx', 'OUTPUT', 400, 260, { name: 'max' }),
+      ],
+      wires: [
+        w('a', 'out', 'mn', 'a'),
+        w('b', 'out', 'mn', 'b'),
+        w('a', 'out', 'mx', 'a'),
+        w('b', 'out', 'mx', 'b'),
+        w('mn', 'out', 'ymn', 'in'),
+        w('mx', 'out', 'ymx', 'in'),
+      ],
+    })),
+  },
+  'half-adder': {
+    label: 'Half-trit adder (cin = 0)',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        c('a',   'INPUT',  100, 130, { value: 1, name: 'a' }),
+        c('b',   'INPUT',  100, 190, { value: 1, name: 'b' }),
+        c('z',   'CONST',  100, 260, { value: 0 }),
+        c('add', 'ADDER',  240, 150),
+        c('ys',  'OUTPUT', 400, 160, { name: 'sum' }),
+        c('yc',  'OUTPUT', 400, 220, { name: 'cout' }),
+      ],
+      wires: [
+        w('a',   'out',  'add', 'a'),
+        w('b',   'out',  'add', 'b'),
+        w('z',   'out',  'add', 'cin'),
+        w('add', 'sum',  'ys',  'in'),
+        w('add', 'cout', 'yc',  'in'),
+      ],
+    })),
+  },
+  'full-adder': {
+    label: 'Full-trit adder',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        c('a',   'INPUT',  100, 130, { value:  1, name: 'a' }),
+        c('b',   'INPUT',  100, 190, { value: -1, name: 'b' }),
+        c('cin', 'INPUT',  100, 250, { value:  0, name: 'cin' }),
+        c('add', 'ADDER',  240, 160),
+        c('ys',  'OUTPUT', 400, 170, { name: 'sum' }),
+        c('yc',  'OUTPUT', 400, 230, { name: 'cout' }),
+      ],
+      wires: [
+        w('a',   'out',  'add', 'a'),
+        w('b',   'out',  'add', 'b'),
+        w('cin', 'out',  'add', 'cin'),
+        w('add', 'sum',  'ys',  'in'),
+        w('add', 'cout', 'yc',  'in'),
+      ],
+    })),
+  },
+  'ripple-3': {
+    label: '3-trit ripple adder',
+    build: () => buildExample((c, w) => {
+      const comps = [];
+      const wires = [];
+      const xA = 80, xB = 80, xCin = 80;
+      for (let i = 0; i < 3; i++) {
+        comps.push(c('a' + i, 'INPUT',  xA, 100 + i * 180, { value: i === 0 ? 1 : 0, name: 'a' + i }));
+        comps.push(c('b' + i, 'INPUT',  xB, 160 + i * 180, { value: i === 0 ? 1 : 0, name: 'b' + i }));
+        comps.push(c('ad' + i, 'ADDER', 240, 100 + i * 180));
+        comps.push(c('s' + i, 'OUTPUT', 400, 130 + i * 180, { name: 's' + i }));
+        wires.push(w('a' + i, 'out', 'ad' + i, 'a'));
+        wires.push(w('b' + i, 'out', 'ad' + i, 'b'));
+        wires.push(w('ad' + i, 'sum', 's' + i, 'in'));
+        if (i === 0) {
+          comps.push(c('cin0', 'CONST', xCin, 220, { value: 0 }));
+          wires.push(w('cin0', 'out', 'ad0', 'cin'));
+        } else {
+          wires.push(w('ad' + (i - 1), 'cout', 'ad' + i, 'cin'));
+        }
+      }
+      comps.push(c('cout', 'OUTPUT', 400, 100 + 3 * 180, { name: 'cout' }));
+      wires.push(w('ad2', 'cout', 'cout', 'in'));
+      return { comps, wires };
+    }),
+  },
+  'd-storage': {
+    label: 'D flip-flop storage (test 3-state hold)',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        c('d',   'INPUT',  100, 140, { value: 0, name: 'd' }),
+        c('clk', 'CLOCK',  100, 220, { value: -1, mode: 'tri' }),
+        c('ff',  'DFF',    260, 160, { q: 0, clkPrev: 0 }),
+        c('q',   'OUTPUT', 420, 175, { name: 'q' }),
+        c('wq',  'WAVE',   420, 250, { name: 'q',   trace: [] }),
+        c('wd',  'WAVE',   420, 310, { name: 'd',   trace: [] }),
+        c('wc',  'WAVE',   420, 370, { name: 'clk', trace: [] }),
+      ],
+      wires: [
+        w('d',   'out', 'ff', 'd'),
+        w('clk', 'out', 'ff', 'clk'),
+        w('ff',  'q',   'q',  'in'),
+        w('ff',  'q',   'wq', 'in'),
+        w('d',   'out', 'wd', 'in'),
+        w('clk', 'out', 'wc', 'in'),
+      ],
+    })),
+  },
+  't-flop': {
+    label: 'T flip-flop (NEG-feedback toggle)',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        c('clk', 'CLOCK',  100, 200, { value: -1, mode: 'tri' }),
+        c('ff',  'DFF',    260, 200, { q: 1, clkPrev: 0 }),
+        c('inv', 'STI',    400, 210),
+        c('wq',  'WAVE',   520, 200, { name: 'q',   trace: [] }),
+        c('wc',  'WAVE',   520, 260, { name: 'clk', trace: [] }),
+      ],
+      wires: [
+        w('clk', 'out', 'ff',  'clk'),
+        w('ff',  'q',   'inv', 'in'),
+        w('inv', 'out', 'ff',  'd'),
+        w('ff',  'q',   'wq',  'in'),
+        w('clk', 'out', 'wc',  'in'),
+      ],
+    })),
+  },
+  'tryte-io': {
+    label: 'Tryte input → tryte probe',
+    build: () => buildExample((c, w) => {
+      const comps = [
+        c('in',  'TRYTE_IN',  100, 130, { value: 17 }),
+        c('out', 'TRYTE_OUT', 280, 130),
+      ];
+      const wires = [];
+      for (let i = 0; i < 6; i++) {
+        wires.push(w('in', 't' + i, 'out', 't' + i));
+      }
+      return { comps, wires };
+    }),
+  },
+  'three-way-branch': {
+    label: 'Three-way branch (neg / zero / pos detector)',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        c('s',   'INPUT',  100, 230, { value: 0, name: 'sign' }),
+        c('nti', 'NTI',    260, 130),
+        c('pti', 'PTI',    260, 330),
+        c('sti', 'STI',    380, 330),
+        c('mx',  'MAX',    500, 220),
+        c('st2', 'STI',    640, 220),
+        c('yn',  'OUTPUT', 760, 145, { name: 'neg' }),
+        c('yz',  'OUTPUT', 760, 230, { name: 'zero' }),
+        c('yp',  'OUTPUT', 760, 345, { name: 'pos' }),
+      ],
+      wires: [
+        w('s',   'out', 'nti', 'in'),
+        w('s',   'out', 'pti', 'in'),
+        w('pti', 'out', 'sti', 'in'),
+        w('sti', 'out', 'yp',  'in'),
+        w('nti', 'out', 'yn',  'in'),
+        w('nti', 'out', 'mx',  'a'),
+        w('sti', 'out', 'mx',  'b'),
+        w('mx',  'out', 'st2', 'in'),
+        w('st2', 'out', 'yz',  'in'),
+      ],
+    })),
+  },
+};
+
+function loadExampleNamed(name) {
+  const ex = EXAMPLES[name];
+  if (!ex) return;
+  const { comps: newComps, wires: newWires } = ex.build();
+  comps = newComps;
+  wires = newWires;
+  syncCompMap();
+  nextCompId = comps.reduce((m, c) => Math.max(m, c.id), 0) + 1;
+  nextWireId = wires.reduce((m, w) => Math.max(m, w.id), 0) + 1;
+  view = { tx: 40, ty: 40, scale: 1 };
+  selection.clear(); selectedWire = null; tick = 0; outVals = {};
+  simulate(); drawWaves(); draw(); updateInspector();
+}
+
+(function initExampleSelect() {
+  const sel = document.getElementById('example-select');
+  for (const key in EXAMPLES) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = EXAMPLES[key].label;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => {
+    if (sel.value) {
+      loadExampleNamed(sel.value);
+      sel.value = '';
+    }
+  });
+})();
+
+function loadExample() { loadExampleNamed('t-flop'); }
+
+// ============================================================================
+//  SELF-TESTS
+// ============================================================================
+
+const TESTS = [];
+const test = (name, fn) => TESTS.push({ name, fn });
+
+function assertEq(actual, expected, ctx = '') {
+  if (!Object.is(actual, expected)) {
+    throw new Error(`${ctx} expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
+function assertDeepEq(actual, expected, ctx = '') {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(`${ctx} expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
+
+// ---- conversions ----
+test('intToTrits round-trips −364..+364 at width 6', () => {
+  for (let n = -364; n <= 364; n++) {
+    assertEq(tritsToInt(intToTrits(n, 6)), n, `n=${n}:`);
+  }
+});
+test('intToTrits known values', () => {
+  assertDeepEq(intToTrits(0, 3),  [0, 0, 0]);
+  assertDeepEq(intToTrits(1, 3),  [1, 0, 0]);
+  assertDeepEq(intToTrits(-1, 3), [-1, 0, 0]);
+  assertDeepEq(intToTrits(2, 3),  [-1, 1, 0]);
+  assertDeepEq(intToTrits(-2, 3), [1, -1, 0]);
+  assertDeepEq(intToTrits(13, 3), [1, 1, 1]);
+});
+test('parseTryteString accepts decimal and ternary', () => {
+  assertDeepEq(parseTryteString('0', 6).trits,   [0, 0, 0, 0, 0, 0]);
+  assertDeepEq(parseTryteString('-7', 6).trits,  intToTrits(-7, 6));
+  assertDeepEq(parseTryteString('T1T', 6).trits, [-1, 1, -1, 0, 0, 0]);
+  assertEq   (parseTryteString('0', 6).warning,   null, 'clean input has no warning');
+  assertEq   (parseTryteString('-7', 6).warning,  null);
+  assertEq   (parseTryteString('T1T', 6).warning, null);
+});
+test('parseTryteString surfaces warnings for invalid / out-of-range / too-long', () => {
+  const a = parseTryteString('garbage', 6);
+  assertDeepEq(a.trits, [0, 0, 0, 0, 0, 0]);
+  if (!a.warning) throw new Error('garbage should warn');
+  const b = parseTryteString('1000', 6);
+  if (!b.warning) throw new Error('out-of-range should warn');
+  assertEq(tritsToInt(b.trits), 364, 'clamps to +max');
+  const c = parseTryteString('-1000', 6);
+  assertEq(tritsToInt(c.trits), -364, 'clamps to -max');
+  const d = parseTryteString('1111111', 6);
+  if (!d.warning) throw new Error('too-long string should warn');
+  assertEq(d.trits.length, 6, 'still returns exactly width trits');
+});
+
+// ---- unary inverters ----
+test('STI truth table', () => {
+  assertEq(TYPES.STI.eval(null, { in: -1 }).out,  1);
+  assertEq(TYPES.STI.eval(null, { in:  0 }).out,  0);
+  assertEq(TYPES.STI.eval(null, { in:  1 }).out, -1);
+  assertEq(TYPES.STI.eval(null, { in: null }).out, null);
+});
+test('PTI truth table (T→1, 0→1, 1→T)', () => {
+  assertEq(TYPES.PTI.eval(null, { in: -1 }).out,  1);
+  assertEq(TYPES.PTI.eval(null, { in:  0 }).out,  1);
+  assertEq(TYPES.PTI.eval(null, { in:  1 }).out, -1);
+});
+test('NTI truth table (T→1, 0→T, 1→T)', () => {
+  assertEq(TYPES.NTI.eval(null, { in: -1 }).out,  1);
+  assertEq(TYPES.NTI.eval(null, { in:  0 }).out, -1);
+  assertEq(TYPES.NTI.eval(null, { in:  1 }).out, -1);
+});
+
+// ---- binary gates ----
+test('MIN over all 9 input combinations', () => {
+  for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) {
+    assertEq(TYPES.MIN.eval(null, { a, b }).out, Math.min(a, b), `MIN(${a},${b}):`);
+  }
+});
+test('MAX over all 9 input combinations', () => {
+  for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) {
+    assertEq(TYPES.MAX.eval(null, { a, b }).out, Math.max(a, b), `MAX(${a},${b}):`);
+  }
+});
+
+// ---- adder ----
+test('Full-trit adder: all 27 input combinations satisfy a+b+cin = cout*3 + sum', () => {
+  for (const a of [-1, 0, 1])
+    for (const b of [-1, 0, 1])
+      for (const cin of [-1, 0, 1]) {
+        const r = TYPES.ADDER.eval(null, { a, b, cin });
+        assertEq(r.cout * 3 + r.sum, a + b + cin, `${a}+${b}+${cin}:`);
+        if (Math.abs(r.sum)  > 1) throw new Error(`sum out of range for ${a},${b},${cin}`);
+        if (Math.abs(r.cout) > 1) throw new Error(`cout out of range for ${a},${b},${cin}`);
+      }
+});
+
+// ---- tryte-level arithmetic ----
+test('6-trit ripple addition matches integer arithmetic (sample)', () => {
+  function addTrytesViaTable(av, bv, width = 6) {
+    const a = intToTrits(av, width), b = intToTrits(bv, width);
+    let cin = 0; const sum = [];
+    for (let i = 0; i < width; i++) {
+      const r = TYPES.ADDER.eval(null, { a: a[i], b: b[i], cin });
+      sum.push(r.sum); cin = r.cout;
+    }
+    return tritsToInt(sum);
+  }
+  const samples = [
+    [0, 0], [1, 1], [-1, -1], [5, -7], [100, 200], [-100, -200],
+    [364, -364], [-364, 364], [123, 241], [50, 50], [-50, -50],
+    [0, 364], [0, -364], [1, -1], [-1, 1], [200, 100],
+  ];
+  for (const [x, y] of samples) {
+    const got = addTrytesViaTable(x, y, 6);
+    let exp = x + y;
+    if (exp >= 365)  exp -= 729;
+    if (exp <= -365) exp += 729;
+    assertEq(got, exp, `${x}+${y}:`);
+  }
+});
+test('Negation: NEG of every value matches -x', () => {
+  for (let n = -50; n <= 50; n++) {
+    const trits = intToTrits(n, 6);
+    const negated = trits.map(t => -t);
+    assertEq(tritsToInt(negated), -n, `NEG(${n}):`);
+  }
+});
+
+// ---- DFF behaviour ----
+test('DFF latches on rising edge into +1, not on other clock transitions', () => {
+  const dff = { id: 99, type: 'DFF', x: 0, y: 0, state: { q: 0, clkPrev: 0 } };
+  const def = TYPES.DFF;
+  def.latch(dff, { d: 1, clk: 0 });
+  assertEq(dff.state.q, 0, 'no latch on clk=0:');
+  def.latch(dff, { d: 1, clk: -1 });
+  assertEq(dff.state.q, 0, 'no latch on clk=-1:');
+  def.latch(dff, { d: 1, clk: 1 });
+  assertEq(dff.state.q, 1, 'latch on 0→1:');
+  def.latch(dff, { d: -1, clk: 1 });
+  assertEq(dff.state.q, 1, 'no latch on flat clk=1:');
+  def.latch(dff, { d: -1, clk: -1 });
+  assertEq(dff.state.q, 1, 'no latch on falling:');
+  def.latch(dff, { d: 0, clk: 1 });
+  assertEq(dff.state.q, 0, 'latch with d=0 stores 0:');
+  def.latch(dff, { d: -1, clk: -1 });
+  def.latch(dff, { d: -1, clk: 1 });
+  assertEq(dff.state.q, -1, 'latch with d=-1 stores -1:');
+});
+
+// ---- custom-gate registration & evaluation ----
+test('Custom gate: table-lookup evaluation matches definition', () => {
+  const savedGates = customGates;
+  try {
+    customGates = {};
+    const table = {};
+    for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) {
+      table[`${a},${b}`] = -Math.min(a, b);
+    }
+    customGates['NAND3'] = { numInputs: 2, table };
+    const fakeInstance = { type: 'GATE:NAND3', state: {} };
+    const def = customGateDef(fakeInstance);
+    assertEq(def.w, 80);
+    if (!('in0' in def.pins) || !('in1' in def.pins) || !('out' in def.pins)) {
+      throw new Error('expected pins in0, in1, out');
+    }
+    for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) {
+      const r = def.eval(fakeInstance, { in0: a, in1: b });
+      assertEq(r.out, -Math.min(a, b), `NAND3(${a},${b}):`);
+    }
+    assertEq(def.eval(fakeInstance, { in0: null, in1: 0 }).out, null, 'null input:');
+  } finally {
+    customGates = savedGates;
+  }
+});
+test('Custom gate: enumerateInputs returns 3^n combinations in stable order', () => {
+  assertEq(enumerateInputs(1).length, 3);
+  assertEq(enumerateInputs(2).length, 9);
+  assertEq(enumerateInputs(3).length, 27);
+  assertDeepEq(enumerateInputs(1), [[-1], [0], [1]]);
+  const two = enumerateInputs(2);
+  assertDeepEq(two[0], [-1, -1]);
+  assertDeepEq(two[two.length - 1], [1, 1]);
+});
+
+function runAllTests() {
+  const results = [];
+  for (const t of TESTS) {
+    try { t.fn(); results.push({ name: t.name, pass: true }); }
+    catch (e) { results.push({ name: t.name, pass: false, error: e.message }); }
+  }
+  return results;
+}
+
+document.getElementById('btn-tests').addEventListener('click', () => {
+  const results = runAllTests();
+  const pass = results.filter(r => r.pass).length;
+  const fail = results.length - pass;
+  document.getElementById('tests-summary').innerHTML =
+    `<b style="color:${fail === 0 ? 'var(--t-pos)' : 'var(--t-neg)'}">` +
+    `${pass} pass · ${fail} fail</b> · ${results.length} total`;
+  const lines = results.map(r =>
+    `<div class="test-row ${r.pass ? 'pass' : 'fail'}">
+       <span class="badge">${r.pass ? 'PASS' : 'FAIL'}</span>
+       <span>${escapeHtml(r.name)}</span>
+       ${r.error ? `<span class="err">${escapeHtml(r.error)}</span>` : ''}
+     </div>`);
+  document.getElementById('tests-result').innerHTML = lines.join('');
+  openModal('tests-modal');
+});
+document.getElementById('tests-run').addEventListener('click', () => {
+  document.getElementById('btn-tests').click();
+});
+document.getElementById('tests-close').addEventListener('click', () => closeModal('tests-modal'));
+
+document.getElementById('btn-crt').addEventListener('click', () => {
+  document.body.classList.toggle('crt');
+  try { localStorage.setItem('tritlogic.crt', document.body.classList.contains('crt') ? '1' : '0'); }
+  catch (e) {}
+  draw(); drawWaves();
+});
+// Restore CRT preference at boot.
+try {
+  if (localStorage.getItem('tritlogic.crt') === '1') document.body.classList.add('crt');
+} catch (e) {}
+
+// Wire-flow animation.  A monotonic counter that ticks every ~100 ms,
+// used by drawWire() for the dashed-line offset.  We only schedule a draw
+// when the page is visible and at least one wire actually has a non-null
+// value to animate — static or all-floating circuits don't burn cycles.
+let animTime = 0;
+let _lastAnim = 0;
+function animLoop(t) {
+  if (t - _lastAnim > 100 && !document.hidden) {
+    _lastAnim = t;
+    animTime++;
+    let live = false;
+    for (const w of wires) {
+      if (outVals[`${w.fromId}:${w.fromPort}`] != null) { live = true; break; }
+    }
+    if (live) draw();
+  }
+  requestAnimationFrame(animLoop);
+}
+requestAnimationFrame(animLoop);
+
+// ============================================================================
+//  VALIDATION
+// ============================================================================
+//
+//  Inspect the current circuit for structural problems and return a list
+//  of human-readable warnings.  Runs after load to catch corrupted saves
+//  and detect dangling references that would otherwise cause silent
+//  evaluation failures.
+
+function validateCircuit() {
+  const warnings = [];
+  const idSet = new Set(comps.map(c => c.id));
+
+  // Wires must point at existing components with the correct pin kind.
+  for (const w of wires) {
+    if (!idSet.has(w.fromId)) { warnings.push(`wire #${w.id}: source comp #${w.fromId} does not exist`); continue; }
+    if (!idSet.has(w.toId))   { warnings.push(`wire #${w.id}: target comp #${w.toId} does not exist`); continue; }
+    const fc = getComp(w.fromId), tc = getComp(w.toId);
+    const fdef = compDef(fc), tdef = compDef(tc);
+    if (!fdef.pins[w.fromPort]) warnings.push(`wire #${w.id}: ${fc.type} #${fc.id} has no pin "${w.fromPort}"`);
+    else if (fdef.pins[w.fromPort].kind !== 'out') warnings.push(`wire #${w.id}: source pin "${w.fromPort}" is not an output`);
+    if (!tdef.pins[w.toPort]) warnings.push(`wire #${w.id}: ${tc.type} #${tc.id} has no pin "${w.toPort}"`);
+    else if (tdef.pins[w.toPort].kind !== 'in') warnings.push(`wire #${w.id}: target pin "${w.toPort}" is not an input`);
+  }
+
+  // Components must have a known type / a present library definition.
+  for (const c of comps) {
+    if (c.type.startsWith('SUB:')) {
+      const name = c.type.slice(4);
+      if (!subcircuitDefs[name]) warnings.push(`SUB instance #${c.id}: subcircuit "${name}" is not defined`);
+    } else if (c.type.startsWith('GATE:')) {
+      const name = c.type.slice(5);
+      if (!customGates[name]) warnings.push(`GATE instance #${c.id}: custom gate "${name}" is not defined`);
+    } else if (!TYPES[c.type]) {
+      warnings.push(`Comp #${c.id}: unknown built-in type "${c.type}"`);
+    }
+  }
+
+  // Direct subcircuit self-reference (cheap one-level cycle check).  Full
+  // recursive cycle detection across the definition graph would need a DFS;
+  // the recursion-depth guard added to simulateScope (below) catches deeper
+  // cycles at runtime.
+  for (const name in subcircuitDefs) {
+    const def = subcircuitDefs[name];
+    for (const sc of def.comps || []) {
+      if (sc.type === 'SUB:' + name) warnings.push(`subcircuit "${name}" instantiates itself`);
+    }
+  }
+
+  return warnings;
+}
+
+// ============================================================================
+//  BOOT
+// ============================================================================
+
+resize();
+loadExample();
+setTool('select');
+refreshSubLib();
+refreshGateLib();
+</script>
+</body>
+</html>
