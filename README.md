@@ -55,56 +55,9 @@ npx serve .
 
 Then visit `http://localhost:8000`.
 
-## Deploying to Vercel
+## Run live version
 
-Three options, fastest to most permanent:
-
-### Option 1 — drag-and-drop (no account changes needed beyond signup)
-
-1. Sign in at <https://vercel.com>.
-2. Go to <https://vercel.com/new> → "Deploy without a Git repository".
-3. Drag this entire `tritlogic/` folder onto the drop zone.
-4. Click **Deploy**. You get a live URL in ~20 seconds.
-
-### Option 2 — Vercel CLI
-
-```bash
-npm install -g vercel
-cd tritlogic
-vercel              # first run will prompt for project name / org
-vercel --prod       # promote to production
-```
-
-### Option 3 — GitHub + Vercel (best for ongoing updates)
-
-```bash
-cd tritlogic
-git init
-git add .
-git commit -m "Initial TritLogic deploy"
-
-# Create the repo on GitHub, then:
-git remote add origin https://github.com/YOURNAME/tritlogic.git
-git push -u origin main
-```
-
-Then in the Vercel dashboard: **Add New… → Project → Import Git Repository**,
-pick the repo, accept the defaults, deploy. Every push to `main` becomes a
-new production deploy; every pull request gets its own preview URL.
-
-### About `vercel.json`
-
-The included `vercel.json` does three small things:
-
-- Disables long caching on `index.html` so a redeploy is immediately
-  visible to returning visitors. (Vercel's other assets — none yet — get
-  the default long-cache treatment.)
-- Adds `X-Content-Type-Options: nosniff` and a couple of other low-risk
-  hardening headers.
-- Enables `cleanUrls` so `/index` works the same as `/index.html`.
-
-None of this is required to deploy successfully; you can delete the file
-and Vercel will still serve the site.
+The latest version is always live at https://tern-pi.vercel.app/.
 
 ## Known limitations
 
