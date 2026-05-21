@@ -407,6 +407,9 @@
   <div class="pal-item" data-tool="place" data-type="ADDER">
     <div class="icon">+</div><div>Full adder</div>
   </div>
+  <div class="pal-item" data-tool="place" data-type="MUX">
+    <div class="icon">MUX</div><div>3:1 multiplexer</div>
+  </div>
 
   <h3>Sequential</h3>
   <div class="pal-item" data-tool="place" data-type="DFF">
@@ -883,6 +886,32 @@ TYPES.ADDER = {
     return ADDER_TABLE[String(v.a + v.b + v.cin)];
   },
   draw: drawAdder,
+};
+
+// ---- Multiplexer ----------------------------------------------------------
+//
+//  A ternary 3:1 multiplexer.  The select trit s routes one of three data
+//  inputs to the output:  s = T → dT,  s = 0 → d0,  s = +1 → dP.  Each data
+//  input is named for the select value that picks it.  A floating select,
+//  or a floating value on the *selected* input, gives a floating output;
+//  floating values on the unselected inputs are ignored.
+
+TYPES.MUX = {
+  w: 80, h: 104,
+  pins: {
+    s:   { side: 'left',  dx: 0,  dy: 20, kind: 'in' },
+    dT:  { side: 'left',  dx: 0,  dy: 44, kind: 'in' },
+    d0:  { side: 'left',  dx: 0,  dy: 62, kind: 'in' },
+    dP:  { side: 'left',  dx: 0,  dy: 80, kind: 'in' },
+    out: { side: 'right', dx: 80, dy: 50, kind: 'out' },
+  },
+  defaults: () => ({}),
+  eval: (_, v) => {
+    if (v.s == null) return { out: null };
+    const pick = v.s === -1 ? v.dT : v.s === 0 ? v.d0 : v.dP;
+    return { out: pick ?? null };
+  },
+  draw: drawMUX,
 };
 
 // ---- D flip-flop ----------------------------------------------------------
@@ -2611,6 +2640,20 @@ function drawALU(c) {
   ctx.fillText('R0', t.w-4, 22); ctx.fillText('R1', t.w-4, 40); ctx.fillText('R2', t.w-4, 58);
   ctx.fillText('C', t.w-4, 82);
 }
+function drawMUX(c) {
+  const t = TYPES.MUX;
+  ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  ctx.fillStyle = '#d8dde6'; ctx.font = 'bold 12px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('MUX', t.w/2, t.h/2);
+  ctx.fillStyle = '#8a92a1'; ctx.font = '9px monospace';
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillText('S', 4, 20);
+  ctx.fillText('dT', 4, 44); ctx.fillText('d0', 4, 62); ctx.fillText('dP', 4, 80);
+  ctx.textAlign = 'right';
+  ctx.fillText('OUT', t.w-4, 50);
+}
 function drawSubInstance(c, name, def) {
   const cdef = compDef(c);
   ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, cdef.w, cdef.h);
@@ -3346,7 +3389,7 @@ const INFO_CATEGORIES = [
   ['Sources',    ['INPUT', 'CONST', 'TRYTE_IN', 'CLOCK']],
   ['Sinks',      ['OUTPUT', 'TRYTE_OUT', 'WAVE']],
   ['Inverters',  ['STI', 'PTI', 'NTI']],
-  ['Gates',      ['MIN', 'MAX', 'ADDER']],
+  ['Gates',      ['MIN', 'MAX', 'ADDER', 'MUX']],
   ['Sequential', ['DFF', 'REG3', 'RAM']],
   ['CPU',        ['ALU']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
@@ -3638,6 +3681,36 @@ const COMPONENT_INFO = {
       N-trit adder. Six of them add two trytes.</p>
       <p>The full 27-row truth table below is generated live by the
       simulator.</p>`,
+  },
+
+  MUX: {
+    name: 'MUX', tagline: 'Ternary 3:1 multiplexer',
+    body: `
+      <p>A multiplexer routes one of several data inputs through to its
+      output, chosen by a select signal. MUX is the ternary 3:1 form: one
+      select trit <code>s</code> picks one of three data inputs.</p>
+      <h4>Selection</h4>
+      <table class="info-tt" style="text-align:center">
+        <thead><tr><th>s</th><th>out</th></tr></thead>
+        <tbody>
+          <tr><td class="trit-T">T</td><td>dT</td></tr>
+          <tr><td class="trit-0">0</td><td>d0</td></tr>
+          <tr><td class="trit-P">+1</td><td>dP</td></tr>
+        </tbody>
+      </table>
+      <p>Each data input is named for the select value that routes it —
+      <code>dT</code> for <code>s = T</code>, <code>d0</code> for
+      <code>s = 0</code>, <code>dP</code> for <code>s = +1</code>.</p>
+      <h4>Floating inputs</h4>
+      <p>If the select <code>s</code> is <code>null</code>, or the
+      <em>selected</em> data input is <code>null</code>, the output is
+      <code>null</code>. A floating value on an <em>unselected</em> input
+      is ignored — only the chosen path reaches the output.</p>
+      <h4>Why it matters</h4>
+      <p>A multiplexer is how a circuit makes a data-driven choice. In the
+      Phase 7 CPU it selects the next program-counter value — increment or
+      jump target — and helps the decoder steer control signals. For a
+      plain 2-way choice just leave one of the three inputs unused.</p>`,
   },
 
   DFF: {
@@ -4415,6 +4488,28 @@ const EXAMPLES = {
       ],
     })),
   },
+  'mux-demo': {
+    label: 'MUX — route one of three inputs',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        // Click the select trit T / 0 / +1 to route a different data input.
+        // The three data inputs hold distinct values so the routing shows.
+        c('s',  'INPUT',  90,  80,  { value:  0, name: 's'  }),
+        c('dT', 'INPUT',  90,  160, { value: -1, name: 'dT' }),
+        c('d0', 'INPUT',  90,  210, { value:  0, name: 'd0' }),
+        c('dP', 'INPUT',  90,  260, { value:  1, name: 'dP' }),
+        c('mux', 'MUX',   300, 165),
+        c('out', 'OUTPUT', 500, 210, { name: 'out' }),
+      ],
+      wires: [
+        w('s',  'out', 'mux', 's'),
+        w('dT', 'out', 'mux', 'dT'),
+        w('d0', 'out', 'mux', 'd0'),
+        w('dP', 'out', 'mux', 'dP'),
+        w('mux', 'out', 'out', 'in'),
+      ],
+    })),
+  },
 };
 
 function loadExampleNamed(name) {
@@ -4532,6 +4627,23 @@ test('MAX over all 9 input combinations', () => {
   for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) {
     assertEq(TYPES.MAX.eval(null, { a, b }).out, Math.max(a, b), `MAX(${a},${b}):`);
   }
+});
+test('MUX routes the data input named by the select trit', () => {
+  const def = TYPES.MUX;
+  for (const dT of [-1, 0, 1])
+    for (const d0 of [-1, 0, 1])
+      for (const dP of [-1, 0, 1]) {
+        assertEq(def.eval(null, { s: -1, dT, d0, dP }).out, dT, `s=T (${dT},${d0},${dP}):`);
+        assertEq(def.eval(null, { s:  0, dT, d0, dP }).out, d0, `s=0 (${dT},${d0},${dP}):`);
+        assertEq(def.eval(null, { s:  1, dT, d0, dP }).out, dP, `s=+1 (${dT},${d0},${dP}):`);
+      }
+});
+test('MUX out is null for a floating select or floating selected input', () => {
+  const def = TYPES.MUX;
+  assertEq(def.eval(null, { s: null, dT: 1, d0: 1, dP: 1 }).out, null, 'select floating:');
+  assertEq(def.eval(null, { s: 0, dT: 1, d0: null, dP: 1 }).out, null, 'selected input floating:');
+  // A floating value on an unselected input must not reach the output.
+  assertEq(def.eval(null, { s: 0, dT: null, d0: 1, dP: null }).out, 1, 'unselected floats ignored:');
 });
 
 // ---- adder ----

@@ -16,13 +16,15 @@ the way you'd expect.
 ## What's in here
 
 - A canvas with grid snap, pan, zoom, rect-select, drag-to-move.
-- Twelve preset example circuits — pick one from the dropdown in the
-  header (including RAM store-and-read-back and ALU add demos).
+- Thirteen preset example circuits — pick one from the dropdown in the
+  header (including RAM store-and-read-back, ALU add, and MUX routing
+  demos).
 - Components: INPUT (cycle T/0/+1), CONST, TRYTE_IN, CLOCK (tri-state
   or two-state cycle), OUTPUT probe, TRYTE_OUT, WAVE recorder, the three
-  inverters (STI, PTI, NTI), MIN, MAX, full-trit ADDER, a D-flip-flop,
-  a 3-trit register (REG3 — three DFFs on a shared clock with a
-  load-enable line), a 9-word × 3-trit RAM block (two-trit address,
+  inverters (STI, PTI, NTI), MIN, MAX, full-trit ADDER, a ternary 3:1
+  MUX, a D-flip-flop, a 3-trit register (REG3 — three DFFs on a shared
+  clock with a load-enable line), a 9-word × 3-trit RAM block (two-trit
+  address,
   asynchronous read, write-enabled synchronous write), and an ALU
   (3-trit-word arithmetic/logic unit — op-select picks ADD, MIN, or MAX).
 - A live combinational simulator (fixed-point iteration) plus a four-phase
