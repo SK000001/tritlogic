@@ -649,21 +649,13 @@ function tritsToInt(trits) {
 // truncated, or rejected — otherwise null.  Callers should surface the
 // warning via setStatus so the user sees it instead of silently getting
 // zeros.
+// Parse a balanced-ternary trit string, MSB first — the digits T (−1), 0
+// and +1.  Strictly ternary: a string of only 0s and 1s is a trit pattern,
+// NOT a decimal number ("000111" → trits, value 13).  Decimal entry has its
+// own dedicated field, so there is no ambiguous decimal fallback here.
 function parseTryteString(s, width = 6) {
   s = (s || '').trim();
   if (s === '') return { trits: new Array(width).fill(0), warning: null };
-  // Decimal form.
-  if (/^-?\d+$/.test(s)) {
-    const n = parseInt(s, 10);
-    const maxAbs = (Math.pow(3, width) - 1) / 2;     // 364 for width 6
-    if (Math.abs(n) > maxAbs) {
-      const clamped = Math.max(-maxAbs, Math.min(maxAbs, n));
-      return { trits: intToTrits(clamped, width),
-               warning: `value ${n} out of ${width}-trit range (±${maxAbs}); clamped to ${clamped}` };
-    }
-    return { trits: intToTrits(n, width), warning: null };
-  }
-  // Balanced-ternary string form (MSB first).
   if (/^[T01]+$/i.test(s)) {
     const arr = s.toUpperCase().split('').reverse().map(c => c === 'T' ? -1 : c === '0' ? 0 : 1);
     if (arr.length > width) {
@@ -673,10 +665,10 @@ function parseTryteString(s, width = 6) {
     while (arr.length < width) arr.push(0);
     return { trits: arr, warning: null };
   }
-  // Anything else is unparseable.  Return zeros + a warning rather than
-  // pretending the user typed 0 successfully.
+  // Not a trit string.  Return zeros + a warning rather than pretending the
+  // user typed 0 successfully.
   return { trits: new Array(width).fill(0),
-           warning: `could not parse "${s}"; expected decimal or balanced-ternary (T/0/1) string` };
+           warning: `could not parse "${s}"; expected a balanced-ternary string of T, 0 and 1 — use the Decimal value field for numbers` };
 }
 function formatTryte(trits) {
   // Pretty form: balanced-ternary MSB first + decimal in parens
@@ -3449,9 +3441,12 @@ const COMPONENT_INFO = {
       values, so the range is <b>−364 … +364</b>. Values outside that range
       are clamped.</p>
       <h4>Setting the value</h4>
-      <p>The inspector accepts either a <b>decimal</b> number or a
-      <b>balanced-ternary string</b> (most-significant trit first), using the
-      digits <code>T</code>, <code>0</code>, and <code>1</code>.</p>
+      <p>The inspector has two fields. <b>Decimal value</b> takes a signed
+      number. <b>Balanced ternary (MSB first)</b> takes a trit string using
+      the digits <code>T</code>, <code>0</code> and <code>1</code> — and it
+      is read strictly as trits: <code>000111</code> is the trit pattern
+      worth <code>13</code>, not the decimal number 111. The two fields are
+      independent — type a number in one or a trit string in the other.</p>
       <h4>Internal state</h4>
       <ul>
         <li><code>value</code> — the signed integer being represented.</li>
@@ -4486,23 +4481,24 @@ test('intToTrits known values', () => {
   assertDeepEq(intToTrits(-2, 3), [1, -1, 0]);
   assertDeepEq(intToTrits(13, 3), [1, 1, 1]);
 });
-test('parseTryteString accepts decimal and ternary', () => {
-  assertDeepEq(parseTryteString('0', 6).trits,   [0, 0, 0, 0, 0, 0]);
-  assertDeepEq(parseTryteString('-7', 6).trits,  intToTrits(-7, 6));
-  assertDeepEq(parseTryteString('T1T', 6).trits, [-1, 1, -1, 0, 0, 0]);
-  assertEq   (parseTryteString('0', 6).warning,   null, 'clean input has no warning');
-  assertEq   (parseTryteString('-7', 6).warning,  null);
-  assertEq   (parseTryteString('T1T', 6).warning, null);
+test('parseTryteString parses balanced-ternary trit strings (MSB first)', () => {
+  assertDeepEq(parseTryteString('0', 6).trits,    [0, 0, 0, 0, 0, 0]);
+  assertDeepEq(parseTryteString('', 6).trits,     [0, 0, 0, 0, 0, 0]);
+  assertDeepEq(parseTryteString('T1T', 6).trits,  [-1, 1, -1, 0, 0, 0]);
+  // All-0/1 strings are trit patterns, not decimal numbers.
+  assertEq(tritsToInt(parseTryteString('000111', 6).trits), 13, '000111 → 13:');
+  assertEq(tritsToInt(parseTryteString('000101', 6).trits), 10, '000101 → 10:');
+  assertEq(tritsToInt(parseTryteString('1000', 6).trits),   27, '1000 → 27:');
+  assertEq(parseTryteString('T1T', 6).warning,    null, 'clean input has no warning');
+  assertEq(parseTryteString('000111', 6).warning, null);
 });
-test('parseTryteString surfaces warnings for invalid / out-of-range / too-long', () => {
+test('parseTryteString warns on non-ternary input and over-long strings', () => {
   const a = parseTryteString('garbage', 6);
   assertDeepEq(a.trits, [0, 0, 0, 0, 0, 0]);
   if (!a.warning) throw new Error('garbage should warn');
-  const b = parseTryteString('1000', 6);
-  if (!b.warning) throw new Error('out-of-range should warn');
-  assertEq(tritsToInt(b.trits), 364, 'clamps to +max');
-  const c = parseTryteString('-1000', 6);
-  assertEq(tritsToInt(c.trits), -364, 'clamps to -max');
+  // Decimal numbers are not trit strings — they belong in the decimal field.
+  if (!parseTryteString('-7', 6).warning) throw new Error('"-7" should warn');
+  if (!parseTryteString('13', 6).warning)  throw new Error('"13" (has a 3) should warn');
   const d = parseTryteString('1111111', 6);
   if (!d.warning) throw new Error('too-long string should warn');
   assertEq(d.trits.length, 6, 'still returns exactly width trits');
