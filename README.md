@@ -19,6 +19,7 @@ the way you'd expect.
 - Fifteen preset example circuits — pick one from the dropdown in the
   header (including RAM store-and-read-back, ALU add, MUX routing, PC
   counting, and a complete single-cycle CPU running a small program).
+  Clock-driven examples start running the moment they are selected.
 - Components: INPUT (cycle T/0/+1), CONST, TRYTE_IN, CLOCK (tri-state
   or two-state cycle), OUTPUT probe, TRYTE_OUT, WAVE recorder, the three
   inverters (STI, PTI, NTI), MIN, MAX, full-trit ADDER, a ternary 3:1
