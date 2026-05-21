@@ -16,14 +16,15 @@ the way you'd expect.
 ## What's in here
 
 - A canvas with grid snap, pan, zoom, rect-select, drag-to-move.
-- Eleven preset example circuits — pick one from the dropdown in the
-  header (including a RAM store-and-read-back demo).
+- Twelve preset example circuits — pick one from the dropdown in the
+  header (including RAM store-and-read-back and ALU add demos).
 - Components: INPUT (cycle T/0/+1), CONST, TRYTE_IN, CLOCK (tri-state
   or two-state cycle), OUTPUT probe, TRYTE_OUT, WAVE recorder, the three
   inverters (STI, PTI, NTI), MIN, MAX, full-trit ADDER, a D-flip-flop,
   a 3-trit register (REG3 — three DFFs on a shared clock with a
-  load-enable line), and a 9-word × 3-trit RAM block (two-trit address,
-  asynchronous read, write-enabled synchronous write).
+  load-enable line), a 9-word × 3-trit RAM block (two-trit address,
+  asynchronous read, write-enabled synchronous write), and an ALU
+  (3-trit-word arithmetic/logic unit — op-select picks ADD, MIN, or MAX).
 - A live combinational simulator (fixed-point iteration) plus a four-phase
   step engine for clocks and flip-flops.
 - Truth-table generator over up to 7 swept inputs (2,187 rows).
@@ -36,8 +37,9 @@ the way you'd expect.
   simulator. Select a component first to jump straight to its page.
 - Built-in self-tests: hit the **Tests** button — test groups covering
   conversions, gate truth tables, the full adder, ripple addition,
-  negation, DFF edge semantics, REG3 register load/hold behaviour, and
-  RAM address decode / read / write-enable semantics.
+  negation, DFF edge semantics, REG3 register load/hold behaviour,
+  RAM address decode / read / write-enable semantics, and ALU
+  add / min / max behaviour.
   All should be green; if anything goes red, the simulator is producing
   wrong values and I want to hear about it.
 
@@ -84,11 +86,11 @@ The latest version is always live at https://tern-pi.vercel.app/.
 The accompanying research guide (in the parent directory) covers ten
 phases of a ternary computing project from theory to hardware. TritLogic
 implements phases 1–4 (logic, voltage thresholds in concept, gates),
-phase 5 (arithmetic), and is well into phase 6 (memory) with the DFF, the
-3-trit register, and a 9-word addressable RAM block. The natural next
-steps are phase 7 (a CPU skeleton — ALU, register file, program counter)
-and phase 8 (ISA encoding fed into a simulated CPU built out of this
-canvas).
+phase 5 (arithmetic), and phase 6 (memory — the DFF, the 3-trit register,
+the RAM block). Phase 7 (a CPU skeleton) is underway: the datapath is a
+single-cycle accumulator machine, and its ALU is the first piece built.
+Still to come are the program counter, instruction decoder, and the
+assembled CPU, then phase 8 (ISA encoding).
 
 ## License
 

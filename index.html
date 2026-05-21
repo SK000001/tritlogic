@@ -419,6 +419,11 @@
     <div class="icon">RAM</div><div>9×3-trit RAM</div>
   </div>
 
+  <h3>CPU</h3>
+  <div class="pal-item" data-tool="place" data-type="ALU">
+    <div class="icon">ALU</div><div>arithmetic / logic unit</div>
+  </div>
+
   <h3>Custom gates</h3>
   <div class="sub-lib" id="gate-lib"></div>
 
@@ -1032,6 +1037,56 @@ TYPES.RAM = {
   },
   isSequential: true,
   draw: drawRAM,
+};
+
+// ---- ALU ------------------------------------------------------------------
+//
+//  The compute core of the Phase 7 CPU.  Combinational (no state): two
+//  3-trit word operands a0..a2 and b0..b2, plus a one-trit operation
+//  select op, produce a 3-trit result r0..r2 and a carry-out cout.
+//
+//    op = T  → MIN   per-trit min(a, b),  cout = 0
+//    op = 0  → ADD   a + b ripple-carried, cout = carry off the top trit
+//    op = +1 → MAX   per-trit max(a, b),  cout = 0
+//
+//  ADD ripples a full-trit add (the same ADDER_TABLE the ADDER component
+//  uses) low trit to high.  The true sum is value(r0..r2) + cout * 27.
+//  A null on op or on any operand trit yields an all-null result.
+
+TYPES.ALU = {
+  w: 120, h: 162,
+  pins: {
+    a0: { side: 'left',  dx: 0,   dy: 22,  kind: 'in' },
+    a1: { side: 'left',  dx: 0,   dy: 40,  kind: 'in' },
+    a2: { side: 'left',  dx: 0,   dy: 58,  kind: 'in' },
+    b0: { side: 'left',  dx: 0,   dy: 82,  kind: 'in' },
+    b1: { side: 'left',  dx: 0,   dy: 100, kind: 'in' },
+    b2: { side: 'left',  dx: 0,   dy: 118, kind: 'in' },
+    op: { side: 'left',  dx: 0,   dy: 142, kind: 'in' },
+    r0: { side: 'right', dx: 120, dy: 22,  kind: 'out' },
+    r1: { side: 'right', dx: 120, dy: 40,  kind: 'out' },
+    r2: { side: 'right', dx: 120, dy: 58,  kind: 'out' },
+    cout: { side: 'right', dx: 120, dy: 82, kind: 'out' },
+  },
+  defaults: () => ({}),
+  eval: (_, v) => {
+    const NULL = { r0: null, r1: null, r2: null, cout: null };
+    const a = [v.a0, v.a1, v.a2], b = [v.b0, v.b1, v.b2];
+    if (v.op == null || a.some(t => t == null) || b.some(t => t == null)) return NULL;
+    if (v.op === 0) {
+      // ADD — ripple a full-trit add from the low trit to the high.
+      let cin = 0; const r = [];
+      for (let i = 0; i < 3; i++) {
+        const s = ADDER_TABLE[String(a[i] + b[i] + cin)];
+        r.push(s.sum); cin = s.cout;
+      }
+      return { r0: r[0], r1: r[1], r2: r[2], cout: cin };
+    }
+    // op = T → MIN, op = +1 → MAX.  No carry for the logic ops.
+    const f = v.op === -1 ? Math.min : Math.max;
+    return { r0: f(a[0], b[0]), r1: f(a[1], b[1]), r2: f(a[2], b[2]), cout: 0 };
+  },
+  draw: drawALU,
 };
 
 // ============================================================================
@@ -2544,6 +2599,26 @@ function drawRAM(c) {
   ctx.moveTo(2, 138); ctx.lineTo(10, 142); ctx.lineTo(2, 146); ctx.closePath();
   ctx.strokeStyle = '#525a6b'; ctx.stroke();
 }
+function drawALU(c) {
+  const t = TYPES.ALU;
+  ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  // Centre label
+  ctx.fillStyle = '#d8dde6'; ctx.font = 'bold 13px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('ALU', t.w/2, t.h/2 - 6);
+  ctx.fillStyle = '#8a92a1'; ctx.font = '8px monospace';
+  ctx.fillText('op T:MIN', t.w/2, t.h/2 + 8);
+  ctx.fillText('0:ADD +:MAX', t.w/2, t.h/2 + 18);
+  // Pin labels
+  ctx.font = '9px monospace'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillText('A0', 4, 22); ctx.fillText('A1', 4, 40); ctx.fillText('A2', 4, 58);
+  ctx.fillText('B0', 4, 82); ctx.fillText('B1', 4, 100); ctx.fillText('B2', 4, 118);
+  ctx.fillText('OP', 4, 142);
+  ctx.textAlign = 'right';
+  ctx.fillText('R0', t.w-4, 22); ctx.fillText('R1', t.w-4, 40); ctx.fillText('R2', t.w-4, 58);
+  ctx.fillText('C', t.w-4, 82);
+}
 function drawSubInstance(c, name, def) {
   const cdef = compDef(c);
   ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, cdef.w, cdef.h);
@@ -3281,6 +3356,7 @@ const INFO_CATEGORIES = [
   ['Inverters',  ['STI', 'PTI', 'NTI']],
   ['Gates',      ['MIN', 'MAX', 'ADDER']],
   ['Sequential', ['DFF', 'REG3', 'RAM']],
+  ['CPU',        ['ALU']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
 ];
 
@@ -3683,6 +3759,43 @@ const COMPONENT_INFO = {
       <p>RAM is the addressable store a CPU reads instructions and data from.
       Phase 7 wires it to a program counter and an ALU to build the first
       ternary processor.</p>`,
+  },
+
+  ALU: {
+    name: 'ALU', tagline: 'Arithmetic / logic unit (3-trit word)',
+    body: `
+      <p>The compute core of the Phase 7 CPU. The ALU takes two 3-trit
+      words — <code>a0..a2</code> and <code>b0..b2</code> — and a one-trit
+      operation select <code>op</code>, and produces a 3-trit result
+      <code>r0..r2</code> with a carry-out <code>cout</code>.</p>
+      <h4>Operations</h4>
+      <p>The single <code>op</code> trit picks one of three operations:</p>
+      <table class="info-tt" style="text-align:center">
+        <thead><tr><th>op</th><th>operation</th><th>result</th></tr></thead>
+        <tbody>
+          <tr><td class="trit-T">T</td><td>MIN</td>
+              <td>per-trit min(a, b)</td></tr>
+          <tr><td class="trit-0">0</td><td>ADD</td>
+              <td>a + b, ripple-carried</td></tr>
+          <tr><td class="trit-P">+1</td><td>MAX</td>
+              <td>per-trit max(a, b)</td></tr>
+        </tbody>
+      </table>
+      <h4>ADD — the carry</h4>
+      <p>ADD ripples a full-trit add across the three positions, low to
+      high — exactly the standalone <b>ADDER</b> chained three deep.
+      <code>cout</code> is the carry off the top trit (weight 27), so the
+      true sum is <code>value(r0..r2) + cout × 27</code>. MIN and MAX have
+      no carry, so <code>cout</code> is <code>0</code> for them.</p>
+      <h4>Floating inputs</h4>
+      <p>If <code>op</code> or any operand trit is <code>null</code> the
+      whole result reads <code>null</code> — a floating input yields a
+      floating output, as everywhere else in the simulator.</p>
+      <h4>Role in the CPU</h4>
+      <p>In the Phase 7 datapath the ALU's <code>a</code> input is the
+      accumulator (ACC) and <code>b</code> is the instruction's operand;
+      <code>op</code> comes from the instruction decoder. The result feeds
+      back into ACC, latched on the next clock edge.</p>`,
   },
 
   SUBCIRCUIT: {
@@ -4276,6 +4389,37 @@ const EXAMPLES = {
       ],
     })),
   },
+  'alu-demo': {
+    label: 'ALU — add two 3-trit words',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        // Word A = 5  (trits T, T, +1 from low to high).
+        c('a0', 'INPUT',  80,  60,  { value: -1, name: 'a0' }),
+        c('a1', 'INPUT',  80,  110, { value: -1, name: 'a1' }),
+        c('a2', 'INPUT',  80,  160, { value:  1, name: 'a2' }),
+        // Word B = 4  (trits +1, +1, 0).
+        c('b0', 'INPUT',  80,  230, { value:  1, name: 'b0' }),
+        c('b1', 'INPUT',  80,  280, { value:  1, name: 'b1' }),
+        c('b2', 'INPUT',  80,  330, { value:  0, name: 'b2' }),
+        // op = 0 selects ADD (5 + 4 = 9 → r = 0,0,+1).  Click op to T for
+        // MIN or +1 for MAX and watch the result change — no clock needed.
+        c('op', 'INPUT',  80,  400, { value:  0, name: 'op' }),
+        c('alu', 'ALU',   300, 160),
+        c('r0', 'OUTPUT', 520, 182, { name: 'r0' }),
+        c('r1', 'OUTPUT', 520, 232, { name: 'r1' }),
+        c('r2', 'OUTPUT', 520, 282, { name: 'r2' }),
+        c('cc', 'OUTPUT', 520, 332, { name: 'cout' }),
+      ],
+      wires: [
+        w('a0', 'out', 'alu', 'a0'), w('a1', 'out', 'alu', 'a1'),
+        w('a2', 'out', 'alu', 'a2'), w('b0', 'out', 'alu', 'b0'),
+        w('b1', 'out', 'alu', 'b1'), w('b2', 'out', 'alu', 'b2'),
+        w('op', 'out', 'alu', 'op'),
+        w('alu', 'r0', 'r0', 'in'), w('alu', 'r1', 'r1', 'in'),
+        w('alu', 'r2', 'r2', 'in'), w('alu', 'cout', 'cc', 'in'),
+      ],
+    })),
+  },
 };
 
 function loadExampleNamed(name) {
@@ -4548,6 +4692,41 @@ test('RAM suppresses a write when the address is floating', () => {
   for (let i = 0; i < 9; i++) {
     assertDeepEq(ram.state.mem[i], [0, 0, 0], `word ${i} unchanged:`);
   }
+});
+
+// ---- ALU ------------------------------------------------------------------
+test('ALU ADD ripple-adds two 3-trit words and matches integer arithmetic', () => {
+  const def = TYPES.ALU;
+  const samples = [
+    [0, 0], [1, 1], [-1, -1], [5, -7], [13, -13], [-13, 13],
+    [6, 6], [-6, -6], [13, 1], [-13, -1], [4, 9], [10, -10],
+  ];
+  for (const [x, y] of samples) {
+    const a = intToTrits(x, 3), b = intToTrits(y, 3);
+    const r = def.eval(null, { a0: a[0], a1: a[1], a2: a[2],
+                               b0: b[0], b1: b[1], b2: b[2], op: 0 });
+    // The carry-out holds the overflow trit (weight 27).
+    const got = tritsToInt([r.r0, r.r1, r.r2]) + r.cout * 27;
+    assertEq(got, x + y, `${x}+${y}:`);
+  }
+});
+test('ALU MIN / MAX apply min / max per trit, with no carry', () => {
+  const def = TYPES.ALU;
+  const a = { a0: -1, a1: 0, a2: 1 }, b = { b0: 1, b1: 0, b2: -1 };
+  const mn = def.eval(null, { ...a, ...b, op: -1 });
+  assertDeepEq([mn.r0, mn.r1, mn.r2], [-1, 0, -1], 'MIN result:');
+  assertEq(mn.cout, 0, 'MIN cout:');
+  const mx = def.eval(null, { ...a, ...b, op: 1 });
+  assertDeepEq([mx.r0, mx.r1, mx.r2], [1, 0, 1], 'MAX result:');
+  assertEq(mx.cout, 0, 'MAX cout:');
+});
+test('ALU outputs all-null when op or any operand trit is floating', () => {
+  const def = TYPES.ALU;
+  const full = { a0: 1, a1: 1, a2: 1, b0: 1, b1: 1, b2: 1, op: 0 };
+  const NULL = { r0: null, r1: null, r2: null, cout: null };
+  assertDeepEq(def.eval(null, { ...full, op: null }), NULL, 'op floating:');
+  assertDeepEq(def.eval(null, { ...full, a1: null }), NULL, 'operand a1 floating:');
+  assertDeepEq(def.eval(null, { ...full, b2: null }), NULL, 'operand b2 floating:');
 });
 
 // ---- preset examples ----
