@@ -4002,8 +4002,13 @@ document.getElementById('pack-confirm').addEventListener('click', () => {
 function buildExample(buildFn) {
   let nextId = 1;
   const labels = {};
-  function comp(label, type, x, y, state = {}) {
-    const c = { id: nextId++, type, x, y, state };
+  function comp(label, type, x, y, state) {
+    // Seed from the type's own defaults so sequential components (DFF,
+    // REG3, RAM, ...) always carry their full internal state; any explicit
+    // values the example passes override the defaults per key.
+    const def = TYPES[type];
+    const base = (def && def.defaults) ? def.defaults() : {};
+    const c = { id: nextId++, type, x, y, state: { ...base, ...(state || {}) } };
     labels[label] = c.id;
     return c;
   }
@@ -4544,6 +4549,20 @@ test('every preset example builds with wires connecting real in/out pins', () =>
         throw new Error(`${key} wire #${wr.id}: ${fc.type}.${wr.fromPort} is not an output pin`);
       if (!tpin || tpin.kind !== 'in')
         throw new Error(`${key} wire #${wr.id}: ${tc.type}.${wr.toPort} is not an input pin`);
+    }
+  }
+});
+
+test('every preset example gives each component its full default state', () => {
+  for (const key in EXAMPLES) {
+    const { comps } = EXAMPLES[key].build();
+    for (const c of comps) {
+      const def = TYPES[c.type];
+      if (!def || !def.defaults) continue;
+      for (const k in def.defaults()) {
+        if (!(k in c.state))
+          throw new Error(`${key}: ${c.type} #${c.id} is missing state key "${k}"`);
+      }
     }
   }
 });
