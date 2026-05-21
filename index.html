@@ -415,6 +415,9 @@
   <div class="pal-item" data-tool="place" data-type="REG3">
     <div class="icon">REG</div><div>3-trit register</div>
   </div>
+  <div class="pal-item" data-tool="place" data-type="RAM">
+    <div class="icon">RAM</div><div>9×3-trit RAM</div>
+  </div>
 
   <h3>Custom gates</h3>
   <div class="sub-lib" id="gate-lib"></div>
@@ -954,6 +957,81 @@ TYPES.REG3 = {
   },
   isSequential: true,
   draw: drawReg,
+};
+
+// ---- Ternary RAM block ----------------------------------------------------
+//
+//  A small addressable memory: nine words of three trits each — the array of
+//  trit registers Phase 6 (memory) calls for.  Conceptually nine REG3s that
+//  share a clock, with an address decoder picking which one a write lands in.
+//
+//  The two address trits a0,a1 form a balanced-ternary number in the range
+//  -4..+4, decoded to a word index 0..8:
+//
+//    word index = (a0 + 1) + (a1 + 1) * 3
+//
+//  Reads are asynchronous: q0..q2 always show the word currently selected by
+//  the address pins.  Writes are synchronous: on the rising edge of clk (the
+//  same edge rule as DFF/REG3) the addressed word is overwritten with d0..d2
+//  — but ONLY when the write-enable pin we is +1.  A null on either address
+//  trit selects no word: the outputs read null and a write is suppressed.
+//
+//  Internal state: mem (nine 3-trit arrays), clkPrev (last clk value seen).
+
+const RAM_WORDS = 9;   // 3^2 — two address trits
+
+function ramAddr(a0, a1) {
+  // Balanced-ternary address decode → word index 0..8, or null when either
+  // address trit is floating.
+  if (a0 == null || a1 == null) return null;
+  return (a0 + 1) + (a1 + 1) * 3;
+}
+
+TYPES.RAM = {
+  w: 132, h: 162,
+  pins: {
+    a0:  { side: 'left',  dx: 0,   dy: 22,  kind: 'in' },
+    a1:  { side: 'left',  dx: 0,   dy: 40,  kind: 'in' },
+    d0:  { side: 'left',  dx: 0,   dy: 64,  kind: 'in' },
+    d1:  { side: 'left',  dx: 0,   dy: 82,  kind: 'in' },
+    d2:  { side: 'left',  dx: 0,   dy: 100, kind: 'in' },
+    we:  { side: 'left',  dx: 0,   dy: 124, kind: 'in' },
+    clk: { side: 'left',  dx: 0,   dy: 142, kind: 'in' },
+    q0:  { side: 'right', dx: 132, dy: 22,  kind: 'out' },
+    q1:  { side: 'right', dx: 132, dy: 40,  kind: 'out' },
+    q2:  { side: 'right', dx: 132, dy: 58,  kind: 'out' },
+  },
+  defaults: () => ({
+    mem: Array.from({ length: RAM_WORDS }, () => [0, 0, 0]),
+    clkPrev: 0,
+  }),
+  eval: (c, v) => {
+    const idx = ramAddr(v.a0, v.a1);
+    if (idx == null) return { q0: null, q1: null, q2: null };
+    const w = c.state.mem[idx];
+    return { q0: w[0], q1: w[1], q2: w[2] };
+  },
+  latch: (c, vIn) => {
+    const clk = vIn.clk ?? 0;
+    if (c.state.clkPrev !== 1 && clk === 1) {
+      // Rising edge — commit a write only when write-enable is asserted (+1)
+      // and the address selects a real word.
+      if ((vIn.we ?? 0) === 1) {
+        const idx = ramAddr(vIn.a0, vIn.a1);
+        if (idx != null) {
+          const w = c.state.mem[idx];
+          c.state.mem[idx] = [
+            vIn.d0 ?? w[0],
+            vIn.d1 ?? w[1],
+            vIn.d2 ?? w[2],
+          ];
+        }
+      }
+    }
+    c.state.clkPrev = clk;
+  },
+  isSequential: true,
+  draw: drawRAM,
 };
 
 // ============================================================================
@@ -2433,6 +2511,39 @@ function drawReg(c) {
   ctx.moveTo(2, 80); ctx.lineTo(10, 84); ctx.lineTo(2, 88); ctx.closePath();
   ctx.strokeStyle = '#525a6b'; ctx.stroke();
 }
+function drawRAM(c) {
+  const t = TYPES.RAM;
+  ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  // Title
+  ctx.fillStyle = '#d8dde6'; ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText('RAM', t.w/2, 4);
+  // Live memory map: nine words top-to-bottom, three trit cells per word.
+  const mem = c.state.mem || [];
+  const cw = 11, ch = 11, gx = 1, gy = 2;
+  const gridW = 3 * cw + 2 * gx;
+  const x0 = (t.w - gridW) / 2, y0 = 20;
+  for (let word = 0; word < RAM_WORDS; word++) {
+    const wv = mem[word] || [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = tritColor(wv[i]);
+      ctx.fillRect(x0 + i * (cw + gx), y0 + word * (ch + gy), cw, ch);
+    }
+  }
+  // Pin labels
+  ctx.fillStyle = '#8a92a1'; ctx.font = '9px monospace';
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillText('A0', 4, 22); ctx.fillText('A1', 4, 40);
+  ctx.fillText('D0', 4, 64); ctx.fillText('D1', 4, 82); ctx.fillText('D2', 4, 100);
+  ctx.fillText('WE', 4, 124); ctx.fillText('CLK', 4, 142);
+  ctx.textAlign = 'right';
+  ctx.fillText('Q0', t.w-4, 22); ctx.fillText('Q1', t.w-4, 40); ctx.fillText('Q2', t.w-4, 58);
+  // clock-edge triangle marker next to the CLK pin
+  ctx.beginPath();
+  ctx.moveTo(2, 138); ctx.lineTo(10, 142); ctx.lineTo(2, 146); ctx.closePath();
+  ctx.strokeStyle = '#525a6b'; ctx.stroke();
+}
 function drawSubInstance(c, name, def) {
   const cdef = compDef(c);
   ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, cdef.w, cdef.h);
@@ -3104,6 +3215,10 @@ document.getElementById('btn-reset').addEventListener('click', () => {
     for (const c of scope.comps) {
       if (c.type === 'DFF') { c.state.q = 0; c.state.clkPrev = 0; }
       else if (c.type === 'REG3') { c.state.q = [0, 0, 0]; c.state.clkPrev = 0; }
+      else if (c.type === 'RAM') {
+        c.state.mem = Array.from({ length: RAM_WORDS }, () => [0, 0, 0]);
+        c.state.clkPrev = 0;
+      }
       else if (c.type === 'CLOCK') { c.state.value = -1; }
       else if (c.type === 'WAVE') { c.state.trace = []; }
       else if (c.type.startsWith('SUB:') && c.subScope) resetScope(c.subScope);
@@ -3165,7 +3280,7 @@ const INFO_CATEGORIES = [
   ['Sinks',      ['OUTPUT', 'TRYTE_OUT', 'WAVE']],
   ['Inverters',  ['STI', 'PTI', 'NTI']],
   ['Gates',      ['MIN', 'MAX', 'ADDER']],
-  ['Sequential', ['DFF', 'REG3']],
+  ['Sequential', ['DFF', 'REG3', 'RAM']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
 ];
 
@@ -3513,6 +3628,45 @@ const COMPONENT_INFO = {
       <h4>Where it leads</h4>
       <p>REG3 is the first phase-6 (memory) component. A wider addressable RAM
       block and a CPU register file are built from registers like this one.</p>`,
+  },
+
+  RAM: {
+    name: 'RAM', tagline: '9-word × 3-trit addressable memory',
+    body: `
+      <p>An addressable ternary memory: <b>nine words</b> of <b>three trits</b>
+      each — the array of trit registers Phase 6 (memory) calls for. Picture
+      nine REG3 registers sharing one clock, with an address decoder choosing
+      which one a write lands in.</p>
+      <h4>Addressing</h4>
+      <p>The two address trits <code>a0</code> and <code>a1</code> form a
+      balanced-ternary number from <code>-4</code> to <code>+4</code>, decoded
+      to a word index 0–8:</p>
+      <p style="text-align:center"><code>index = (a0 + 1) + (a1 + 1) × 3</code></p>
+      <p>If either address trit is floating the address is invalid: the
+      outputs read <code>null</code> and any write is suppressed.</p>
+      <h4>Reading — asynchronous</h4>
+      <p>The outputs <code>q0..q2</code> continuously show the word currently
+      selected by the address pins. Move the address and the outputs follow
+      at once — no clock required.</p>
+      <h4>Writing — synchronous</h4>
+      <p>On the <b>rising edge</b> of <code>clk</code> (the same edge rule as
+      DFF and REG3) the addressed word is overwritten with
+      <code>d0..d2</code> — but only when the write-enable <code>we</code> is
+      <code>+1</code>. With <code>we</code> at <code>0</code>, <code>T</code>,
+      or floating the memory holds every word through the edge.</p>
+      <h4>Internal state</h4>
+      <ul>
+        <li><code>mem</code> — nine 3-trit arrays, the stored words.</li>
+        <li><code>clkPrev</code> — previous clock value, for edge
+        detection.</li>
+      </ul>
+      <p>The component face draws a live <b>memory map</b>: nine rows of three
+      colour cells, one row per word, so storage can be watched as the
+      circuit runs. <b>Reset</b> clears every word to <code>[0, 0, 0]</code>.</p>
+      <h4>Where it leads</h4>
+      <p>RAM is the addressable store a CPU reads instructions and data from.
+      Phase 7 wires it to a program counter and an ALU to build the first
+      ternary processor.</p>`,
   },
 
   SUBCIRCUIT: {
@@ -4271,6 +4425,68 @@ test('REG3 holds its contents through an edge when ld is 0, T, or floating', () 
 test('REG3 eval mirrors the stored trits to q0..q2', () => {
   const reg = { type: 'REG3', state: { q: [-1, 0, 1], clkPrev: 0 } };
   assertDeepEq(TYPES.REG3.eval(reg), { q0: -1, q1: 0, q2: 1 });
+});
+
+// ---- ternary RAM ----------------------------------------------------------
+test('RAM address decode maps (a0,a1) to nine distinct word indices 0..8', () => {
+  const seen = new Set();
+  for (const a1 of [-1, 0, 1])
+    for (const a0 of [-1, 0, 1]) {
+      const idx = ramAddr(a0, a1);
+      if (idx < 0 || idx > 8) throw new Error(`idx out of range for a0=${a0},a1=${a1}: ${idx}`);
+      seen.add(idx);
+    }
+  assertEq(seen.size, 9, 'all nine addresses distinct:');
+  assertEq(ramAddr(null, 0), null, 'floating a0 → no address:');
+  assertEq(ramAddr(0, null), null, 'floating a1 → no address:');
+});
+test('RAM eval shows the addressed word; a floating address reads null', () => {
+  const def = TYPES.RAM;
+  const ram = { type: 'RAM', state: def.defaults() };
+  ram.state.mem[ramAddr(1, -1)] = [1, 0, -1];
+  assertDeepEq(def.eval(ram, { a0: 1, a1: -1 }), { q0: 1, q1: 0, q2: -1 }, 'written word:');
+  assertDeepEq(def.eval(ram, { a0: 0, a1: 0 }),  { q0: 0, q1: 0, q2: 0 },  'untouched word:');
+  assertDeepEq(def.eval(ram, { a0: null, a1: 0 }),
+               { q0: null, q1: null, q2: null }, 'floating address:');
+});
+test('RAM writes the addressed word on a rising edge when we = +1', () => {
+  const def = TYPES.RAM;
+  const ram = { type: 'RAM', state: def.defaults() };
+  const idx = ramAddr(-1, 1);
+  // A genuine 0→1 edge with we asserted — the addressed word loads.
+  def.latch(ram, { a0: -1, a1: 1, d0: 1, d1: -1, d2: 1, we: 1, clk: -1 });
+  def.latch(ram, { a0: -1, a1: 1, d0: 1, d1: -1, d2: 1, we: 1, clk:  1 });
+  assertDeepEq(ram.state.mem[idx], [1, -1, 1], 'addressed word written:');
+  assertDeepEq(def.eval(ram, { a0: 0, a1: 0 }),
+               { q0: 0, q1: 0, q2: 0 }, 'other words untouched:');
+});
+test('RAM holds every word through an edge when we is 0, T, or floating', () => {
+  const def = TYPES.RAM;
+  for (const we of [0, -1, null]) {
+    const ram = { type: 'RAM', state: def.defaults() };
+    const idx = ramAddr(1, 1);
+    ram.state.mem[idx] = [1, 1, 1];
+    def.latch(ram, { a0: 1, a1: 1, d0: -1, d1: -1, d2: -1, we, clk: -1 });
+    def.latch(ram, { a0: 1, a1: 1, d0: -1, d1: -1, d2: -1, we, clk:  1 });
+    assertDeepEq(ram.state.mem[idx], [1, 1, 1], `holds when we=${we}:`);
+  }
+});
+test('RAM ignores a write when the clock does not actually rise', () => {
+  const def = TYPES.RAM;
+  const ram = { type: 'RAM',
+                state: { mem: Array.from({ length: 9 }, () => [0, 0, 0]), clkPrev: 1 } };
+  // clk is already high — a flat clk=1 is not an edge and must not write.
+  def.latch(ram, { a0: 0, a1: 0, d0: 1, d1: 1, d2: 1, we: 1, clk: 1 });
+  assertDeepEq(ram.state.mem[ramAddr(0, 0)], [0, 0, 0], 'no write without a 0→1 edge:');
+});
+test('RAM suppresses a write when the address is floating', () => {
+  const def = TYPES.RAM;
+  const ram = { type: 'RAM', state: def.defaults() };
+  def.latch(ram, { a0: null, a1: 0, d0: 1, d1: 1, d2: 1, we: 1, clk: -1 });
+  def.latch(ram, { a0: null, a1: 0, d0: 1, d1: 1, d2: 1, we: 1, clk:  1 });
+  for (let i = 0; i < 9; i++) {
+    assertDeepEq(ram.state.mem[i], [0, 0, 0], `word ${i} unchanged:`);
+  }
 });
 
 // ---- custom-gate registration & evaluation ----

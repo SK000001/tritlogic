@@ -20,8 +20,9 @@ the way you'd expect.
 - Components: INPUT (cycle T/0/+1), CONST, TRYTE_IN, CLOCK (tri-state
   or two-state cycle), OUTPUT probe, TRYTE_OUT, WAVE recorder, the three
   inverters (STI, PTI, NTI), MIN, MAX, full-trit ADDER, a D-flip-flop,
-  and a 3-trit register (REG3 — three DFFs on a shared clock with a
-  load-enable line).
+  a 3-trit register (REG3 — three DFFs on a shared clock with a
+  load-enable line), and a 9-word × 3-trit RAM block (two-trit address,
+  asynchronous read, write-enabled synchronous write).
 - A live combinational simulator (fixed-point iteration) plus a four-phase
   step engine for clocks and flip-flops.
 - Truth-table generator over up to 7 swept inputs (2,187 rows).
@@ -34,7 +35,8 @@ the way you'd expect.
   simulator. Select a component first to jump straight to its page.
 - Built-in self-tests: hit the **Tests** button — test groups covering
   conversions, gate truth tables, the full adder, ripple addition,
-  negation, DFF edge semantics, and REG3 register load/hold behaviour.
+  negation, DFF edge semantics, REG3 register load/hold behaviour, and
+  RAM address decode / read / write-enable semantics.
   All should be green; if anything goes red, the simulator is producing
   wrong values and I want to hear about it.
 
@@ -81,10 +83,11 @@ The latest version is always live at https://tern-pi.vercel.app/.
 The accompanying research guide (in the parent directory) covers ten
 phases of a ternary computing project from theory to hardware. TritLogic
 implements phases 1–4 (logic, voltage thresholds in concept, gates),
-phase 5 (arithmetic), and has started on phase 6 (memory) with the DFF
-and the 3-trit register. The natural next steps are a wider addressable
-ternary RAM block (rest of phase 6) and phase 8 (ISA encoding fed into a
-simulated CPU built out of this canvas).
+phase 5 (arithmetic), and is well into phase 6 (memory) with the DFF, the
+3-trit register, and a 9-word addressable RAM block. The natural next
+steps are phase 7 (a CPU skeleton — ALU, register file, program counter)
+and phase 8 (ISA encoding fed into a simulated CPU built out of this
+canvas).
 
 ## License
 
