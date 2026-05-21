@@ -4675,7 +4675,9 @@ const EXAMPLES = {
         c('nti',  'NTI',    610, 150),
         c('sti',  'STI',    740, 150),
         c('alu',  'ALU',    610, 320),
-        c('b2',   'CONST',  470, 540, { value: 0 }),   // operand sign-extend
+        // One constant 0 — feeds the ALU operand's sign-extend trit, and
+        // ties off the instruction memory's write port (read-only IMEM).
+        c('zero', 'CONST',  430, 510, { value: 0 }),
         c('acc',  'REG3',   800, 330),
         c('wclk', 'WAVE',   60,  470, { name: 'clk',  trace: [] }),
         c('wacc', 'WAVE',   800, 480, { name: 'ACC0', trace: [] }),
@@ -4686,9 +4688,16 @@ const EXAMPLES = {
         w('nti', 'out', 'pc', 'jmp'),
         w('imem', 'q0', 'pc', 'j0'),
         w('imem', 'q1', 'pc', 'j1'),
-        // IMEM addressed by the PC
+        // IMEM addressed by the PC.  It is read-only instruction memory:
+        // clk is wired in, but the write port (we, d0..d2) is tied to 0,
+        // so the pre-loaded program is never overwritten.
         w('pc', 'p0', 'imem', 'a0'),
         w('pc', 'p1', 'imem', 'a1'),
+        w('clk', 'out', 'imem', 'clk'),
+        w('zero', 'out', 'imem', 'we'),
+        w('zero', 'out', 'imem', 'd0'),
+        w('zero', 'out', 'imem', 'd1'),
+        w('zero', 'out', 'imem', 'd2'),
         // Decoder: opcode → NTI (jmp) → STI (accWrite)
         w('imem', 'q2', 'nti', 'in'),
         w('nti', 'out', 'sti', 'in'),
@@ -4698,7 +4707,7 @@ const EXAMPLES = {
         w('acc', 'q2', 'alu', 'a2'),
         w('imem', 'q0', 'alu', 'b0'),
         w('imem', 'q1', 'alu', 'b1'),
-        w('b2', 'out', 'alu', 'b2'),
+        w('zero', 'out', 'alu', 'b2'),
         w('imem', 'q2', 'alu', 'op'),
         // ACC ← ALU result, clock, accWrite (load-enable)
         w('alu', 'r0', 'acc', 'd0'),
