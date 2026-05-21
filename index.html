@@ -69,6 +69,33 @@
                     font-size: 10px; font-weight: 600; }
   .pal-item .desc { color: var(--muted); font-size: 10px; margin-left: auto; }
 
+  /* Sliding on/off toggle, used for the right-click-delete option. */
+  .switch-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 8px 6px 8px; margin-bottom: 3px;
+    font-size: 10px; color: var(--muted); user-select: none;
+  }
+  .switch-row .txt { flex: 1; }
+  .switch {
+    position: relative; display: inline-block;
+    width: 30px; height: 16px; flex-shrink: 0; cursor: pointer;
+  }
+  .switch input {
+    position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer;
+  }
+  .switch .slider {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: #1a1d23; border: 1px solid var(--border);
+    transition: background .15s, border-color .15s;
+  }
+  .switch .slider::before {
+    content: ''; position: absolute; left: 2px; top: 2px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--muted); transition: transform .15s, background .15s;
+  }
+  .switch input:checked + .slider { background: var(--accent); border-color: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(14px); background: #fff; }
+
   main.canvas-wrap {
     position: relative; overflow: hidden; background: #14171c;
   }
@@ -281,6 +308,13 @@
   <div class="pal-item" data-tool="delete">
     <div class="icon">✕</div><div>Delete</div>
   </div>
+  <div class="switch-row">
+    <span class="txt">Right-click delete</span>
+    <label class="switch" title="When on, right-clicking a component or wire deletes it">
+      <input type="checkbox" id="rmb-delete-toggle" />
+      <span class="slider"></span>
+    </label>
+  </div>
 
   <h3>Sources</h3>
   <div class="pal-item" data-tool="place" data-type="INPUT">
@@ -367,6 +401,7 @@
     <li>To wire, click an output pin then an input pin.</li>
     <li>Drag on empty space to <b>pan the canvas</b>. <kbd>Shift</kbd>+drag rect-selects.</li>
     <li><kbd>Del</kbd> deletes. <kbd>Esc</kbd> cancels wiring. <kbd>Space</kbd>+drag also pans. Wheel zooms.</li>
+    <li>Right-click deletes the component/wire under the cursor — toggle it with <b>Right-click delete</b> in the palette.</li>
     <li><b>Step</b> advances one clock tick (latches flip-flops, ticks clocks).</li>
   </ul>
 
@@ -884,6 +919,7 @@ let tool = 'select';
 let placeType = null;
 let mouse = { x: 0, y: 0, wx: 0, wy: 0, down: false, spaceDown: false };
 let drag = null;             // { kind:'comp'|'pan'|'rect', startX, startY, ... }
+let rmbDelete = true;        // right-click deletes the comp/wire under the cursor
 let pendingWire = null;
 let hoverPin = null;
 let selection = new Set();   // Set of component IDs
@@ -2723,6 +2759,33 @@ function setTool(t, type = null) {
 }
 document.querySelectorAll('.pal-item').forEach(el => {
   el.addEventListener('click', () => setTool(el.dataset.tool, el.dataset.type || null));
+});
+
+// ---- right-click-to-delete -------------------------------------------------
+// When enabled (toggle in the palette), a right-click on the canvas removes
+// the component — or, failing that, the wire — under the cursor, and the
+// browser's native context menu is suppressed.  When disabled, the right
+// click falls through to the normal context menu.
+cv.addEventListener('contextmenu', (e) => {
+  if (!rmbDelete) return;
+  e.preventDefault();
+  const r = cv.getBoundingClientRect();
+  const w = screenToWorld(e.clientX - r.left, e.clientY - r.top);
+  const p = hitTestComp(w.x, w.y);
+  if (p) { deleteComp(p.id); return; }
+  const wr = hitTestWire(w.x, w.y);
+  if (wr) deleteWire(wr.id);
+});
+const rmbToggle = document.getElementById('rmb-delete-toggle');
+try {
+  if (localStorage.getItem('tritlogic.rmbDelete') === '0') rmbDelete = false;
+} catch (e) {}
+rmbToggle.checked = rmbDelete;
+rmbToggle.addEventListener('change', () => {
+  rmbDelete = rmbToggle.checked;
+  try { localStorage.setItem('tritlogic.rmbDelete', rmbDelete ? '1' : '0'); }
+  catch (e) {}
+  setStatus(`right-click delete ${rmbDelete ? 'enabled' : 'disabled'}`);
 });
 
 cv.addEventListener('mousemove', (e) => {
