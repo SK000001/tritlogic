@@ -3395,7 +3395,8 @@ document.getElementById('btn-reset').addEventListener('click', () => {
       if (c.type === 'DFF') { c.state.q = 0; c.state.clkPrev = 0; }
       else if (c.type === 'REG3') { c.state.q = [0, 0, 0]; c.state.clkPrev = 0; }
       else if (c.type === 'RAM') {
-        c.state.mem = Array.from({ length: RAM_WORDS }, () => [0, 0, 0]);
+        // Reset clears registers, not memory — RAM contents persist (so a
+        // program loaded into a RAM-as-instruction-memory survives Reset).
         c.state.clkPrev = 0;
       }
       else if (c.type === 'PC') { c.state.p = [-1, -1]; c.state.clkPrev = 0; }
@@ -3892,7 +3893,9 @@ const COMPONENT_INFO = {
       </ul>
       <p>The component face draws a live <b>memory map</b>: nine rows of three
       colour cells, one row per word, so storage can be watched as the
-      circuit runs. <b>Reset</b> clears every word to <code>[0, 0, 0]</code>.</p>
+      circuit runs. <b>Reset</b> does <em>not</em> clear the memory — like
+      real RAM, contents persist across a reset (only the clock-edge
+      tracking is cleared). Use <b>Clear</b> to wipe the whole circuit.</p>
       <h4>Where it leads</h4>
       <p>RAM is the addressable store a CPU reads instructions and data from.
       Phase 7 wires it to a program counter and an ALU to build the first
@@ -4639,6 +4642,70 @@ const EXAMPLES = {
         w('pc', 'p0', 'p0', 'in'),
         w('pc', 'p1', 'p1', 'in'),
         w('pc', 'p0', 'wp', 'in'),
+      ],
+    })),
+  },
+  'cpu': {
+    label: 'CPU — a single-cycle ternary processor',
+    build: () => buildExample((c, w) => ({
+      // The whole Phase 7 datapath wired up.  Press Play (or Step): each
+      // rising clock edge executes one instruction.  Watch the PC face
+      // count, the ACC (REG3) face hold the running total, and the IMEM
+      // memory map show the two-instruction program.
+      //
+      //   instruction word = [operand-low, operand-high, opcode]
+      //   opcode  0 = ADDI (ACC += operand) · +1 = MAXI · T = JMP
+      //
+      //   mem[0] = ADDI +1   [1, 0, 0]      ACC = ACC + 1
+      //   mem[1] = JMP  0    [T, T, T]      jump back to word 0
+      //
+      // The loop adds 1 to the accumulator forever.
+      comps: [
+        c('clk',  'CLOCK',  60,  340, { value: -1, mode: 'bi' }),
+        c('pc',   'PC',     190, 290),
+        c('imem', 'RAM',    360, 220, { mem: [
+          [1, 0, 0], [-1, -1, -1],
+          [0, 0, 0], [0, 0, 0], [0, 0, 0],
+          [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+        ] }),
+        // Decoder — two inverters off the opcode trit (imem q2).
+        c('nti',  'NTI',    610, 150),
+        c('sti',  'STI',    740, 150),
+        c('alu',  'ALU',    610, 320),
+        c('b2',   'CONST',  470, 540, { value: 0 }),   // operand sign-extend
+        c('acc',  'REG3',   800, 330),
+        c('wclk', 'WAVE',   60,  470, { name: 'clk',  trace: [] }),
+        c('wacc', 'WAVE',   800, 480, { name: 'ACC0', trace: [] }),
+      ],
+      wires: [
+        // PC ← clock, decoder jmp, jump target (the operand)
+        w('clk', 'out', 'pc', 'clk'),
+        w('nti', 'out', 'pc', 'jmp'),
+        w('imem', 'q0', 'pc', 'j0'),
+        w('imem', 'q1', 'pc', 'j1'),
+        // IMEM addressed by the PC
+        w('pc', 'p0', 'imem', 'a0'),
+        w('pc', 'p1', 'imem', 'a1'),
+        // Decoder: opcode → NTI (jmp) → STI (accWrite)
+        w('imem', 'q2', 'nti', 'in'),
+        w('nti', 'out', 'sti', 'in'),
+        // ALU: a = ACC, b = operand (high trit sign-extended 0), op = opcode
+        w('acc', 'q0', 'alu', 'a0'),
+        w('acc', 'q1', 'alu', 'a1'),
+        w('acc', 'q2', 'alu', 'a2'),
+        w('imem', 'q0', 'alu', 'b0'),
+        w('imem', 'q1', 'alu', 'b1'),
+        w('b2', 'out', 'alu', 'b2'),
+        w('imem', 'q2', 'alu', 'op'),
+        // ACC ← ALU result, clock, accWrite (load-enable)
+        w('alu', 'r0', 'acc', 'd0'),
+        w('alu', 'r1', 'acc', 'd1'),
+        w('alu', 'r2', 'acc', 'd2'),
+        w('clk', 'out', 'acc', 'clk'),
+        w('sti', 'out', 'acc', 'ld'),
+        // Probes
+        w('clk', 'out', 'wclk', 'in'),
+        w('acc', 'q0', 'wacc', 'in'),
       ],
     })),
   },

@@ -16,9 +16,9 @@ the way you'd expect.
 ## What's in here
 
 - A canvas with grid snap, pan, zoom, rect-select, drag-to-move.
-- Fourteen preset example circuits — pick one from the dropdown in the
-  header (including RAM store-and-read-back, ALU add, MUX routing, and
-  PC counting demos).
+- Fifteen preset example circuits — pick one from the dropdown in the
+  header (including RAM store-and-read-back, ALU add, MUX routing, PC
+  counting, and a complete single-cycle CPU running a small program).
 - Components: INPUT (cycle T/0/+1), CONST, TRYTE_IN, CLOCK (tri-state
   or two-state cycle), OUTPUT probe, TRYTE_OUT, WAVE recorder, the three
   inverters (STI, PTI, NTI), MIN, MAX, full-trit ADDER, a ternary 3:1
@@ -89,10 +89,11 @@ The accompanying research guide (in the parent directory) covers ten
 phases of a ternary computing project from theory to hardware. TritLogic
 implements phases 1–4 (logic, voltage thresholds in concept, gates),
 phase 5 (arithmetic), and phase 6 (memory — the DFF, the 3-trit register,
-the RAM block). Phase 7 (a CPU skeleton) is underway: the datapath is a
-single-cycle accumulator machine, and its ALU, MUX, and program counter
-are built. Still to come are the instruction decoder and the assembled
-CPU, then phase 8 (ISA encoding).
+the RAM block). Phase 7 (a CPU skeleton) is essentially done: a
+single-cycle accumulator processor — PC, RAM as instruction memory, a
+two-inverter decoder, ALU, and accumulator — is wired up as the "CPU"
+preset example and runs a small program. Next is phase 8 (a fuller ISA
+encoding) built on this datapath.
 
 ## License
 
