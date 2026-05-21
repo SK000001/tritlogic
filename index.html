@@ -837,7 +837,7 @@ function makeInverter(label, fn) {
     draw: (c) => drawInverterShape(c, label),
   };
 }
-TYPES.STI = makeInverter('STI', a => -a);
+TYPES.STI = makeInverter('STI', a => -a || 0);   // `|| 0` canonicalises -0 → 0
 TYPES.PTI = makeInverter('PTI', a => a === 1 ? -1 : 1);   // T,0 → 1 ; 1 → T
 TYPES.NTI = makeInverter('NTI', a => a === -1 ? 1 : -1);  // T → 1 ; 0,1 → T
 
@@ -4219,7 +4219,7 @@ test('Negation: NEG of every value matches -x', () => {
   for (let n = -50; n <= 50; n++) {
     const trits = intToTrits(n, 6);
     const negated = trits.map(t => -t);
-    assertEq(tritsToInt(negated), -n, `NEG(${n}):`);
+    assertEq(tritsToInt(negated), -n || 0, `NEG(${n}):`);
   }
 });
 
