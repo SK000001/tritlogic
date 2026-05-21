@@ -16,17 +16,17 @@ the way you'd expect.
 ## What's in here
 
 - A canvas with grid snap, pan, zoom, rect-select, drag-to-move.
-- Thirteen preset example circuits — pick one from the dropdown in the
-  header (including RAM store-and-read-back, ALU add, and MUX routing
-  demos).
+- Fourteen preset example circuits — pick one from the dropdown in the
+  header (including RAM store-and-read-back, ALU add, MUX routing, and
+  PC counting demos).
 - Components: INPUT (cycle T/0/+1), CONST, TRYTE_IN, CLOCK (tri-state
   or two-state cycle), OUTPUT probe, TRYTE_OUT, WAVE recorder, the three
   inverters (STI, PTI, NTI), MIN, MAX, full-trit ADDER, a ternary 3:1
   MUX, a D-flip-flop, a 3-trit register (REG3 — three DFFs on a shared
   clock with a load-enable line), a 9-word × 3-trit RAM block (two-trit
-  address,
-  asynchronous read, write-enabled synchronous write), and an ALU
-  (3-trit-word arithmetic/logic unit — op-select picks ADD, MIN, or MAX).
+  address, asynchronous read, write-enabled synchronous write), an ALU
+  (3-trit-word arithmetic/logic unit — op-select picks ADD, MIN, or MAX),
+  and a PC (2-trit program counter — increments or jumps on a clock edge).
 - A live combinational simulator (fixed-point iteration) plus a four-phase
   step engine for clocks and flip-flops.
 - Truth-table generator over up to 7 swept inputs (2,187 rows).
@@ -90,9 +90,9 @@ phases of a ternary computing project from theory to hardware. TritLogic
 implements phases 1–4 (logic, voltage thresholds in concept, gates),
 phase 5 (arithmetic), and phase 6 (memory — the DFF, the 3-trit register,
 the RAM block). Phase 7 (a CPU skeleton) is underway: the datapath is a
-single-cycle accumulator machine, and its ALU is the first piece built.
-Still to come are the program counter, instruction decoder, and the
-assembled CPU, then phase 8 (ISA encoding).
+single-cycle accumulator machine, and its ALU, MUX, and program counter
+are built. Still to come are the instruction decoder and the assembled
+CPU, then phase 8 (ISA encoding).
 
 ## License
 
