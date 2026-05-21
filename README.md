@@ -16,7 +16,8 @@ the way you'd expect.
 ## What's in here
 
 - A canvas with grid snap, pan, zoom, rect-select, drag-to-move.
-- Ten preset example circuits — pick one from the dropdown in the header.
+- Eleven preset example circuits — pick one from the dropdown in the
+  header (including a RAM store-and-read-back demo).
 - Components: INPUT (cycle T/0/+1), CONST, TRYTE_IN, CLOCK (tri-state
   or two-state cycle), OUTPUT probe, TRYTE_OUT, WAVE recorder, the three
   inverters (STI, PTI, NTI), MIN, MAX, full-trit ADDER, a D-flip-flop,

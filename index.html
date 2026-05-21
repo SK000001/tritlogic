@@ -4215,6 +4215,46 @@ const EXAMPLES = {
       ],
     })),
   },
+  'ram-store': {
+    label: 'RAM — store a word and read it back',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        // Address: a0 = 0, a1 = 0.  In balanced ternary the zero address
+        // selects the MIDDLE word — index (0+1) + (0+1)*3 = 4 of 0..8.
+        c('a0',  'INPUT',  80,  70,  { value:  0, name: 'a0' }),
+        c('a1',  'INPUT',  80,  130, { value:  0, name: 'a1' }),
+        // The trit pattern to store: (+1, T, +1).
+        c('d0',  'INPUT',  80,  200, { value:  1, name: 'd0' }),
+        c('d1',  'INPUT',  80,  260, { value: -1, name: 'd1' }),
+        c('d2',  'INPUT',  80,  320, { value:  1, name: 'd2' }),
+        // Write-enable held high; clock free-running.  Step (or Play) the
+        // circuit: on the first rising clock edge the RAM latches d0..d2
+        // into word 4, and the q outputs — an asynchronous read — show it.
+        c('we',  'INPUT',  80,  390, { value:  1, name: 'we' }),
+        c('clk', 'CLOCK',  80,  450, { value: -1, mode: 'tri' }),
+        c('ram', 'RAM',    300, 170),
+        c('q0',  'OUTPUT', 540, 200, { name: 'q0' }),
+        c('q1',  'OUTPUT', 540, 260, { name: 'q1' }),
+        c('q2',  'OUTPUT', 540, 320, { name: 'q2' }),
+        c('wc',  'WAVE',   540, 400, { name: 'clk', trace: [] }),
+        c('wq',  'WAVE',   540, 460, { name: 'q0',  trace: [] }),
+      ],
+      wires: [
+        w('a0',  'out', 'ram', 'a0'),
+        w('a1',  'out', 'ram', 'a1'),
+        w('d0',  'out', 'ram', 'd0'),
+        w('d1',  'out', 'ram', 'd1'),
+        w('d2',  'out', 'ram', 'd2'),
+        w('we',  'out', 'ram', 'we'),
+        w('clk', 'out', 'ram', 'clk'),
+        w('ram', 'q0',  'q0',  'in'),
+        w('ram', 'q1',  'q1',  'in'),
+        w('ram', 'q2',  'q2',  'in'),
+        w('clk', 'out', 'wc',  'in'),
+        w('ram', 'q0',  'wq',  'in'),
+      ],
+    })),
+  },
 };
 
 function loadExampleNamed(name) {
@@ -4486,6 +4526,25 @@ test('RAM suppresses a write when the address is floating', () => {
   def.latch(ram, { a0: null, a1: 0, d0: 1, d1: 1, d2: 1, we: 1, clk:  1 });
   for (let i = 0; i < 9; i++) {
     assertDeepEq(ram.state.mem[i], [0, 0, 0], `word ${i} unchanged:`);
+  }
+});
+
+// ---- preset examples ----
+test('every preset example builds with wires connecting real in/out pins', () => {
+  for (const key in EXAMPLES) {
+    const { comps, wires } = EXAMPLES[key].build();
+    const byId = {};
+    for (const c of comps) byId[c.id] = c;
+    for (const wr of wires) {
+      const fc = byId[wr.fromId], tc = byId[wr.toId];
+      if (!fc || !tc) throw new Error(`${key} wire #${wr.id}: missing component`);
+      const fpin = TYPES[fc.type] && TYPES[fc.type].pins[wr.fromPort];
+      const tpin = TYPES[tc.type] && TYPES[tc.type].pins[wr.toPort];
+      if (!fpin || fpin.kind !== 'out')
+        throw new Error(`${key} wire #${wr.id}: ${fc.type}.${wr.fromPort} is not an output pin`);
+      if (!tpin || tpin.kind !== 'in')
+        throw new Error(`${key} wire #${wr.id}: ${tc.type}.${wr.toPort} is not an input pin`);
+    }
   }
 });
 
