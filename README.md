@@ -29,6 +29,9 @@ the way you'd expect.
   block with named pins.
 - Waveform panel that records every probe on each clock step, displayed
   as three-level step plots.
+- An in-app component reference (**Info** button) — an encyclopedia page
+  for every component, with pins and truth tables generated live from the
+  simulator. Select a component first to jump straight to its page.
 - Built-in self-tests: hit the **Tests** button — test groups covering
   conversions, gate truth tables, the full adder, ripple addition,
   negation, DFF edge semantics, and REG3 register load/hold behaviour.

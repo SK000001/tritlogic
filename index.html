@@ -175,6 +175,50 @@
   .modal .sweep-list h4 { margin: 0 0 6px 0; font-size: 11px;
                           color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
   .modal .sweep-list label { display: block; font-size: 12px; padding: 2px 0; cursor: pointer; }
+
+  /* Component reference / encyclopedia */
+  .info-layout { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }
+  .info-list {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 5px; padding: 6px; max-height: 66vh; overflow-y: auto;
+  }
+  .info-list .cat {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin: 9px 4px 3px;
+  }
+  .info-list .cat:first-child { margin-top: 2px; }
+  .info-entry {
+    padding: 4px 8px; border-radius: 4px; cursor: pointer;
+    font-size: 12px; user-select: none;
+  }
+  .info-entry:hover { background: var(--panel); }
+  .info-entry.active { background: var(--accent); color: #fff; }
+  .info-detail {
+    max-height: 66vh; overflow-y: auto; padding-right: 8px;
+    font-size: 13px; line-height: 1.55;
+  }
+  .info-detail h3 { margin: 0; font-size: 17px; }
+  .info-detail h4 {
+    margin: 15px 0 4px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--accent);
+  }
+  .info-detail .tagline { color: var(--muted); font-size: 12px; margin: 2px 0 8px; }
+  .info-detail p { margin: 6px 0; }
+  .info-detail ul { margin: 6px 0; padding-left: 20px; }
+  .info-detail li { margin: 3px 0; }
+  .info-detail code {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 3px; padding: 0 4px; font-size: 12px;
+  }
+  .info-tt { border-collapse: collapse; margin: 4px 0; font-family: monospace; }
+  .info-tt th, .info-tt td {
+    border: 1px solid var(--border); padding: 2px 10px; font-size: 12px; text-align: center;
+  }
+  .info-tt th { background: var(--panel-2); color: var(--muted); font-weight: 600; }
+  .info-tt td.trit-T { color: var(--t-neg);  font-weight: 600; }
+  .info-tt td.trit-0 { color: var(--t-zero); }
+  .info-tt td.trit-P { color: var(--t-pos);  font-weight: 600; }
+  .info-pintbl td:first-child { font-weight: 600; color: var(--text); }
   .tt-result table { border-collapse: collapse; width: 100%; font-family: monospace; }
   .tt-result th, .tt-result td {
     border: 1px solid var(--border); padding: 3px 8px; font-size: 12px; text-align: center;
@@ -286,6 +330,7 @@
   <button id="btn-gate" title="Define a new gate from a truth table">Build Gate</button>
   <button id="btn-wave" title="Toggle waveform panel">Wave</button>
   <button id="btn-tests" title="Run the built-in self-test suite">Tests</button>
+  <button id="btn-info" title="Component reference — select a component first to jump to its page">Info</button>
   <button id="btn-crt" title="Toggle retro CRT theme">CRT</button>
   <span class="spacer"></span>
   <select id="example-select" title="Load a preset circuit"
@@ -403,6 +448,7 @@
     <li><kbd>Del</kbd> deletes. <kbd>Esc</kbd> cancels wiring. <kbd>Space</kbd>+drag also pans. Wheel zooms.</li>
     <li>Right-click deletes the component/wire under the cursor — toggle it with <b>Right-click delete</b> in the palette.</li>
     <li><b>Step</b> advances one clock tick (latches flip-flops, ticks clocks).</li>
+    <li><b>Info</b> opens the component reference — select a component first to jump straight to its page.</li>
   </ul>
 
   <h3>Simulator</h3>
@@ -509,6 +555,17 @@
     <div class="inspector-form" id="pack-form"></div>
     <div style="margin-top: 10px;">
       <button class="btn" id="pack-confirm" style="border-color: var(--accent);">Pack</button>
+    </div>
+  </div>
+</div>
+
+<!-- Component reference / encyclopedia modal -->
+<div class="modal-bg" id="info-modal">
+  <div class="modal" style="min-width: 700px;">
+    <h2>Component reference <button class="btn close" id="info-close">close</button></h2>
+    <div class="info-layout">
+      <div class="info-list" id="info-list"></div>
+      <div class="info-detail" id="info-detail"></div>
     </div>
   </div>
 </div>
@@ -3086,6 +3143,510 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 document.querySelectorAll('.modal-bg').forEach(bg => {
   bg.addEventListener('click', (e) => { if (e.target === bg) bg.classList.remove('open'); });
 });
+
+// ============================================================================
+//  COMPONENT REFERENCE  (Info button)
+// ============================================================================
+//
+//  An in-app encyclopedia of every built-in component.  The Info button
+//  opens it; if a component is selected on the canvas it opens straight to
+//  that component's page, otherwise it shows the intro and the full list.
+
+// Gate-like types whose behaviour is a pure function of their inputs — for
+// these we render a truth table generated live from the simulator's own
+// eval(), so the docs can never drift from real behaviour.
+const INFO_GATE_TYPES = ['STI', 'PTI', 'NTI', 'MIN', 'MAX', 'ADDER'];
+
+// Order of the left-hand list.  Each key is either a real TYPES name or one
+// of the synthetic keys (_intro, SUBCIRCUIT, CUSTOMGATE).
+const INFO_CATEGORIES = [
+  ['Start here', ['_intro']],
+  ['Sources',    ['INPUT', 'CONST', 'TRYTE_IN', 'CLOCK']],
+  ['Sinks',      ['OUTPUT', 'TRYTE_OUT', 'WAVE']],
+  ['Inverters',  ['STI', 'PTI', 'NTI']],
+  ['Gates',      ['MIN', 'MAX', 'ADDER']],
+  ['Sequential', ['DFF', 'REG3']],
+  ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
+];
+
+const COMPONENT_INFO = {
+  _intro: {
+    name: 'Getting started',
+    tagline: 'Ternary basics and how the simulator runs',
+    body: `
+      <p>This is the in-app reference for every built-in TritLogic component.
+      Pick an entry on the left to read how it works. If you select a
+      component on the canvas <em>before</em> pressing <b>Info</b>, this
+      window opens straight to that component's page.</p>
+      <h4>Balanced ternary in 30 seconds</h4>
+      <p>Every wire carries one <em>trit</em> instead of a bit. A trit has
+      three values:</p>
+      <ul>
+        <li><code>T</code> = −1 — drawn red</li>
+        <li><code>0</code> = 0 — drawn grey</li>
+        <li><code>1</code> = +1 — drawn green</li>
+      </ul>
+      <p>A fourth value, <code>null</code> (dark grey), means the pin is
+      <em>floating</em> — undriven. null flows through logic the way you would
+      expect: most gates emit null if any input is null.</p>
+      <h4>How the simulator runs</h4>
+      <p>Combinational logic is solved by <b>fixed-point iteration</b>: every
+      component is re-evaluated over and over until no wire value changes (or
+      300 passes elapse, which flags an oscillation).</p>
+      <p>Clocked parts use a <b>four-phase Step</b>: tick the clocks → settle
+      the logic → latch the flip-flops on the rising edge → settle again. That
+      ordering is why a flip-flop sees the new clock level before it decides
+      whether to latch.</p>
+      <h4>Reading a component page</h4>
+      <p>Each page lists the component's <b>pins</b> (read live from the
+      simulator), its <b>working mechanism</b>, any internal <b>state</b> it
+      keeps, and — for gates — a <b>truth table generated live</b> by running
+      the simulator's evaluation function.</p>`,
+  },
+
+  INPUT: {
+    name: 'INPUT', tagline: 'Manual signal source',
+    body: `
+      <p>A manual signal source — the trit you set by hand. INPUT is how you
+      feed stimulus into a circuit.</p>
+      <h4>Working mechanism</h4>
+      <p>INPUT stores a single trit. Its one output pin emits that stored
+      value on every simulation pass; it has no inputs and never changes on
+      its own.</p>
+      <p>With the <b>Select</b> tool active, <b>clicking the component on the
+      canvas</b> cycles the stored value <code>T → 0 → +1 → T</code>. You can
+      also set it precisely in the inspector.</p>
+      <h4>Internal state</h4>
+      <ul>
+        <li><code>value</code> — the stored trit (−1, 0, or +1).</li>
+        <li><code>name</code> — an optional label. When you <b>Pack</b> a
+        selection into a subcircuit, each INPUT becomes an input pin of the
+        block and this name becomes the pin name.</li>
+      </ul>
+      <h4>Tips</h4>
+      <p>Use INPUT for signals you want to poke during simulation; use CONST
+      for values that should never change.</p>`,
+  },
+
+  CONST: {
+    name: 'CONST', tagline: 'Fixed signal source',
+    body: `
+      <p>A fixed signal source. Like INPUT, but its value is not meant to
+      change while you experiment.</p>
+      <h4>Working mechanism</h4>
+      <p>CONST emits one constant trit from its single output pin. It defaults
+      to <code>+1</code>. Unlike INPUT it does not cycle when clicked on the
+      canvas — set the value in the inspector.</p>
+      <h4>Internal state</h4>
+      <ul><li><code>value</code> — the constant trit.</li></ul>
+      <h4>Tips</h4>
+      <p>Handy for tying a gate input to a known level — for example a
+      permanent carry-in of <code>0</code> on the least-significant ADDER of a
+      ripple chain.</p>`,
+  },
+
+  TRYTE_IN: {
+    name: 'TRYTE_IN', tagline: '6-trit word source',
+    body: `
+      <p>A whole ternary word as a source. A <em>tryte</em> is the ternary
+      cousin of a byte; here it is six trits wide.</p>
+      <h4>Working mechanism</h4>
+      <p>TRYTE_IN holds one signed integer and breaks it into six trits across
+      six output pins, <code>t0</code> through <code>t5</code>.
+      <code>t0</code> is the <b>least-significant</b> trit.</p>
+      <p>Six balanced-ternary trits represent 3<sup>6</sup> = 729 distinct
+      values, so the range is <b>−364 … +364</b>. Values outside that range
+      are clamped.</p>
+      <h4>Setting the value</h4>
+      <p>The inspector accepts either a <b>decimal</b> number or a
+      <b>balanced-ternary string</b> (most-significant trit first), using the
+      digits <code>T</code>, <code>0</code>, and <code>1</code>.</p>
+      <h4>Internal state</h4>
+      <ul>
+        <li><code>value</code> — the signed integer being represented.</li>
+        <li><code>name</code> — optional label for subcircuit packing.</li>
+      </ul>
+      <h4>Tips</h4>
+      <p>Wire <code>t0..t5</code> into a row of ADDERs for word-wide
+      arithmetic; pair it with TRYTE_OUT to read the result back as a
+      number.</p>`,
+  },
+
+  CLOCK: {
+    name: 'CLOCK', tagline: 'Autonomous oscillator',
+    body: `
+      <p>An autonomous oscillator — the heartbeat that drives every sequential
+      element.</p>
+      <h4>Working mechanism</h4>
+      <p>CLOCK emits a trit from its one output pin and advances that trit by
+      one position <b>every time you press Step</b> (or on each tick of Play).
+      It does <em>not</em> free-run inside the combinational solver — only the
+      Step engine moves it.</p>
+      <h4>Two cycle modes</h4>
+      <ul>
+        <li><b>tri</b> (default): <code>T → 0 → +1 → T → …</code> — visits all
+        three ternary states; one full cycle every 3 ticks.</li>
+        <li><b>bi</b>: <code>T ↔ +1</code> — skips the middle state for
+        classic two-level edge timing; one full cycle every 2 ticks.</li>
+      </ul>
+      <p>In <em>both</em> modes there is exactly one rising transition into
+      <code>+1</code> per cycle, so a DFF or REG3 on this clock latches once
+      per cycle either way.</p>
+      <h4>Internal state</h4>
+      <ul>
+        <li><code>value</code> — the current output trit.</li>
+        <li><code>mode</code> — <code>'tri'</code> or <code>'bi'</code>.</li>
+      </ul>
+      <p><b>Reset</b> returns the clock to <code>T</code>.</p>`,
+  },
+
+  OUTPUT: {
+    name: 'OUTPUT', tagline: 'Signal probe / display',
+    body: `
+      <p>A probe — a sink that displays whatever trit reaches it.</p>
+      <h4>Working mechanism</h4>
+      <p>OUTPUT has a single input pin and no output. The simulator does not
+      evaluate it as logic; it simply shows the value on its input pin,
+      colour-coded by trit, so you can read a circuit's result at a glance.</p>
+      <h4>Internal state</h4>
+      <ul><li><code>name</code> — optional label. When you <b>Pack</b> a
+      selection, each OUTPUT becomes an <em>output pin</em> of the resulting
+      subcircuit and this name becomes the pin name.</li></ul>
+      <h4>Tips</h4>
+      <p>OUTPUT shows the <em>settled</em> value. To watch a value evolve over
+      clock ticks, use WAVE instead.</p>`,
+  },
+
+  TRYTE_OUT: {
+    name: 'TRYTE_OUT', tagline: '6-trit word display',
+    body: `
+      <p>A whole-word display — the sink counterpart of TRYTE_IN.</p>
+      <h4>Working mechanism</h4>
+      <p>TRYTE_OUT has six input pins, <code>t0</code> (least-significant)
+      through <code>t5</code>. It assembles those six trits back into a signed
+      integer and shows it, so you can read word-wide arithmetic results as a
+      number.</p>
+      <h4>Tips</h4>
+      <p>Feed it the <code>sum</code> outputs of a six-ADDER ripple chain to
+      read the total. An undriven pin counts as <code>0</code> in the
+      displayed value.</p>`,
+  },
+
+  WAVE: {
+    name: 'WAVE', tagline: 'Waveform recorder',
+    body: `
+      <p>A waveform recorder — a probe with a memory.</p>
+      <h4>Working mechanism</h4>
+      <p>WAVE is a <em>passive observer</em>. It has one input pin and no
+      output, and it takes no part in combinational logic. Once per
+      <b>Step</b>, after the final settle, it samples the trit on its input
+      and appends it to a trace buffer.</p>
+      <p>The buffer keeps the most recent <b>256</b> samples; older samples
+      drop off the front. Open the <b>Wave</b> panel to see every WAVE probe
+      drawn as a three-level step plot on a shared time axis.</p>
+      <h4>Internal state</h4>
+      <ul>
+        <li><code>trace</code> — the array of recorded trits.</li>
+        <li><code>name</code> — label shown next to the trace.</li>
+      </ul>
+      <p><b>Reset</b> empties the trace.</p>`,
+  },
+
+  STI: {
+    name: 'STI', tagline: 'Standard ternary inverter',
+    body: `
+      <p>The Standard Ternary Inverter — the ternary analogue of a NOT gate.</p>
+      <h4>Working mechanism</h4>
+      <p>STI outputs the <b>negation</b> of its input: <code>out = −in</code>.
+      It swaps <code>T</code> and <code>+1</code> and leaves <code>0</code>
+      untouched. A <code>null</code> (floating) input gives a <code>null</code>
+      output.</p>
+      <p>This is the most natural inverter in balanced ternary, because
+      negating a balanced-ternary number is simply negating every trit.</p>
+      <h4>The three inverters</h4>
+      <p>STI, PTI, and NTI are three different one-input functions. Together
+      with MIN and MAX they form a <b>functionally complete</b> set — any
+      ternary logic function can be built from them.</p>`,
+  },
+
+  PTI: {
+    name: 'PTI', tagline: 'Positive ternary inverter',
+    body: `
+      <p>The Positive Ternary Inverter — one of the three standard ternary
+      inverters.</p>
+      <h4>Working mechanism</h4>
+      <p>PTI sends every <em>non-positive</em> input to <code>+1</code> and the
+      positive input to <code>T</code>:</p>
+      <ul>
+        <li><code>T → +1</code></li>
+        <li><code>0 → +1</code></li>
+        <li><code>+1 → T</code></li>
+      </ul>
+      <p>Read it as the question "is the input <em>not</em> <code>+1</code>?",
+      answered in ternary. With NTI and STI it lets you decompose any ternary
+      function.</p>`,
+  },
+
+  NTI: {
+    name: 'NTI', tagline: 'Negative ternary inverter',
+    body: `
+      <p>The Negative Ternary Inverter — one of the three standard ternary
+      inverters.</p>
+      <h4>Working mechanism</h4>
+      <p>NTI sends only the negative input to <code>+1</code>; everything else
+      goes to <code>T</code>:</p>
+      <ul>
+        <li><code>T → +1</code></li>
+        <li><code>0 → T</code></li>
+        <li><code>+1 → T</code></li>
+      </ul>
+      <p>Read it as the question "is the input <code>T</code>?", answered in
+      ternary. It is the mirror image of PTI.</p>`,
+  },
+
+  MIN: {
+    name: 'MIN', tagline: 'Ternary AND (minimum)',
+    body: `
+      <p>Ternary AND — outputs the <em>lesser</em> of its two inputs.</p>
+      <h4>Working mechanism</h4>
+      <p>With the three states ordered <code>T &lt; 0 &lt; +1</code>, MIN
+      returns <code>min(a, b)</code>. If either input is <code>null</code> the
+      output is <code>null</code>.</p>
+      <p>MIN generalises the Boolean AND gate: restricted to the two values
+      <code>T</code> and <code>+1</code> it behaves exactly like AND, with
+      <code>T</code> playing the role of "false".</p>
+      <h4>Why it matters</h4>
+      <p>MIN and MAX are the two fundamental ternary gates. Together with the
+      inverters they can express every ternary function.</p>`,
+  },
+
+  MAX: {
+    name: 'MAX', tagline: 'Ternary OR (maximum)',
+    body: `
+      <p>Ternary OR — outputs the <em>greater</em> of its two inputs.</p>
+      <h4>Working mechanism</h4>
+      <p>With the states ordered <code>T &lt; 0 &lt; +1</code>, MAX returns
+      <code>max(a, b)</code>. A <code>null</code> on either input gives a
+      <code>null</code> output.</p>
+      <p>MAX generalises the Boolean OR gate: restricted to <code>T</code> and
+      <code>+1</code> it behaves exactly like OR.</p>`,
+  },
+
+  ADDER: {
+    name: 'ADDER', tagline: 'Full single-trit adder',
+    body: `
+      <p>A full single-trit adder — the arithmetic core of the simulator.</p>
+      <h4>Working mechanism</h4>
+      <p>ADDER takes three trits — <code>a</code>, <code>b</code>, and a
+      carry-in <code>cin</code> — and adds them. The arithmetic sum lies
+      between −3 and +3, which a single trit cannot hold, so the result is
+      split across two output trits:</p>
+      <p style="text-align:center"><code>a + b + cin = 3·cout + sum</code></p>
+      <p>Both <code>sum</code> and <code>cout</code> are themselves in
+      {<code>T</code>, <code>0</code>, <code>+1</code>}. If any input is
+      <code>null</code>, both outputs are <code>null</code>.</p>
+      <h4>Building wider adders</h4>
+      <p>Chain adders into a <b>ripple-carry</b> array: wire each stage's
+      <code>cout</code> to the next stage's <code>cin</code>, feed the
+      least-significant <code>cin</code> with <code>0</code>, and you have an
+      N-trit adder. Six of them add two trytes.</p>
+      <p>The full 27-row truth table below is generated live by the
+      simulator.</p>`,
+  },
+
+  DFF: {
+    name: 'DFF', tagline: 'D flip-flop — 1-trit memory',
+    body: `
+      <p>The D flip-flop — the one-trit memory cell, and the simplest
+      sequential component.</p>
+      <h4>Working mechanism</h4>
+      <p>DFF has a data input <code>d</code>, a clock input <code>clk</code>,
+      and an output <code>q</code> that always shows the stored trit.</p>
+      <p>It is <b>edge-triggered</b>. On the <em>rising edge</em> of the clock
+      — the moment the previous clk value was not <code>+1</code> and the
+      current value is <code>+1</code> — it copies <code>d</code> into storage.
+      At every other time, including a clock that simply sits at
+      <code>+1</code>, it holds.</p>
+      <h4>When latching happens</h4>
+      <p>The store is updated only in the <b>latch phase</b> of a Step, never
+      during a combinational settle. That separation is what makes feedback
+      loops through a flip-flop behave: the rest of the circuit sees a stable
+      <code>q</code> while logic settles, and <code>q</code> changes only on
+      the edge.</p>
+      <h4>Internal state</h4>
+      <ul>
+        <li><code>q</code> — the stored trit (also the output).</li>
+        <li><code>clkPrev</code> — the clock value seen on the previous tick,
+        used to detect the rising edge.</li>
+      </ul>
+      <p><b>Reset</b> sets <code>q = 0</code>.</p>`,
+  },
+
+  REG3: {
+    name: 'REG3', tagline: '3-trit register',
+    body: `
+      <p>A 3-trit register — three D flip-flops sharing one clock, with a
+      load-enable line. The smallest multi-trit memory in TritLogic.</p>
+      <h4>Working mechanism</h4>
+      <p>REG3 has three data inputs <code>d0..d2</code>, a clock
+      <code>clk</code>, a load-enable <code>ld</code>, and three outputs
+      <code>q0..q2</code> that always show the stored trits.</p>
+      <p>On the <b>rising edge</b> of <code>clk</code> (the same edge rule as
+      the DFF) the register checks <code>ld</code>:</p>
+      <ul>
+        <li><code>ld = +1</code> — <b>load</b>: <code>d0..d2</code> are copied
+        into storage.</li>
+        <li><code>ld = 0</code>, <code>T</code>, or floating — <b>hold</b>:
+        the stored trits pass through the edge unchanged.</li>
+      </ul>
+      <p>The load-enable is what lets many registers share one clock yet
+      update independently — only the ones whose <code>ld</code> is asserted
+      change.</p>
+      <h4>Internal state</h4>
+      <ul>
+        <li><code>q</code> — an array of three stored trits,
+        <code>[q0, q1, q2]</code>.</li>
+        <li><code>clkPrev</code> — previous clock value, for edge
+        detection.</li>
+      </ul>
+      <p><b>Reset</b> clears the register to <code>[0, 0, 0]</code>.</p>
+      <h4>Where it leads</h4>
+      <p>REG3 is the first phase-6 (memory) component. A wider addressable RAM
+      block and a CPU register file are built from registers like this one.</p>`,
+  },
+
+  SUBCIRCUIT: {
+    name: 'Subcircuits', tagline: 'Packed reusable blocks',
+    body: `
+      <p>A subcircuit is a circuit you have <b>packed</b> into a single
+      reusable block — TritLogic's mechanism for hierarchical design.</p>
+      <h4>How to make one</h4>
+      <p>Select a group of components, press <b>Pack ▢</b>, and give the block
+      a name. Every <b>INPUT</b> in the selection becomes an input pin of the
+      block; every <b>OUTPUT</b> becomes an output pin. Pin names come from
+      the <code>name</code> field of those INPUT/OUTPUT components.</p>
+      <h4>Working mechanism</h4>
+      <p>A subcircuit <em>instance</em> contains a full copy of the inner
+      circuit. When the simulator evaluates it, it drives the inner INPUTs
+      from the instance's input pins, settles the inner circuit recursively,
+      and reads the inner OUTPUTs back out — clocks and flip-flops inside are
+      stepped along with the rest of the design.</p>
+      <h4>Limitations</h4>
+      <p>Subcircuits are not editable in place: to change one, build a new
+      version and re-pack. Existing instances of the old definition keep
+      working.</p>`,
+  },
+
+  CUSTOMGATE: {
+    name: 'Custom gates', tagline: 'Table-defined behavioural gates',
+    body: `
+      <p>A custom gate is a <b>behavioural</b> component you define by filling
+      in a truth table, rather than by drawing an internal circuit.</p>
+      <h4>How to make one</h4>
+      <p>Press <b>Build Gate</b>, choose 1–3 inputs, and click the
+      truth-table cells to cycle each output through
+      <code>T → 0 → +1</code>. Name it and add it to the library; it then
+      appears in the palette like any built-in gate.</p>
+      <h4>Working mechanism</h4>
+      <p>The simulator evaluates a custom gate by <b>table lookup</b>: it reads
+      the input trits, finds the matching row, and returns the stored output.
+      There is no internal network of MIN/MAX/inverter primitives — the table
+      <em>is</em> the definition. A <code>null</code> on any input yields a
+      <code>null</code> output.</p>
+      <h4>Tips</h4>
+      <p>Custom gates are ideal for capturing a ternary function you have
+      worked out on paper, without wiring up the primitives every time.</p>`,
+  },
+};
+
+// Pin table read straight from the live TYPES definition.
+function infoPinsTable(typeName) {
+  const def = TYPES[typeName];
+  if (!def || !def.pins) return '';
+  const rows = Object.keys(def.pins).map(p => {
+    const pin = def.pins[p];
+    return `<tr><td>${escapeHtml(p)}</td>` +
+           `<td>${pin.kind === 'in' ? 'input' : 'output'}</td>` +
+           `<td>${escapeHtml(pin.side)}</td></tr>`;
+  }).join('');
+  return `<h4>Pins</h4><table class="info-tt info-pintbl">` +
+         `<thead><tr><th>pin</th><th>kind</th><th>side</th></tr></thead>` +
+         `<tbody>${rows}</tbody></table>`;
+}
+
+// Truth table generated by actually running the simulator's eval().
+function infoTruthTable(typeName) {
+  const def = TYPES[typeName];
+  const inPins  = Object.keys(def.pins).filter(p => def.pins[p].kind === 'in');
+  const outPins = Object.keys(def.pins).filter(p => def.pins[p].kind === 'out');
+  let html = '<table class="info-tt"><thead><tr>';
+  for (const p of inPins)  html += `<th>${escapeHtml(p)}</th>`;
+  for (const p of outPins) html += `<th>${escapeHtml(p)}</th>`;
+  html += '</tr></thead><tbody>';
+  for (const combo of enumerateInputs(inPins.length)) {
+    const vIn = {};
+    inPins.forEach((p, i) => vIn[p] = combo[i]);
+    const vOut = def.eval(null, vIn) || {};
+    html += '<tr>';
+    for (const v of combo) html += `<td class="${tritClass(v)}">${tritLabel(v)}</td>`;
+    for (const p of outPins) html += `<td class="${tritClass(vOut[p])}">${tritLabel(vOut[p])}</td>`;
+    html += '</tr>';
+  }
+  return html + '</tbody></table>';
+}
+
+function renderInfoList(activeKey) {
+  let html = '';
+  for (const [cat, keys] of INFO_CATEGORIES) {
+    html += `<div class="cat">${cat}</div>`;
+    for (const k of keys) {
+      const e = COMPONENT_INFO[k];
+      if (!e) continue;
+      html += `<div class="info-entry${k === activeKey ? ' active' : ''}" ` +
+              `data-key="${k}">${escapeHtml(e.name)}</div>`;
+    }
+  }
+  const list = document.getElementById('info-list');
+  list.innerHTML = html;
+  list.querySelectorAll('.info-entry').forEach(el => {
+    el.addEventListener('click', () => showInfoEntry(el.dataset.key));
+  });
+}
+
+function showInfoEntry(key) {
+  const e = COMPONENT_INFO[key];
+  if (!e) return;
+  renderInfoList(key);
+  let html = `<h3>${escapeHtml(e.name)}</h3>` +
+             `<p class="tagline">${escapeHtml(e.tagline)}</p>`;
+  if (TYPES[key]) html += infoPinsTable(key);
+  html += e.body;
+  if (INFO_GATE_TYPES.includes(key)) {
+    html += '<h4>Truth table — generated live from the simulator</h4>' +
+            infoTruthTable(key);
+  }
+  const detail = document.getElementById('info-detail');
+  detail.innerHTML = html;
+  detail.scrollTop = 0;
+}
+
+function openInfoModal() {
+  // If a component is selected, open straight to its reference page.
+  let key = '_intro';
+  const firstId = selection.values().next().value;
+  if (firstId != null) {
+    const c = getComp(firstId);
+    if (c) {
+      if (c.type.startsWith('SUB:'))       key = 'SUBCIRCUIT';
+      else if (c.type.startsWith('GATE:')) key = 'CUSTOMGATE';
+      else if (COMPONENT_INFO[c.type])     key = c.type;
+    }
+  }
+  showInfoEntry(key);
+  openModal('info-modal');
+}
+document.getElementById('btn-info').addEventListener('click', openInfoModal);
+document.getElementById('info-close').addEventListener('click', () => closeModal('info-modal'));
 
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (!confirm('Clear the entire circuit? (Subcircuit library is preserved.)')) return;
