@@ -3544,7 +3544,7 @@ const INFO_CATEGORIES = [
   ['CPU',        ['ALU', 'PC']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
-  ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD']],
+  ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3']],
 ];
 
 const COMPONENT_INFO = {
@@ -4398,6 +4398,62 @@ const COMPONENT_INFO = {
       table below is generated live by running it — all 27 input
       combinations, identical to the native <code>ADDER</code>'s.</p>`,
   },
+
+  'SUB:ALU3': {
+    name: 'ALU3 — gate-level arithmetic-logic unit',
+    tagline: 'The native ALU, rebuilt from FADD / MIN / MAX / MUX',
+    body: `
+      <p><b>ALU3</b> is the structural, openable equivalent of the native
+      <code>ALU</code> component. It takes two 3-trit words —
+      <code>a0..a2</code> and <code>b0..b2</code> — and a one-trit operation
+      select <code>op</code>, and produces a 3-trit result
+      <code>r0..r2</code> with a carry-out <code>cout</code>.</p>
+
+      <h4>Operations</h4>
+      <ul>
+        <li><code>op = T</code> → <b>MIN</b> — per-trit minimum of a and b;
+            <code>cout = 0</code></li>
+        <li><code>op = 0</code> → <b>ADD</b> — a + b, ripple-carried;
+            <code>cout</code> is the carry off the top trit</li>
+        <li><code>op = +1</code> → <b>MAX</b> — per-trit maximum of a and b;
+            <code>cout = 0</code></li>
+      </ul>
+
+      <h4>Working mechanism</h4>
+      <p>All three operations are computed <em>at once, in parallel</em>, and
+      <code>op</code> selects which result reaches the output:</p>
+      <ul>
+        <li>At each trit position a <b>MIN</b> gate and a <b>MAX</b> gate
+            compute the logic results directly.</li>
+        <li>Three <b>FADD</b> blocks form a ripple-carry adder — each one's
+            carry-out feeds the next one's carry-in, low trit to high.</li>
+        <li>A <b>MUX</b> at each trit, steered by <code>op</code>, picks
+            MIN / ADD-sum / MAX. A fourth MUX picks the carry-out: the
+            ripple carry for ADD, a constant <code>0</code> for MIN and MAX.</li>
+      </ul>
+      <p>"Compute everything, then select" is how real ALUs are built — the
+      op code steers a multiplexer, it does not switch the arithmetic on
+      and off.</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>7 × <b>INPUT</b> — <code>a0..a2</code>, <code>b0..b2</code>, <code>op</code></li>
+        <li>3 × <b>MIN</b> + 3 × <b>MAX</b> — the per-trit logic operations</li>
+        <li>3 × <b>FADD</b> — the ripple-carry adder. Each FADD is itself a
+            subcircuit; middle-click to drill down to TSUM / TCARRY, then to
+            the gates.</li>
+        <li>4 × <b>MUX</b> + 1 × <b>CONST 0</b> — the op-selected output</li>
+        <li>4 × <b>OUTPUT</b> — <code>r0..r2</code>, <code>cout</code></li>
+      </ul>
+
+      <h4>Relation to the native ALU</h4>
+      <p>For every driven input, ALU3 produces exactly what the native
+      <code>ALU</code> does — a self-test confirms this. One difference: the
+      native ALU emits all-<code>null</code> if any input is floating,
+      whereas ALU3 (like every subcircuit) treats a floating input as
+      <code>0</code>. No live truth table is shown — seven trit inputs would
+      be 3⁷ = 2187 rows.</p>`,
+  },
 };
 
 // Pin table read straight from the live TYPES definition.
@@ -4978,6 +5034,62 @@ function buildFaddDef() {
   };
 }
 
+// ALU3 — the structural equivalent of the native ALU. Two 3-trit words and
+// a 1-trit op select → a 3-trit result + carry-out. All three operations are
+// computed in parallel and a MUX (steered by op) selects which one reaches
+// the output: op = T → MIN, op = 0 → ADD (ripple of three FADDs), op = +1 →
+// MAX. Built from FADD / MIN / MAX / MUX — every part itself openable.
+function buildAlu3Def() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [], wires = [];
+    comps.push(c('op', 'INPUT', 40, 400, { value: 0, name: 'op' }));
+    comps.push(c('cZ', 'CONST', 40, 470, { value: 0 }));
+    for (let i = 0; i < 3; i++) {
+      const yB = 40 + i * 150;
+      comps.push(c('a' + i, 'INPUT',    40,  yB,      { value: 0, name: 'a' + i }));
+      comps.push(c('b' + i, 'INPUT',    40,  yB + 60, { value: 0, name: 'b' + i }));
+      comps.push(c('mn' + i, 'MIN',     230, yB));
+      comps.push(c('mx' + i, 'MAX',     230, yB + 70));
+      comps.push(c('fa' + i, 'SUB:FADD',410, yB));
+      comps.push(c('rm' + i, 'MUX',     620, yB + 20));
+      comps.push(c('r' + i,  'OUTPUT',  800, yB + 38, { name: 'r' + i }));
+      // per-trit MIN and MAX
+      wires.push(w('a' + i, 'out', 'mn' + i, 'a'));
+      wires.push(w('b' + i, 'out', 'mn' + i, 'b'));
+      wires.push(w('a' + i, 'out', 'mx' + i, 'a'));
+      wires.push(w('b' + i, 'out', 'mx' + i, 'b'));
+      // ripple-carry full add: each FADD's carry-out feeds the next's cin
+      wires.push(w('a' + i, 'out', 'fa' + i, 'a'));
+      wires.push(w('b' + i, 'out', 'fa' + i, 'b'));
+      wires.push(w(i === 0 ? 'cZ' : 'fa' + (i - 1),
+                   i === 0 ? 'out' : 'cout', 'fa' + i, 'cin'));
+      // op selects MIN / ADD-sum / MAX into the result trit
+      wires.push(w('op',     'out', 'rm' + i, 's'));
+      wires.push(w('mn' + i, 'out', 'rm' + i, 'dT'));
+      wires.push(w('fa' + i, 'sum', 'rm' + i, 'd0'));
+      wires.push(w('mx' + i, 'out', 'rm' + i, 'dP'));
+      wires.push(w('rm' + i, 'out', 'r' + i,  'in'));
+    }
+    // carry-out: the ripple carry for ADD, a constant 0 for MIN and MAX
+    comps.push(c('cm', 'MUX',    620, 510));
+    comps.push(c('co', 'OUTPUT', 800, 528, { name: 'cout' }));
+    wires.push(w('op',  'out',  'cm', 's'));
+    wires.push(w('cZ',  'out',  'cm', 'dT'));
+    wires.push(w('fa2', 'cout', 'cm', 'd0'));
+    wires.push(w('cZ',  'out',  'cm', 'dP'));
+    wires.push(w('cm',  'out',  'co', 'in'));
+    return { comps, wires };
+  });
+  return {
+    inputs: [{ name: 'a0' }, { name: 'a1' }, { name: 'a2' },
+             { name: 'b0' }, { name: 'b1' }, { name: 'b2' }, { name: 'op' }],
+    outputs: [{ name: 'r0' }, { name: 'r1' }, { name: 'r2' }, { name: 'cout' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
 // The subcircuits this build ships with. Each names its builder and the kit
 // (library-panel heading) it belongs to.
 const BUILTIN_SUBCIRCUITS = {
@@ -4987,11 +5099,12 @@ const BUILTIN_SUBCIRCUITS = {
   TSUM:   { kit: 'Arithmetic Kit', build: buildTsumDef },
   TCARRY: { kit: 'Arithmetic Kit', build: buildTcarryDef },
   FADD:   { kit: 'Arithmetic Kit', build: buildFaddDef },
+  ALU3:   { kit: 'Arithmetic Kit', build: buildAlu3Def },
 };
 // Kit headings, in library-panel order.
 const BUILTIN_SUBCIRCUIT_KITS = [
   { label: 'Neural-Net Kit', names: ['TMUL', 'MAC3', 'ACT'] },
-  { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD'] },
+  { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3'] },
 ];
 // Seed the built-ins into the library. Called at boot and re-called after a
 // load; the `if absent` guard means a loaded file's own same-named
@@ -6106,7 +6219,7 @@ test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () =
 
 test('Info reference has detailed pages for the built-in subcircuits', () => {
   for (const key of ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT',
-                      'SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD']) {
+                      'SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3']) {
     const e = COMPONENT_INFO[key];
     if (!e) throw new Error(`no COMPONENT_INFO entry for ${key}`);
     if (!e.name || !e.tagline || !e.body) throw new Error(`${key} info entry is incomplete`);
@@ -6125,7 +6238,7 @@ test('Info reference has detailed pages for the built-in subcircuits', () => {
 
 test('Subcircuit library protects built-ins; only user blocks are deletable', () => {
   registerBuiltinSubcircuits();
-  for (const n of ['TMUL', 'MAC3', 'ACT', 'TSUM', 'TCARRY', 'FADD']) {
+  for (const n of ['TMUL', 'MAC3', 'ACT', 'TSUM', 'TCARRY', 'FADD', 'ALU3']) {
     assertEq(isBuiltinSubcircuit(n), true, `${n} is built-in:`);
     deleteSubcircuit(n);   // protected — must be a no-op, not a deletion
     if (!subcircuitDefs[n]) throw new Error(`built-in subcircuit "${n}" was deleted`);
@@ -6154,6 +6267,23 @@ test('Gate-level FADD subcircuit matches the native ADDER for all 27 inputs', ()
     const want = TYPES.ADDER.eval(null, { a, b, cin });
     assertEq(got.sum,  want.sum,  `FADD sum (a=${a},b=${b},cin=${cin}):`);
     assertEq(got.cout, want.cout, `FADD cout (a=${a},b=${b},cin=${cin}):`);
+  }
+});
+
+test('Gate-level ALU3 subcircuit matches the native ALU over a deterministic sample', () => {
+  registerBuiltinSubcircuits();
+  let seed = 271;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let s = 0; s < 300; s++) {
+    const v = {
+      a0: nextTrit(), a1: nextTrit(), a2: nextTrit(),
+      b0: nextTrit(), b1: nextTrit(), b2: nextTrit(),
+      op: nextTrit(),
+    };
+    const got  = simulateSubInstance({ type: 'SUB:ALU3', state: {} }, v);
+    const want = TYPES.ALU.eval(null, v);
+    for (const p of ['r0', 'r1', 'r2', 'cout'])
+      assertEq(got[p], want[p], `ALU3 ${p} sample ${s} (op=${v.op}):`);
   }
 });
 
