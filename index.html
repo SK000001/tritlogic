@@ -4721,6 +4721,66 @@ const EXAMPLES = {
       ],
     })),
   },
+  'ternary-mac': {
+    label: 'Ternary-weight MAC — the AI dot-product primitive',
+    build: () => buildExample((c, w) => {
+      // A 3-element ternary-weight multiply-accumulate:  y = Σ wᵢ·xᵢ.
+      //
+      // This is the operation a neural network spends almost all its time
+      // on — a dot product — with the weights quantised to {T, 0, +1}
+      // (the BitNet b1.58 idea).  A ternary weight removes the multiplier
+      // entirely: multiplying an activation xᵢ by a weight wᵢ is just
+      //
+      //     wᵢ = +1 → pass xᵢ     wᵢ = 0 → 0     wᵢ = T → negate xᵢ
+      //
+      // so each "multiply" is one STI (negate xᵢ) feeding one MUX (the
+      // weight trit selects pass / zero / negate).  The three products are
+      // then summed by a small ADDER tree — no multiplier anywhere.
+      //
+      // Result is two trits:  value = 3·y1 + y0  ∈ −3..+3.
+      // Defaults: x = (+1,+1,T), w = (+1,0,T) → products (+1,0,+1) → y = 2,
+      // which shows all three multiply modes at once (pass, zero, negate).
+      const comps = [];
+      const wires = [];
+      const xv = [1, 1, -1], wv = [1, 0, -1];
+      comps.push(c('zero', 'CONST', 430, 660, { value: 0 }));
+      for (let i = 0; i < 3; i++) {
+        const baseY = 70 + i * 170;
+        comps.push(c('x' + i,   'INPUT',  60,  baseY,      { value: xv[i], name: 'x' + i }));
+        comps.push(c('w' + i,   'INPUT',  60,  baseY + 72, { value: wv[i], name: 'w' + i }));
+        comps.push(c('neg' + i, 'STI',    220, baseY + 30));
+        comps.push(c('mux' + i, 'MUX',    380, baseY + 18));
+        comps.push(c('p' + i,   'OUTPUT', 560, baseY + 38, { name: 'p' + i }));
+        // multiply-by-trit: STI negates xᵢ; the MUX picks pass / zero /
+        // negate according to the weight trit wᵢ on its select input.
+        wires.push(w('x' + i,   'out', 'neg' + i, 'in'));
+        wires.push(w('w' + i,   'out', 'mux' + i, 's'));
+        wires.push(w('neg' + i, 'out', 'mux' + i, 'dT'));
+        wires.push(w('zero',    'out', 'mux' + i, 'd0'));
+        wires.push(w('x' + i,   'out', 'mux' + i, 'dP'));
+        wires.push(w('mux' + i, 'out', 'p' + i,   'in'));
+      }
+      // Adder tree: (p0 + p1), then that low trit + p2; the two carries
+      // sum to the result's high trit (their own carry is always 0 here).
+      comps.push(c('add1', 'ADDER',  720, 150));
+      comps.push(c('add2', 'ADDER',  880, 330));
+      comps.push(c('add3', 'ADDER',  880, 540));
+      comps.push(c('y0',   'OUTPUT', 1060, 336, { name: 'y0' }));
+      comps.push(c('y1',   'OUTPUT', 1060, 546, { name: 'y1' }));
+      wires.push(w('mux0', 'out',  'add1', 'a'));
+      wires.push(w('mux1', 'out',  'add1', 'b'));
+      wires.push(w('zero', 'out',  'add1', 'cin'));
+      wires.push(w('add1', 'sum',  'add2', 'a'));
+      wires.push(w('mux2', 'out',  'add2', 'b'));
+      wires.push(w('zero', 'out',  'add2', 'cin'));
+      wires.push(w('add1', 'cout', 'add3', 'a'));
+      wires.push(w('add2', 'cout', 'add3', 'b'));
+      wires.push(w('zero', 'out',  'add3', 'cin'));
+      wires.push(w('add2', 'sum',  'y0',   'in'));
+      wires.push(w('add3', 'sum',  'y1',   'in'));
+      return { comps, wires };
+    }),
+  },
 };
 
 function loadExampleNamed(name) {
@@ -5113,6 +5173,34 @@ test('every preset example gives each component its full default state', () => {
           throw new Error(`${key}: ${c.type} #${c.id} is missing state key "${k}"`);
       }
     }
+  }
+});
+
+test('Ternary-weight MAC computes the dot product Σ wᵢ·xᵢ for all 729 inputs', () => {
+  const { comps, wires } = EXAMPLES['ternary-mac'].build();
+  const inByName = {}, outSrc = {};
+  for (const c of comps) {
+    if (c.type === 'INPUT') inByName[c.state.name] = c;
+    if (c.type === 'OUTPUT') {
+      const wr = wires.find(w => w.toId === c.id && w.toPort === 'in');
+      outSrc[c.state.name] = wr ? `${wr.fromId}:${wr.fromPort}` : null;
+    }
+  }
+  for (const x0 of [-1, 0, 1]) for (const x1 of [-1, 0, 1]) for (const x2 of [-1, 0, 1])
+  for (const w0 of [-1, 0, 1]) for (const w1 of [-1, 0, 1]) for (const w2 of [-1, 0, 1]) {
+    inByName.x0.state.value = x0; inByName.x1.state.value = x1; inByName.x2.state.value = x2;
+    inByName.w0.state.value = w0; inByName.w1.state.value = w1; inByName.w2.state.value = w2;
+    const scope = { comps, wires, outVals: {} };
+    simulateScope(scope);
+    const tag = `MAC(x=${x0},${x1},${x2} w=${w0},${w1},${w2}):`;
+    // Each MUX must realise multiply-by-trit on its product output.
+    // (|| 0 normalises JS's -0 from e.g. 0 * -1 to a plain 0.)
+    assertEq(scope.outVals[outSrc.p0], w0 * x0 || 0, tag + ' p0');
+    assertEq(scope.outVals[outSrc.p1], w1 * x1 || 0, tag + ' p1');
+    assertEq(scope.outVals[outSrc.p2], w2 * x2 || 0, tag + ' p2');
+    // The adder tree must accumulate them: value = 3·y1 + y0.
+    const got = 3 * scope.outVals[outSrc.y1] + scope.outVals[outSrc.y0];
+    assertEq(got, (w0 * x0 + w1 * x1 + w2 * x2) || 0, tag + ' y');
   }
 });
 
