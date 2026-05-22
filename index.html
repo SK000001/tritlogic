@@ -278,6 +278,26 @@
     cursor: pointer;
   }
   .sub-entry button:hover { color: var(--t-neg); border-color: var(--t-neg); }
+  .sub-cat {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin: 10px 4px 4px;
+  }
+  .sub-cat:first-child { margin-top: 2px; }
+  .sub-hint { font-size: 11px; color: var(--muted); padding: 2px 4px 4px; }
+
+  /* Lightweight right-click menu (subcircuit library) */
+  .ctx-menu {
+    position: fixed; z-index: 2000;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 3px; min-width: 150px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.55);
+  }
+  .ctx-item {
+    padding: 6px 10px; font-size: 12px; border-radius: 4px;
+    cursor: pointer; color: var(--text); user-select: none;
+  }
+  .ctx-item:hover { background: var(--accent); color: #11141a; }
+  .ctx-item.danger:hover { background: var(--t-neg); color: #11141a; }
 
   .selection-rect {
     pointer-events: none;
@@ -1963,33 +1983,124 @@ function boundingBox(items) {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
+// The names of the subcircuits this build ships with — must stay in step
+// with registerBuiltinSubcircuits(). The library panel uses this list to
+// group them under their own heading and to protect them from deletion.
+const BUILTIN_SUBCIRCUIT_NAMES = ['TMUL', 'MAC3', 'ACT'];
+function isBuiltinSubcircuit(name) { return BUILTIN_SUBCIRCUIT_NAMES.includes(name); }
+
+// ---- lightweight right-click menu ----------------------------------------
+// A single floating menu, used by the subcircuit library. Created on demand,
+// dismissed on any click elsewhere or on Escape.
+let _ctxMenuEl = null;
+function hideContextMenu() {
+  if (_ctxMenuEl) { _ctxMenuEl.remove(); _ctxMenuEl = null; }
+}
+function showContextMenu(x, y, items) {
+  hideContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+  for (const it of items) {
+    const row = document.createElement('div');
+    row.className = 'ctx-item' + (it.danger ? ' danger' : '');
+    row.textContent = it.label;
+    row.addEventListener('click', (e) => { e.stopPropagation(); hideContextMenu(); it.fn(); });
+    menu.appendChild(row);
+  }
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  document.body.appendChild(menu);
+  _ctxMenuEl = menu;
+}
+document.addEventListener('click', hideContextMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideContextMenu(); });
+
+// Delete a subcircuit definition. Built-ins are protected — only
+// user-created subcircuits can be removed.
+function deleteSubcircuit(name) {
+  if (isBuiltinSubcircuit(name)) {
+    setStatus(`"${name}" is a built-in subcircuit and cannot be deleted`);
+    return;
+  }
+  if (!confirm(`Delete subcircuit "${name}"? Existing instances will become broken.`)) return;
+  delete subcircuitDefs[name];
+  if (placeType === 'SUB:' + name) setTool('select');
+  refreshSubLib();
+  simulate(); draw();
+}
+
+// "Edit on canvas" — load a subcircuit's inner circuit (the components and
+// wires it was packed from) onto the main canvas, so it can be inspected or
+// modified and then re-packed. Replaces the current canvas contents.
+function editSubcircuit(name) {
+  const def = subcircuitDefs[name];
+  if (!def) return;
+  if (!confirm(`Load the internals of "${name}" onto the canvas for editing?\n\n` +
+               `This replaces the current circuit. When done, select the parts ` +
+               `and press Pack ▢ to save them back as a subcircuit.`)) return;
+  comps = deepClone(def.comps);
+  wires = deepClone(def.wires);
+  syncCompMap();
+  nextCompId = comps.reduce((m, c) => Math.max(m, c.id), 0) + 1;
+  nextWireId = wires.reduce((m, w) => Math.max(m, w.id), 0) + 1;
+  view = { tx: 40, ty: 40, scale: 1 };
+  selection.clear(); selectedWire = null; tick = 0; outVals = {};
+  setTool('select');
+  simulate(); drawWaves(); draw(); updateInspector();
+  setStatus(`Editing "${name}" — its INPUT / OUTPUT components are the block's pins`);
+}
+
 function refreshSubLib() {
   const lib = document.getElementById('sub-lib');
   lib.innerHTML = '';
-  for (const name in subcircuitDefs) {
+  const ICON = '<div class="icon" style="width:24px;height:18px;' +
+    'display:flex;align-items:center;justify-content:center;' +
+    'border:1px solid var(--border);border-radius:3px;background:#1a1d23;font-size:10px;">⌬</div>';
+
+  function addHeading(text) {
+    const h = document.createElement('div');
+    h.className = 'sub-cat';
+    h.textContent = text;
+    lib.appendChild(h);
+  }
+  function addEntry(name, deletable) {
     const def = subcircuitDefs[name];
     const el = document.createElement('div');
     el.className = 'sub-entry';
-    el.innerHTML = `<div class="icon" style="width:24px;height:18px;
-        display:flex;align-items:center;justify-content:center;
-        border:1px solid var(--border);border-radius:3px;background:#1a1d23;font-size:10px;">⌬</div>
-      <div>${escapeHtml(name)}</div>
-      <span class="pin-counts">${def.inputs.length}→${def.outputs.length}</span>
-      <button data-del="${escapeHtml(name)}" title="Delete subcircuit">✕</button>`;
+    el.title = 'Click to place · right-click for options';
+    el.innerHTML = ICON +
+      `<div>${escapeHtml(name)}</div>` +
+      `<span class="pin-counts">${def.inputs.length}→${def.outputs.length}</span>` +
+      (deletable ? `<button data-del="${escapeHtml(name)}" title="Delete subcircuit">✕</button>` : '');
     el.addEventListener('click', (e) => {
-      if (e.target.tagName === 'BUTTON') {
-        const n = e.target.dataset.del;
-        if (confirm(`Delete subcircuit "${n}"? Existing instances will become broken.`)) {
-          delete subcircuitDefs[n];
-          if (placeType === 'SUB:' + n) setTool('select');
-          refreshSubLib();
-          simulate(); draw();    // same reason as the GATE: deletion above
-        }
-        return;
-      }
+      if (e.target.tagName === 'BUTTON') { deleteSubcircuit(e.target.dataset.del); return; }
       setTool('place', 'SUB:' + name);
     });
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const items = [{ label: 'Edit on canvas', fn: () => editSubcircuit(name) }];
+      if (deletable) items.push({ label: 'Delete', danger: true, fn: () => deleteSubcircuit(name) });
+      showContextMenu(e.clientX, e.clientY, items);
+    });
     lib.appendChild(el);
+  }
+
+  const names = Object.keys(subcircuitDefs);
+  const builtin = names.filter(isBuiltinSubcircuit);
+  const user    = names.filter(n => !isBuiltinSubcircuit(n));
+
+  if (builtin.length) {
+    addHeading('Neural-Net Kit');
+    for (const name of builtin) addEntry(name, false);
+  }
+  addHeading('Your subcircuits');
+  if (user.length) {
+    for (const name of user) addEntry(name, true);
+  } else {
+    const hint = document.createElement('div');
+    hint.className = 'sub-hint';
+    hint.textContent = 'None yet — select components and press Pack ▢.';
+    lib.appendChild(hint);
   }
 }
 function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -3995,10 +4106,18 @@ const COMPONENT_INFO = {
       from the instance's input pins, settles the inner circuit recursively,
       and reads the inner OUTPUTs back out — clocks and flip-flops inside are
       stepped along with the rest of the design.</p>
-      <h4>Limitations</h4>
-      <p>Subcircuits are not editable in place: to change one, build a new
-      version and re-pack. Existing instances of the old definition keep
-      working.</p>`,
+      <h4>Editing</h4>
+      <p>A subcircuit is not editable in place, but <b>right-click any entry
+      in the library</b> and choose <b>Edit on canvas</b>: that loads the
+      block's internal components and wires back onto the canvas, where you
+      can change them and <b>Pack</b> them again. Existing instances of the
+      old definition keep working until they are replaced.</p>
+      <h4>Built-in vs. your own</h4>
+      <p>The blocks under the <b>Neural-Net Kit</b> heading
+      (<code>TMUL</code>, <code>MAC3</code>, <code>ACT</code>) ship with the
+      app and cannot be deleted. Subcircuits you create yourself appear
+      under <b>Your subcircuits</b> and can be removed with the ✕ button or
+      the right-click menu.</p>`,
   },
 
   CUSTOMGATE: {
@@ -5779,6 +5898,16 @@ test('Info reference has detailed pages for the built-in subcircuits', () => {
     const out = simulateSubInstance({ type: 'SUB:TMUL', state: {} }, { w, x });
     assertEq(out.p, w * x || 0, `TMUL info table (w=${w},x=${x}):`);
   }
+});
+
+test('Subcircuit library protects built-ins; only user blocks are deletable', () => {
+  registerBuiltinSubcircuits();
+  for (const n of ['TMUL', 'MAC3', 'ACT']) {
+    assertEq(isBuiltinSubcircuit(n), true, `${n} is built-in:`);
+    deleteSubcircuit(n);   // protected — must be a no-op, not a deletion
+    if (!subcircuitDefs[n]) throw new Error(`built-in subcircuit "${n}" was deleted`);
+  }
+  assertEq(isBuiltinSubcircuit('MyBlock7'), false, 'a user-named block is not built-in:');
 });
 
 // ---- custom-gate registration & evaluation ----
