@@ -3544,7 +3544,7 @@ const INFO_CATEGORIES = [
   ['CPU',        ['ALU', 'PC']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
-  ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3']],
+  ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
 ];
 
 const COMPONENT_INFO = {
@@ -4454,6 +4454,58 @@ const COMPONENT_INFO = {
       <code>0</code>. No live truth table is shown — seven trit inputs would
       be 3⁷ = 2187 rows.</p>`,
   },
+
+  'SUB:MUX3': {
+    name: 'MUX3 — gate-level 3:1 multiplexer',
+    tagline: 'The MUX, rebuilt from MIN / MAX / STI / NTI',
+    body: `
+      <p><b>MUX3</b> is the structural equivalent of the native <b>MUX</b>: a
+      3:1 ternary multiplexer. The select trit <code>s</code> routes one of
+      three data inputs to the output — <code>s = T → dT</code>,
+      <code>s = 0 → d0</code>, <code>s = +1 → dP</code> — but here it is
+      built entirely from MIN, MAX and inverter gates, with no MUX inside.</p>
+
+      <h4>Why this one matters</h4>
+      <p>Every other block in the kit — TMUL, ACT, TSUM, TCARRY — leans on
+      the MUX as if it were a fundamental primitive. MUX3 shows it is not:
+      the MUX itself reduces to MIN / MAX / inverters. So the whole tower —
+      <code>ALU3 → FADD → TSUM → MUX</code> — bottoms out at the same handful
+      of gates.</p>
+      <p>It also sharpens an earlier claim. TSUM needs a MUX because mod-3
+      addition is <em>non-monotone</em> while MIN and MAX are monotone — but
+      the MUX is not the only non-monotone primitive. The <b>inverters</b>
+      (STI / PTI / NTI) are too, and they are more fundamental: MUX3 is built
+      from them. The true gate floor is <b>MIN, MAX, and the inverters</b>;
+      the MUX is a convenience built on top.</p>
+
+      <h4>Working mechanism</h4>
+      <p>Three steps — decode, mask, combine:</p>
+      <ul>
+        <li><b>Decode.</b> The select <code>s</code> becomes three detector
+            signals, each <code>+1</code> when its case holds and
+            <code>T</code> otherwise: <code>isT = NTI(s)</code>,
+            <code>isP = NTI(−s)</code>,
+            <code>is0 = STI(MAX(isT, isP))</code>.</li>
+        <li><b>Mask.</b> Each data input is combined with its detector by a
+            MIN: <code>MIN(d, +1) = d</code> passes the value when selected,
+            <code>MIN(d, T) = T</code> forces it to −1 when not.</li>
+        <li><b>Combine.</b> Exactly one masked value is real data; the other
+            two are −1. A MAX tree keeps the one that got through, since
+            <code>MAX(d, −1, −1) = d</code>.</li>
+      </ul>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>4 × <b>INPUT</b> — <code>s</code>, <code>dT</code>,
+            <code>d0</code>, <code>dP</code></li>
+        <li>2 × <b>STI</b> + 2 × <b>NTI</b> — negate s, and the case decoder</li>
+        <li>3 × <b>MIN</b> — mask each data input by its detector</li>
+        <li>3 × <b>MAX</b> — one in the decoder, two to combine the results</li>
+        <li>1 × <b>OUTPUT</b> — <code>out</code></li>
+      </ul>
+      <p>No MUX, and no constants — fifteen components, all gates. No live
+      truth table is shown: four trit inputs would be 3⁴ = 81 rows.</p>`,
+  },
 };
 
 // Pin table read straight from the live TYPES definition.
@@ -5090,6 +5142,61 @@ function buildAlu3Def() {
   };
 }
 
+// MUX3 — a 3:1 ternary multiplexer built from MIN / MAX / STI / NTI, with no
+// MUX inside it. It shows that the MUX (which TMUL, ACT, TSUM ... all lean
+// on) is not fundamental: decode the select s into three case detectors,
+// mask each data input to −1 unless its detector fires, then MAX-combine.
+function buildMux3Def() {
+  const { comps, wires } = buildExample((c, w) => ({
+    comps: [
+      c('s',    'INPUT',  40,   40,  { value: 0, name: 's'  }),
+      c('dT',   'INPUT',  40,   130, { value: 0, name: 'dT' }),
+      c('d0',   'INPUT',  40,   200, { value: 0, name: 'd0' }),
+      c('dP',   'INPUT',  40,   270, { value: 0, name: 'dP' }),
+      c('sNeg', 'STI',    210,  40),
+      c('isT',  'NTI',    210,  120),
+      c('isP',  'NTI',    370,  40),
+      c('mxT',  'MAX',    370,  130),
+      c('is0',  'STI',    530,  140),
+      c('gT',   'MIN',    690,  40),
+      c('g0',   'MIN',    690,  150),
+      c('gP',   'MIN',    690,  260),
+      c('c1',   'MAX',    850,  90),
+      c('mxF',  'MAX',    1000, 170),
+      c('o',    'OUTPUT', 1170, 190, { name: 'out' }),
+    ],
+    wires: [
+      // decode the select trit into three detectors (+1 = "this case holds")
+      w('s',    'out', 'sNeg', 'in'),   // sNeg = −s
+      w('s',    'out', 'isT',  'in'),   // isT  = +1 iff s = T
+      w('sNeg', 'out', 'isP',  'in'),   // isP  = +1 iff s = +1
+      w('isT',  'out', 'mxT',  'a'),
+      w('isP',  'out', 'mxT',  'b'),
+      w('mxT',  'out', 'is0',  'in'),   // is0  = +1 iff s = 0
+      // mask each data input: MIN(d, +1) = d when selected, MIN(d, T) = −1 when not
+      w('dT',   'out', 'gT', 'a'),
+      w('isT',  'out', 'gT', 'b'),
+      w('d0',   'out', 'g0', 'a'),
+      w('is0',  'out', 'g0', 'b'),
+      w('dP',   'out', 'gP', 'a'),
+      w('isP',  'out', 'gP', 'b'),
+      // MAX keeps the one value that got through (the other two are −1)
+      w('gT',   'out', 'c1',  'a'),
+      w('g0',   'out', 'c1',  'b'),
+      w('c1',   'out', 'mxF', 'a'),
+      w('gP',   'out', 'mxF', 'b'),
+      w('mxF',  'out', 'o',   'in'),
+    ],
+  }));
+  return {
+    inputs: [{ name: 's' }, { name: 'dT' }, { name: 'd0' }, { name: 'dP' }],
+    outputs: [{ name: 'out' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
 // The subcircuits this build ships with. Each names its builder and the kit
 // (library-panel heading) it belongs to.
 const BUILTIN_SUBCIRCUITS = {
@@ -5100,11 +5207,12 @@ const BUILTIN_SUBCIRCUITS = {
   TCARRY: { kit: 'Arithmetic Kit', build: buildTcarryDef },
   FADD:   { kit: 'Arithmetic Kit', build: buildFaddDef },
   ALU3:   { kit: 'Arithmetic Kit', build: buildAlu3Def },
+  MUX3:   { kit: 'Arithmetic Kit', build: buildMux3Def },
 };
 // Kit headings, in library-panel order.
 const BUILTIN_SUBCIRCUIT_KITS = [
   { label: 'Neural-Net Kit', names: ['TMUL', 'MAC3', 'ACT'] },
-  { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3'] },
+  { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3', 'MUX3'] },
 ];
 // Seed the built-ins into the library. Called at boot and re-called after a
 // load; the `if absent` guard means a loaded file's own same-named
@@ -6218,8 +6326,8 @@ test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () =
 });
 
 test('Info reference has detailed pages for the built-in subcircuits', () => {
-  for (const key of ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT',
-                      'SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3']) {
+  for (const key of ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT', 'SUB:TSUM',
+                      'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']) {
     const e = COMPONENT_INFO[key];
     if (!e) throw new Error(`no COMPONENT_INFO entry for ${key}`);
     if (!e.name || !e.tagline || !e.body) throw new Error(`${key} info entry is incomplete`);
@@ -6238,7 +6346,7 @@ test('Info reference has detailed pages for the built-in subcircuits', () => {
 
 test('Subcircuit library protects built-ins; only user blocks are deletable', () => {
   registerBuiltinSubcircuits();
-  for (const n of ['TMUL', 'MAC3', 'ACT', 'TSUM', 'TCARRY', 'FADD', 'ALU3']) {
+  for (const n of ['TMUL', 'MAC3', 'ACT', 'TSUM', 'TCARRY', 'FADD', 'ALU3', 'MUX3']) {
     assertEq(isBuiltinSubcircuit(n), true, `${n} is built-in:`);
     deleteSubcircuit(n);   // protected — must be a no-op, not a deletion
     if (!subcircuitDefs[n]) throw new Error(`built-in subcircuit "${n}" was deleted`);
@@ -6284,6 +6392,16 @@ test('Gate-level ALU3 subcircuit matches the native ALU over a deterministic sam
     const want = TYPES.ALU.eval(null, v);
     for (const p of ['r0', 'r1', 'r2', 'cout'])
       assertEq(got[p], want[p], `ALU3 ${p} sample ${s} (op=${v.op}):`);
+  }
+});
+
+test('Gate-level MUX3 subcircuit matches the native MUX for all 81 inputs', () => {
+  registerBuiltinSubcircuits();
+  for (const s of [-1, 0, 1]) for (const dT of [-1, 0, 1])
+  for (const d0 of [-1, 0, 1]) for (const dP of [-1, 0, 1]) {
+    const got  = simulateSubInstance({ type: 'SUB:MUX3', state: {} }, { s, dT, d0, dP });
+    const want = TYPES.MUX.eval(null, { s, dT, d0, dP });
+    assertEq(got.out, want.out, `MUX3 (s=${s},dT=${dT},d0=${d0},dP=${dP}):`);
   }
 });
 
