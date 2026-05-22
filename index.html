@@ -3467,6 +3467,7 @@ const INFO_CATEGORIES = [
   ['Sequential', ['DFF', 'REG3', 'RAM']],
   ['CPU',        ['ALU', 'PC']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
+  ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
 ];
 
 const COMPONENT_INFO = {
@@ -4020,11 +4021,182 @@ const COMPONENT_INFO = {
       <p>Custom gates are ideal for capturing a ternary function you have
       worked out on paper, without wiring up the primitives every time.</p>`,
   },
+
+  'SUB:TMUL': {
+    name: 'TMUL — multiply-by-trit',
+    tagline: 'Multiplies one activation by one ternary weight',
+    body: `
+      <p><b>TMUL</b> is a built-in subcircuit that computes a single ternary
+      product: <code>p = w · x</code>, where <code>w</code> is a weight trit
+      and <code>x</code> is an activation trit. It is the smallest piece of
+      the ternary neural-net toolkit — one multiply.</p>
+
+      <h4>Why it exists</h4>
+      <p>A neural network spends almost all of its time multiplying
+      activations by weights. When the weight is restricted to the three
+      values <code>{T, 0, +1}</code> — as in a ternary-weight network — that
+      multiply stops needing a multiplier at all. It becomes a choice
+      between three things:</p>
+      <ul>
+        <li><code>w = +1</code> → <b>pass</b> the activation: <code>p = x</code></li>
+        <li><code>w = 0</code> → output <b>zero</b>: <code>p = 0</code> (the
+            activation is ignored entirely — a free "skip")</li>
+        <li><code>w = T</code> → <b>negate</b> the activation: <code>p = −x</code></li>
+      </ul>
+      <p>So a ternary multiply is just <em>route, zero, or negate</em> — no
+      arithmetic hardware. That is the core reason ternary weights are
+      cheap, and why a network built from them needs only adders.</p>
+
+      <h4>Working mechanism</h4>
+      <p>Two primitives do the job. An <b>STI</b> inverter continuously
+      produces <code>−x</code>. A <b>MUX</b> then uses the weight
+      <code>w</code> as its select trit to choose its output: when
+      <code>w = T</code> it routes <code>−x</code>, when <code>w = 0</code>
+      it routes a constant <code>0</code>, and when <code>w = +1</code> it
+      routes <code>x</code> unchanged.</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>2 × <b>INPUT</b> — the pins <code>w</code> and <code>x</code></li>
+        <li>1 × <b>CONST 0</b> — the zero selected when <code>w = 0</code></li>
+        <li>1 × <b>STI</b> — negates <code>x</code> to feed the MUX's
+            <code>dT</code> data input</li>
+        <li>1 × <b>MUX</b> — select <code>s = w</code>; data inputs
+            <code>dT = −x</code>, <code>d0 = 0</code>, <code>dP = x</code></li>
+        <li>1 × <b>OUTPUT</b> — the pin <code>p</code></li>
+      </ul>
+
+      <h4>Role in the bigger picture</h4>
+      <p>Three TMUL blocks plus an adder tree make a <b>MAC3</b> — a
+      three-element dot product, i.e. one neuron's arithmetic. The truth
+      table below is generated live by running the subcircuit through the
+      simulator: all nine <code>(w, x)</code> combinations.</p>`,
+  },
+
+  'SUB:MAC3': {
+    name: 'MAC3 — ternary dot product',
+    tagline: 'A 3-element ternary-weight multiply-accumulate',
+    body: `
+      <p><b>MAC3</b> computes a three-element dot product —
+      <code>w0·x0 + w1·x1 + w2·x2</code> — from three weight trits and three
+      activation trits. It is exactly one neuron's worth of arithmetic: the
+      <code>ternary-mac</code> preset example, packed into a single block.</p>
+
+      <h4>The two-trit output</h4>
+      <p>Three products, each in <code>{T, 0, +1}</code>, can sum to as much
+      as <code>+3</code> or as little as <code>−3</code> — a range a single
+      trit cannot hold. So MAC3 produces <b>two</b> output trits,
+      <code>lo</code> and <code>hi</code>, and the value they represent is
+      <code>3·hi + lo</code>, covering <code>−3 … +3</code>.</p>
+
+      <h4>Working mechanism</h4>
+      <p>Two stages. First, three multiply-by-trit cells (an STI + MUX each
+      — the same circuit as <b>TMUL</b>) form the three products
+      <code>p0, p1, p2</code>. Then an <b>ADDER tree</b> sums them:</p>
+      <ul>
+        <li><code>add1</code> = <code>p0 + p1</code> → a sum trit and a carry trit</li>
+        <li><code>add2</code> = <code>add1.sum + p2</code> → its sum trit is the output <code>lo</code></li>
+        <li><code>add3</code> = <code>add1.carry + add2.carry</code> → its sum trit is the output <code>hi</code></li>
+      </ul>
+      <p>Because the true total never leaves <code>−3 … +3</code>, the third
+      adder's own carry-out is always <code>0</code> — two output trits are
+      always enough to hold the result.</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>6 × <b>INPUT</b> — weights <code>w0,w1,w2</code> and activations
+            <code>x0,x1,x2</code></li>
+        <li>1 × <b>CONST 0</b> — one shared zero, used for the MUX
+            <code>d0</code> inputs and the three adder carry-ins</li>
+        <li>3 × <b>STI</b> + 3 × <b>MUX</b> — the three multiply-by-trit cells</li>
+        <li>3 × <b>ADDER</b> — the summation tree described above</li>
+        <li>2 × <b>OUTPUT</b> — the result pins <code>lo</code> and <code>hi</code></li>
+      </ul>
+
+      <h4>Worked example</h4>
+      <p>With <code>x = (+1, +1, T)</code> and <code>w = (+1, 0, T)</code>
+      the three products are <code>p = (+1, 0, +1)</code> — a pass, a zero,
+      and a negate — which sum to <code>+2</code>. In balanced ternary
+      <code>+2 = 3·(+1) + (−1)</code>, so the block outputs
+      <code>hi = +1</code> and <code>lo = T</code>.</p>
+
+      <h4>Role in the bigger picture</h4>
+      <p>One MAC3 is one neuron, before its activation. A row of MAC3 blocks
+      sharing the same activation inputs is a <b>matrix-vector layer</b> —
+      see the <code>ternary-layer</code> example. No truth table is shown
+      here: six trit inputs would be 3⁶ = 729 rows.</p>`,
+  },
+
+  'SUB:ACT': {
+    name: 'ACT — sign activation',
+    tagline: 'The sign() nonlinearity — a 2-trit value down to one trit',
+    body: `
+      <p><b>ACT</b> is the activation function of the ternary neural-net
+      kit. It takes a two-trit value — the <code>lo</code> / <code>hi</code>
+      pair produced by a <b>MAC3</b> — and outputs a single trit
+      <code>s = sign(value)</code>, where <code>value = 3·hi + lo</code>.</p>
+
+      <h4>Why it exists</h4>
+      <p>It serves two purposes. First, <b>requantisation</b>: a MAC3 output
+      spans <code>−3 … +3</code> across two trits, but the next layer's
+      inputs are single trits — ACT compresses the wide value back down to
+      one. Second, and more fundamental, it is the network's
+      <b>nonlinearity</b>. Without a nonlinear step between them, two weight
+      layers <code>W2·(W1·x)</code> collapse algebraically into a single
+      linear map <code>(W2·W1)·x</code> — and depth would buy nothing. ACT
+      is what makes a two-layer network genuinely two layers.</p>
+      <p>It is also the one <em>decision</em> in the pipeline. The matrix
+      multiplies on either side of it are purely linear; a sign is a
+      threshold. In a photonic implementation that threshold is exactly the
+      point where the computation would have to hand back from light to
+      electronics.</p>
+
+      <h4>Working mechanism</h4>
+      <p>Taking the sign of <code>3·hi + lo</code> looks like it needs a
+      comparison — it does not. The high trit <b>dominates</b>: whenever
+      <code>hi</code> is non-zero, <code>|3·hi| ≥ 3</code> already outweighs
+      <code>|lo| ≤ 1</code>, so the sign of the value simply <em>is</em>
+      <code>hi</code>. Only when <code>hi = 0</code> does the low trit
+      decide — and then the value is just <code>lo</code>, already a clean
+      trit. So:</p>
+      <p style="text-align:center"><code>sign(value) = hi when hi ≠ 0, else lo</code></p>
+      <p>— which is precisely one <b>MUX</b> selecting on <code>hi</code>.</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>2 × <b>INPUT</b> — the pins <code>lo</code> and <code>hi</code></li>
+        <li>1 × <b>MUX</b> — select <code>s = hi</code>; data inputs
+            <code>dT = hi</code>, <code>d0 = lo</code>, <code>dP = hi</code>.
+            The high trit is wired to <em>both</em> of its own non-zero
+            select cases, so a non-zero <code>hi</code> passes itself
+            through.</li>
+        <li>1 × <b>OUTPUT</b> — the pin <code>s</code></li>
+      </ul>
+
+      <h4>The mapping</h4>
+      <p>Across every value a MAC3 can produce:</p>
+      <ul>
+        <li><code>value = −3, −2, −1</code> → <code>s = T</code></li>
+        <li><code>value = 0</code> → <code>s = 0</code></li>
+        <li><code>value = +1, +2, +3</code> → <code>s = +1</code></li>
+      </ul>
+      <p>The live truth table below enumerates all nine raw
+      <code>(lo, hi)</code> combinations. Three of them — where
+      <code>|3·hi + lo| &gt; 3</code> — cannot actually arise from a real
+      MAC3; ACT still defines an output for them, and because
+      <code>hi</code> dominates that output is the correct sign anyway.</p>
+
+      <h4>Role in the bigger picture</h4>
+      <p>A complete neuron is a <b>MAC3</b> followed by an <b>ACT</b>. The
+      <code>ternary-mlp</code> example stacks two such layers; every ACT
+      block in it is one nonlinearity — one decision.</p>`,
+  },
 };
 
 // Pin table read straight from the live TYPES definition.
 function infoPinsTable(typeName) {
-  const def = TYPES[typeName];
+  const def = typeName.startsWith('SUB:') ? subInstanceDef({ type: typeName })
+                                          : TYPES[typeName];
   if (!def || !def.pins) return '';
   const rows = Object.keys(def.pins).map(p => {
     const pin = def.pins[p];
@@ -4058,6 +4230,29 @@ function infoTruthTable(typeName) {
   return html + '</tbody></table>';
 }
 
+// Truth table for a subcircuit, generated by actually running the block
+// through the simulator — the SUB: counterpart of infoTruthTable, for types
+// whose behaviour comes from an inner circuit rather than an eval().
+function infoSubTruthTable(typeName) {
+  const def = subInstanceDef({ type: typeName });
+  const inPins  = Object.keys(def.pins).filter(p => def.pins[p].kind === 'in');
+  const outPins = Object.keys(def.pins).filter(p => def.pins[p].kind === 'out');
+  let html = '<table class="info-tt"><thead><tr>';
+  for (const p of inPins)  html += `<th>${escapeHtml(p)}</th>`;
+  for (const p of outPins) html += `<th>${escapeHtml(p)}</th>`;
+  html += '</tr></thead><tbody>';
+  for (const combo of enumerateInputs(inPins.length)) {
+    const vIn = {};
+    inPins.forEach((p, i) => vIn[p] = combo[i]);
+    const vOut = simulateSubInstance({ type: typeName, state: {} }, vIn) || {};
+    html += '<tr>';
+    for (const v of combo) html += `<td class="${tritClass(v)}">${tritLabel(v)}</td>`;
+    for (const p of outPins) html += `<td class="${tritClass(vOut[p])}">${tritLabel(vOut[p])}</td>`;
+    html += '</tr>';
+  }
+  return html + '</tbody></table>';
+}
+
 function renderInfoList(activeKey) {
   let html = '';
   for (const [cat, keys] of INFO_CATEGORIES) {
@@ -4082,11 +4277,21 @@ function showInfoEntry(key) {
   renderInfoList(key);
   let html = `<h3>${escapeHtml(e.name)}</h3>` +
              `<p class="tagline">${escapeHtml(e.tagline)}</p>`;
-  if (TYPES[key]) html += infoPinsTable(key);
+  const isBuiltinSub = key.startsWith('SUB:') && !!subcircuitDefs[key.slice(4)];
+  if (TYPES[key] || isBuiltinSub) html += infoPinsTable(key);
   html += e.body;
   if (INFO_GATE_TYPES.includes(key)) {
     html += '<h4>Truth table — generated live from the simulator</h4>' +
             infoTruthTable(key);
+  } else if (isBuiltinSub) {
+    // A small subcircuit (≤ 2 inputs) gets a full live truth table; a
+    // larger one would have too many rows (3ⁿ) to be useful.
+    const subDef = subInstanceDef({ type: key });
+    const nIn = Object.keys(subDef.pins).filter(p => subDef.pins[p].kind === 'in').length;
+    if (nIn <= 2) {
+      html += '<h4>Truth table — generated live from the simulator</h4>' +
+              infoSubTruthTable(key);
+    }
   }
   const detail = document.getElementById('info-detail');
   detail.innerHTML = html;
@@ -4100,7 +4305,7 @@ function openInfoModal() {
   if (firstId != null) {
     const c = getComp(firstId);
     if (c) {
-      if (c.type.startsWith('SUB:'))       key = 'SUBCIRCUIT';
+      if (c.type.startsWith('SUB:'))       key = COMPONENT_INFO[c.type] ? c.type : 'SUBCIRCUIT';
       else if (c.type.startsWith('GATE:')) key = 'CUSTOMGATE';
       else if (COMPONENT_INFO[c.type])     key = c.type;
     }
@@ -5555,6 +5760,24 @@ test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () =
       if (!byId[wr.fromId] || !byId[wr.toId])
         throw new Error(`${name}: wire references a missing component`);
     }
+  }
+});
+
+test('Info reference has detailed pages for the built-in subcircuits', () => {
+  for (const key of ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']) {
+    const e = COMPONENT_INFO[key];
+    if (!e) throw new Error(`no COMPONENT_INFO entry for ${key}`);
+    if (!e.name || !e.tagline || !e.body) throw new Error(`${key} info entry is incomplete`);
+    if (!INFO_CATEGORIES.some(([, keys]) => keys.includes(key)))
+      throw new Error(`${key} is not listed in any INFO_CATEGORIES group`);
+    showInfoEntry(key);   // must render without throwing
+  }
+  // The two-input blocks get a live truth table — confirm it builds and
+  // that the values come from the real subcircuit behaviour.
+  if (!/<table/.test(infoSubTruthTable('SUB:TMUL'))) throw new Error('TMUL table missing');
+  for (const w of [-1, 0, 1]) for (const x of [-1, 0, 1]) {
+    const out = simulateSubInstance({ type: 'SUB:TMUL', state: {} }, { w, x });
+    assertEq(out.p, w * x || 0, `TMUL info table (w=${w},x=${x}):`);
   }
 });
 
