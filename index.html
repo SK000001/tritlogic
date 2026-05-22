@@ -1969,11 +1969,12 @@ function boundingBox(items) {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-// The names of the subcircuits this build ships with — must stay in step
-// with registerBuiltinSubcircuits(). The library panel uses this list to
-// group them under their own heading and to protect them from deletion.
-const BUILTIN_SUBCIRCUIT_NAMES = ['TMUL', 'MAC3', 'ACT'];
-function isBuiltinSubcircuit(name) { return BUILTIN_SUBCIRCUIT_NAMES.includes(name); }
+// True for the subcircuits this build ships with — see BUILTIN_SUBCIRCUITS,
+// defined further down. The library panel uses this to group them under
+// their kit headings and to protect them from deletion.
+function isBuiltinSubcircuit(name) {
+  return Object.prototype.hasOwnProperty.call(BUILTIN_SUBCIRCUITS, name);
+}
 
 // Delete a subcircuit definition. Built-ins are protected — only
 // user-created subcircuits can be removed.
@@ -2049,15 +2050,15 @@ function refreshSubLib() {
     lib.appendChild(el);
   }
 
-  const names = Object.keys(subcircuitDefs);
-  const builtin = names.filter(isBuiltinSubcircuit);
-  const user    = names.filter(n => !isBuiltinSubcircuit(n));
-
-  if (builtin.length) {
-    addHeading('Neural-Net Kit');
-    for (const name of builtin) addEntry(name, false);
+  // Built-in subcircuits, grouped by kit; then any user-created ones.
+  for (const kit of BUILTIN_SUBCIRCUIT_KITS) {
+    const inKit = kit.names.filter(n => subcircuitDefs[n]);
+    if (!inKit.length) continue;
+    addHeading(kit.label);
+    for (const name of inKit) addEntry(name, false);
   }
   addHeading('Your subcircuits');
+  const user = Object.keys(subcircuitDefs).filter(n => !isBuiltinSubcircuit(n));
   if (user.length) {
     for (const name of user) addEntry(name, true);
   } else {
@@ -3543,6 +3544,7 @@ const INFO_CATEGORIES = [
   ['CPU',        ['ALU', 'PC']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
+  ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD']],
 ];
 
 const COMPONENT_INFO = {
@@ -4275,6 +4277,127 @@ const COMPONENT_INFO = {
       <code>ternary-mlp</code> example stacks two such layers; every ACT
       block in it is one nonlinearity — one decision.</p>`,
   },
+
+  'SUB:TSUM': {
+    name: 'TSUM — carry-free ternary sum',
+    tagline: 'One digit of balanced-ternary addition, without the carry',
+    body: `
+      <p><b>TSUM</b> adds two balanced-ternary trits and returns the result
+      <em>folded back into one trit</em> — the sum "modulo 3". It is the
+      carry-free half of single-digit addition; its partner <b>TCARRY</b>
+      supplies the part that does not fit in one trit.</p>
+
+      <h4>What it computes</h4>
+      <p>For inputs <code>x</code> and <code>y</code> the output is
+      <code>x + y</code> when that lands in <code>{T, 0, +1}</code>, and
+      wraps when it does not: <code>+1</code> plus <code>+1</code> is
+      <code>T</code> (2 wraps to −1), and <code>T</code> plus <code>T</code>
+      is <code>+1</code> (−2 wraps to +1).</p>
+
+      <h4>Working mechanism</h4>
+      <p>Mod-3 addition is <em>not monotone</em>, so it cannot be built from
+      <b>MIN</b> and <b>MAX</b> alone — those are monotone, and anything made
+      only from monotone parts stays monotone. The non-monotone primitive
+      here is the <b>MUX</b>. The operand <code>y</code> selects one of three
+      versions of <code>x</code>:</p>
+      <ul>
+        <li><code>y = T</code> → <b>rotate-down</b> x &nbsp;(T→1, 0→T, 1→0)</li>
+        <li><code>y = 0</code> → <b>x unchanged</b></li>
+        <li><code>y = +1</code> → <b>rotate-up</b> x &nbsp;(T→0, 0→1, 1→T)</li>
+      </ul>
+      <p>Each rotation is itself a MUX that selects between the three
+      constant trits, so TSUM is three MUXes plus three constants.</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>2 × <b>INPUT</b> — <code>x</code>, <code>y</code></li>
+        <li>3 × <b>CONST</b> — the trits T, 0, +1</li>
+        <li>2 × <b>MUX</b> — rotate-up and rotate-down of <code>x</code></li>
+        <li>1 × <b>MUX</b> — <code>y</code> selects rotate-down / x / rotate-up</li>
+        <li>1 × <b>OUTPUT</b> — <code>sum</code></li>
+      </ul>
+
+      <h4>Role</h4>
+      <p>Two TSUMs and two TCARRYs make a full adder — see <b>FADD</b>. The
+      truth table below is generated live by running the subcircuit.</p>`,
+  },
+
+  'SUB:TCARRY': {
+    name: 'TCARRY — ternary add carry',
+    tagline: 'The carry digit produced by adding two trits',
+    body: `
+      <p><b>TCARRY</b> gives the carry of a single balanced-ternary add: the
+      part of <code>x + y</code> that does not fit in one trit. It is
+      <code>+1</code> only when both inputs are <code>+1</code> (sum +2),
+      <code>T</code> only when both are <code>T</code> (sum −2), and
+      <code>0</code> everywhere else.</p>
+
+      <h4>Working mechanism</h4>
+      <p>Unlike the sum, the carry <em>is</em> monotone, so <b>MIN</b> and
+      <b>MAX</b> can do most of the work. The operand <code>y</code> selects,
+      through a MUX:</p>
+      <ul>
+        <li><code>y = T</code> → <code>MIN(x, 0)</code> — gives −1 only if x is also T</li>
+        <li><code>y = 0</code> → <code>0</code> — no carry is possible</li>
+        <li><code>y = +1</code> → <code>MAX(x, 0)</code> — gives +1 only if x is also +1</li>
+      </ul>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>2 × <b>INPUT</b> — <code>x</code>, <code>y</code></li>
+        <li>1 × <b>CONST 0</b></li>
+        <li>1 × <b>MIN</b> + 1 × <b>MAX</b> — clamp x to its negative / positive part</li>
+        <li>1 × <b>MUX</b> — <code>y</code> selects MIN / 0 / MAX</li>
+        <li>1 × <b>OUTPUT</b> — <code>carry</code></li>
+      </ul>
+
+      <h4>Role</h4>
+      <p>TCARRY pairs with <b>TSUM</b>: together they are a half-adder, and
+      two half-adders make the full adder <b>FADD</b>.</p>`,
+  },
+
+  'SUB:FADD': {
+    name: 'FADD — gate-level full-trit adder',
+    tagline: 'A full adder built from subcircuits — the ADDER, opened up',
+    body: `
+      <p><b>FADD</b> adds three balanced-ternary trits — <code>a</code>,
+      <code>b</code>, and a carry-in <code>cin</code> — producing a
+      <code>sum</code> trit and a carry-out <code>cout</code>. It is the
+      <em>circuit-level equivalent of the native <code>ADDER</code></em>
+      component: identical truth table, but assembled from smaller blocks
+      instead of computed by code.</p>
+
+      <h4>Why it exists</h4>
+      <p>The native <code>ADDER</code> is a <b>behavioural</b> model — a code
+      function, with no inside to inspect. FADD is the same function built
+      <b>structurally</b>: middle-click it in the library to open it on the
+      canvas and trace every gate. It is the adder that Phases 4–5 of the
+      research guide build by hand.</p>
+
+      <h4>Working mechanism</h4>
+      <p>Two half-adds, exactly as in a binary full adder:</p>
+      <ul>
+        <li><code>s1 = TSUM(a, b)</code> &nbsp;·&nbsp; <code>c1 = TCARRY(a, b)</code></li>
+        <li><code>sum = TSUM(s1, cin)</code> &nbsp;·&nbsp; <code>c2 = TCARRY(s1, cin)</code></li>
+        <li><code>cout = TSUM(c1, c2)</code></li>
+      </ul>
+      <p>The two carries <code>c1</code> and <code>c2</code> can never both
+      be the same non-zero value, so their sum always fits in one trit — a
+      plain TSUM combines them, with no further carry needed.</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>3 × <b>INPUT</b> — <code>a</code>, <code>b</code>, <code>cin</code></li>
+        <li>3 × <b>TSUM</b> + 2 × <b>TCARRY</b> — themselves subcircuits;
+            middle-click those to drill down to the gates</li>
+        <li>2 × <b>OUTPUT</b> — <code>sum</code>, <code>cout</code></li>
+      </ul>
+
+      <h4>Role</h4>
+      <p>FADD is a structural stand-in for <code>ADDER</code>. The truth
+      table below is generated live by running it — all 27 input
+      combinations, identical to the native <code>ADDER</code>'s.</p>`,
+  },
 };
 
 // Pin table read straight from the live TYPES definition.
@@ -4368,11 +4491,11 @@ function showInfoEntry(key) {
     html += '<h4>Truth table — generated live from the simulator</h4>' +
             infoTruthTable(key);
   } else if (isBuiltinSub) {
-    // A small subcircuit (≤ 2 inputs) gets a full live truth table; a
-    // larger one would have too many rows (3ⁿ) to be useful.
+    // A small subcircuit (≤ 3 inputs, so ≤ 27 rows) gets a full live truth
+    // table; a larger one would have too many rows (3ⁿ) to be useful.
     const subDef = subInstanceDef({ type: key });
     const nIn = Object.keys(subDef.pins).filter(p => subDef.pins[p].kind === 'in').length;
-    if (nIn <= 2) {
+    if (nIn <= 3) {
       html += '<h4>Truth table — generated live from the simulator</h4>' +
               infoSubTruthTable(key);
     }
@@ -4730,18 +4853,152 @@ function buildActDef() {
   };
 }
 
-// The subcircuits this build ships with — the ternary neural-net toolkit:
-//   TMUL  multiply-by-trit          (w, x → p)
-//   MAC3  3-element dot product     (w0..2, x0..2 → lo, hi)
-//   ACT   sign() activation         (lo, hi → s)
-// Seeded into the library at boot and re-seeded after a load, so they are
-// always available to place — even in a fresh or imported circuit. The
-// `if absent` guard means a loaded file's own same-named definition (which
-// may have been edited) is never overwritten by the built-in.
+// TSUM — the carry-free balanced-ternary sum of two trits: x + y folded
+// back into {T,0,+1}. Mod-3 addition is non-monotone, so it cannot be made
+// from MIN/MAX alone (those are monotone). The non-monotone primitive is the
+// MUX: operand y selects one of three rotations of x.
+function buildTsumDef() {
+  const { comps, wires } = buildExample((c, w) => ({
+    comps: [
+      c('x',   'INPUT',  40,  40,  { value: 0, name: 'x' }),
+      c('y',   'INPUT',  40,  330, { value: 0, name: 'y' }),
+      c('cN',  'CONST',  40,  120, { value: -1 }),
+      c('cZ',  'CONST',  40,  170, { value: 0 }),
+      c('cP',  'CONST',  40,  220, { value: 1 }),
+      c('rUp', 'MUX',    220, 40),
+      c('rDn', 'MUX',    220, 200),
+      c('mux', 'MUX',    440, 150),
+      c('s',   'OUTPUT', 620, 190, { name: 'sum' }),
+    ],
+    wires: [
+      // rUp = rotate-up(x):   x = T/0/+1 routes 0 / +1 / T
+      w('x',  'out', 'rUp', 's'),
+      w('cZ', 'out', 'rUp', 'dT'),
+      w('cP', 'out', 'rUp', 'd0'),
+      w('cN', 'out', 'rUp', 'dP'),
+      // rDn = rotate-down(x): x = T/0/+1 routes +1 / T / 0
+      w('x',  'out', 'rDn', 's'),
+      w('cP', 'out', 'rDn', 'dT'),
+      w('cN', 'out', 'rDn', 'd0'),
+      w('cZ', 'out', 'rDn', 'dP'),
+      // y selects rotate-down / x unchanged / rotate-up
+      w('y',   'out', 'mux', 's'),
+      w('rDn', 'out', 'mux', 'dT'),
+      w('x',   'out', 'mux', 'd0'),
+      w('rUp', 'out', 'mux', 'dP'),
+      w('mux', 'out', 's',   'in'),
+    ],
+  }));
+  return {
+    inputs: [{ name: 'x' }, { name: 'y' }],
+    outputs: [{ name: 'sum' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
+// TCARRY — the carry of adding two trits: +1 only when both are +1, T only
+// when both are T, else 0. The carry is monotone, so MIN/MAX carry the load;
+// operand y selects MIN(x,0) / 0 / MAX(x,0).
+function buildTcarryDef() {
+  const { comps, wires } = buildExample((c, w) => ({
+    comps: [
+      c('x',   'INPUT',  40,  40,  { value: 0, name: 'x' }),
+      c('y',   'INPUT',  40,  300, { value: 0, name: 'y' }),
+      c('cZ',  'CONST',  40,  170, { value: 0 }),
+      c('mn',  'MIN',    220, 40),
+      c('mx',  'MAX',    220, 150),
+      c('mux', 'MUX',    420, 120),
+      c('c',   'OUTPUT', 600, 160, { name: 'carry' }),
+    ],
+    wires: [
+      w('x',  'out', 'mn', 'a'),
+      w('cZ', 'out', 'mn', 'b'),
+      w('x',  'out', 'mx', 'a'),
+      w('cZ', 'out', 'mx', 'b'),
+      w('y',  'out', 'mux', 's'),
+      w('mn', 'out', 'mux', 'dT'),
+      w('cZ', 'out', 'mux', 'd0'),
+      w('mx', 'out', 'mux', 'dP'),
+      w('mux','out', 'c',   'in'),
+    ],
+  }));
+  return {
+    inputs: [{ name: 'x' }, { name: 'y' }],
+    outputs: [{ name: 'carry' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
+// FADD — a full-trit adder built structurally from TSUM/TCARRY subcircuits:
+// the circuit-level equivalent of the native ADDER. Two half-adds chain
+// a, b and cin; a final TSUM combines the two carries into the carry-out.
+function buildFaddDef() {
+  const { comps, wires } = buildExample((c, w) => ({
+    comps: [
+      c('a',    'INPUT',      40,  40,  { value: 0, name: 'a' }),
+      c('b',    'INPUT',      40,  130, { value: 0, name: 'b' }),
+      c('cin',  'INPUT',      40,  360, { value: 0, name: 'cin' }),
+      c('ha1s', 'SUB:TSUM',   230, 40),
+      c('ha1c', 'SUB:TCARRY', 230, 210),
+      c('ha2s', 'SUB:TSUM',   450, 70),
+      c('ha2c', 'SUB:TCARRY', 450, 300),
+      c('csum', 'SUB:TSUM',   670, 200),
+      c('outS', 'OUTPUT',     880, 110, { name: 'sum' }),
+      c('outC', 'OUTPUT',     880, 250, { name: 'cout' }),
+    ],
+    wires: [
+      // half-add 1:  a + b
+      w('a', 'out', 'ha1s', 'x'),
+      w('b', 'out', 'ha1s', 'y'),
+      w('a', 'out', 'ha1c', 'x'),
+      w('b', 'out', 'ha1c', 'y'),
+      // half-add 2:  (sum of half-add 1) + cin
+      w('ha1s', 'sum', 'ha2s', 'x'),
+      w('cin',  'out', 'ha2s', 'y'),
+      w('ha1s', 'sum', 'ha2c', 'x'),
+      w('cin',  'out', 'ha2c', 'y'),
+      // carry-out = TSUM of the two carries (always in range — no wrap)
+      w('ha1c', 'carry', 'csum', 'x'),
+      w('ha2c', 'carry', 'csum', 'y'),
+      // results
+      w('ha2s', 'sum', 'outS', 'in'),
+      w('csum', 'sum', 'outC', 'in'),
+    ],
+  }));
+  return {
+    inputs: [{ name: 'a' }, { name: 'b' }, { name: 'cin' }],
+    outputs: [{ name: 'sum' }, { name: 'cout' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
+// The subcircuits this build ships with. Each names its builder and the kit
+// (library-panel heading) it belongs to.
+const BUILTIN_SUBCIRCUITS = {
+  TMUL:   { kit: 'Neural-Net Kit', build: buildTmulDef },
+  MAC3:   { kit: 'Neural-Net Kit', build: buildMac3Def },
+  ACT:    { kit: 'Neural-Net Kit', build: buildActDef },
+  TSUM:   { kit: 'Arithmetic Kit', build: buildTsumDef },
+  TCARRY: { kit: 'Arithmetic Kit', build: buildTcarryDef },
+  FADD:   { kit: 'Arithmetic Kit', build: buildFaddDef },
+};
+// Kit headings, in library-panel order.
+const BUILTIN_SUBCIRCUIT_KITS = [
+  { label: 'Neural-Net Kit', names: ['TMUL', 'MAC3', 'ACT'] },
+  { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD'] },
+];
+// Seed the built-ins into the library. Called at boot and re-called after a
+// load; the `if absent` guard means a loaded file's own same-named
+// definition (perhaps edited) is never overwritten by the built-in.
 function registerBuiltinSubcircuits() {
-  if (!subcircuitDefs['TMUL']) subcircuitDefs['TMUL'] = buildTmulDef();
-  if (!subcircuitDefs['MAC3']) subcircuitDefs['MAC3'] = buildMac3Def();
-  if (!subcircuitDefs['ACT'])  subcircuitDefs['ACT']  = buildActDef();
+  for (const name in BUILTIN_SUBCIRCUITS)
+    if (!subcircuitDefs[name]) subcircuitDefs[name] = BUILTIN_SUBCIRCUITS[name].build();
 }
 
 const EXAMPLES = {
@@ -5848,7 +6105,8 @@ test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () =
 });
 
 test('Info reference has detailed pages for the built-in subcircuits', () => {
-  for (const key of ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']) {
+  for (const key of ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT',
+                      'SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD']) {
     const e = COMPONENT_INFO[key];
     if (!e) throw new Error(`no COMPONENT_INFO entry for ${key}`);
     if (!e.name || !e.tagline || !e.body) throw new Error(`${key} info entry is incomplete`);
@@ -5867,12 +6125,36 @@ test('Info reference has detailed pages for the built-in subcircuits', () => {
 
 test('Subcircuit library protects built-ins; only user blocks are deletable', () => {
   registerBuiltinSubcircuits();
-  for (const n of ['TMUL', 'MAC3', 'ACT']) {
+  for (const n of ['TMUL', 'MAC3', 'ACT', 'TSUM', 'TCARRY', 'FADD']) {
     assertEq(isBuiltinSubcircuit(n), true, `${n} is built-in:`);
     deleteSubcircuit(n);   // protected — must be a no-op, not a deletion
     if (!subcircuitDefs[n]) throw new Error(`built-in subcircuit "${n}" was deleted`);
   }
   assertEq(isBuiltinSubcircuit('MyBlock7'), false, 'a user-named block is not built-in:');
+});
+
+test('Gate-level TSUM / TCARRY subcircuits match the balanced-ternary add tables', () => {
+  registerBuiltinSubcircuits();
+  for (const x of [-1, 0, 1]) for (const y of [-1, 0, 1]) {
+    const total = x + y;
+    let sum = total, carry = 0;
+    if (total === 2)  { sum = -1; carry = 1; }
+    if (total === -2) { sum = 1;  carry = -1; }
+    const ts = simulateSubInstance({ type: 'SUB:TSUM',   state: {} }, { x, y });
+    const tc = simulateSubInstance({ type: 'SUB:TCARRY', state: {} }, { x, y });
+    assertEq(ts.sum,   sum   || 0, `TSUM(${x},${y}):`);
+    assertEq(tc.carry, carry || 0, `TCARRY(${x},${y}):`);
+  }
+});
+
+test('Gate-level FADD subcircuit matches the native ADDER for all 27 inputs', () => {
+  registerBuiltinSubcircuits();
+  for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) for (const cin of [-1, 0, 1]) {
+    const got  = simulateSubInstance({ type: 'SUB:FADD', state: {} }, { a, b, cin });
+    const want = TYPES.ADDER.eval(null, { a, b, cin });
+    assertEq(got.sum,  want.sum,  `FADD sum (a=${a},b=${b},cin=${cin}):`);
+    assertEq(got.cout, want.cout, `FADD cout (a=${a},b=${b},cin=${cin}):`);
+  }
 });
 
 // ---- custom-gate registration & evaluation ----
