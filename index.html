@@ -4362,6 +4362,84 @@ function buildTmulDef() {
   };
 }
 
+// A complete 3-element ternary-weight dot product, packaged as a subcircuit:
+// inputs w0..w2 and x0..x2, outputs the 2-trit result lo/hi (value 3·hi+lo).
+// Inside it is the ternary-MAC example — three multiply-by-trit cells
+// (STI + MUX) feeding an ADDER tree.  One MAC3 block is one neuron's worth
+// of arithmetic.
+function buildMac3Def() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [], wires = [];
+    comps.push(c('z', 'CONST', 40, 360, { value: 0 }));
+    for (let i = 0; i < 3; i++) {
+      const y = 40 + i * 90;
+      comps.push(c('w' + i,  'INPUT', 40, y,      { value: 0, name: 'w' + i }));
+      comps.push(c('x' + i,  'INPUT', 40, y + 42, { value: 0, name: 'x' + i }));
+      comps.push(c('ng' + i, 'STI',   200, y + 24));
+      comps.push(c('mx' + i, 'MUX',   340, y + 12));
+      wires.push(w('x' + i,  'out', 'ng' + i, 'in'));
+      wires.push(w('w' + i,  'out', 'mx' + i, 's'));
+      wires.push(w('ng' + i, 'out', 'mx' + i, 'dT'));
+      wires.push(w('z',      'out', 'mx' + i, 'd0'));
+      wires.push(w('x' + i,  'out', 'mx' + i, 'dP'));
+    }
+    comps.push(c('a1', 'ADDER', 500, 90));
+    comps.push(c('a2', 'ADDER', 640, 210));
+    comps.push(c('a3', 'ADDER', 640, 340));
+    comps.push(c('lo', 'OUTPUT', 820, 236, { name: 'lo' }));
+    comps.push(c('hi', 'OUTPUT', 820, 366, { name: 'hi' }));
+    wires.push(w('mx0', 'out',  'a1', 'a'));
+    wires.push(w('mx1', 'out',  'a1', 'b'));
+    wires.push(w('z',   'out',  'a1', 'cin'));
+    wires.push(w('a1',  'sum',  'a2', 'a'));
+    wires.push(w('mx2', 'out',  'a2', 'b'));
+    wires.push(w('z',   'out',  'a2', 'cin'));
+    wires.push(w('a1',  'cout', 'a3', 'a'));
+    wires.push(w('a2',  'cout', 'a3', 'b'));
+    wires.push(w('z',   'out',  'a3', 'cin'));
+    wires.push(w('a2',  'sum',  'lo', 'in'));
+    wires.push(w('a3',  'sum',  'hi', 'in'));
+    return { comps, wires };
+  });
+  return {
+    inputs: [{ name: 'w0' }, { name: 'w1' }, { name: 'w2' },
+             { name: 'x0' }, { name: 'x1' }, { name: 'x2' }],
+    outputs: [{ name: 'lo' }, { name: 'hi' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, x) => Math.max(m, x.id), 0) + 1,
+  };
+}
+
+// The sign() activation, packaged as a subcircuit: inputs lo/hi (a 2-trit
+// value, −3..+3), output s = sign of that value, one trit {T,0,+1}.
+// The high trit dominates (|3·hi| ≥ 3 > |lo|), so sign is just "hi when hi
+// is non-zero, else lo" — which is exactly one MUX selecting on hi.
+function buildActDef() {
+  const { comps, wires } = buildExample((c, w) => ({
+    comps: [
+      c('lo', 'INPUT',  40,  40,  { value: 0, name: 'lo' }),
+      c('hi', 'INPUT',  40,  110, { value: 0, name: 'hi' }),
+      c('mx', 'MUX',    220, 60),
+      c('s',  'OUTPUT', 400, 100, { name: 's' }),
+    ],
+    wires: [
+      w('hi', 'out', 'mx', 's'),    // select on the high trit
+      w('hi', 'out', 'mx', 'dT'),   // hi = T  → output hi (= T)
+      w('lo', 'out', 'mx', 'd0'),   // hi = 0  → output lo
+      w('hi', 'out', 'mx', 'dP'),   // hi = +1 → output hi (= +1)
+      w('mx', 'out', 's',  'in'),
+    ],
+  }));
+  return {
+    inputs: [{ name: 'lo' }, { name: 'hi' }],
+    outputs: [{ name: 's' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, x) => Math.max(m, x.id), 0) + 1,
+  };
+}
+
 const EXAMPLES = {
   'sti-inverter': {
     label: 'STI inverter (NEG)',
@@ -4877,6 +4955,78 @@ const EXAMPLES = {
       });
     },
   },
+  'ternary-mlp': {
+    label: 'Ternary MLP — a 2-layer network with activation',
+    build: () => {
+      // Register the two subcircuits this example places.
+      subcircuitDefs['MAC3'] = buildMac3Def();
+      subcircuitDefs['ACT']  = buildActDef();
+      return buildExample((c, w) => {
+        // A two-layer ternary neural network:
+        //
+        //   x → [layer 1: MAC3 ×3] → [ACT ×3] → h → [layer 2: MAC3] → [ACT] → y
+        //
+        //   Layer 1   3 neurons, weight matrix W1 (3×3), shared input x.
+        //   ACT       sign() — the nonlinearity. It maps each neuron's
+        //             2-trit output (−3..+3) back to ONE trit so the next
+        //             layer can consume it. This is the decision step: the
+        //             matmul either side of it is linear (photonics' home
+        //             turf), but sign() is a threshold — exactly where a
+        //             photonic build would hand back to electronics.
+        //   Layer 2   1 output neuron, weight vector W2, over the hidden h.
+        //   ACT       sign() again — so the network's output y is a 3-way
+        //             classification {T, 0, +1}.
+        //
+        // Without the ACT blocks the two matmuls would collapse into one
+        // (W2·W1·x is still linear) — the activation is what makes depth
+        // mean something.
+        //
+        // Defaults:  x = (+1,+1,T)
+        //   W1 = [(+1,0,T),(T,+1,+1),(0,T,0)] → h_pre (2,−1,−1) → h (+1,T,T)
+        //   W2 = (+1,+1,T)                    → y_pre  1        → y  +1
+        const comps = [];
+        const wires = [];
+        const xv = [1, 1, -1];
+        const W1 = [[1, 0, -1], [-1, 1, 1], [0, -1, 0]];
+        const W2 = [1, 1, -1];
+        // Shared input vector — fans out to all three layer-1 neurons.
+        for (let i = 0; i < 3; i++)
+          comps.push(c('x' + i, 'INPUT', 30, 250 + i * 44, { value: xv[i], name: 'x' + i }));
+        // Layer 1 — three neurons, each a MAC3 (dot product) then an ACT.
+        for (let j = 0; j < 3; j++) {
+          const yB = 40 + j * 210;
+          for (let i = 0; i < 3; i++)
+            comps.push(c('w1_' + j + i, 'INPUT', 150, yB + 12 + i * 22,
+                         { value: W1[j][i], name: 'W1_' + j + i }));
+          comps.push(c('mac1_' + j, 'SUB:MAC3', 300, yB));
+          comps.push(c('act1_' + j, 'SUB:ACT',  490, yB + 30));
+          comps.push(c('h' + j, 'OUTPUT', 620, yB + 48, { name: 'h' + j }));
+          for (let i = 0; i < 3; i++) {
+            wires.push(w('w1_' + j + i, 'out', 'mac1_' + j, 'w' + i));
+            wires.push(w('x' + i,       'out', 'mac1_' + j, 'x' + i));
+          }
+          wires.push(w('mac1_' + j, 'lo', 'act1_' + j, 'lo'));
+          wires.push(w('mac1_' + j, 'hi', 'act1_' + j, 'hi'));
+          wires.push(w('act1_' + j, 's',  'h' + j, 'in'));
+        }
+        // Layer 2 — one output neuron over the three hidden activations.
+        for (let i = 0; i < 3; i++)
+          comps.push(c('w2_' + i, 'INPUT', 690, 250 + i * 44,
+                       { value: W2[i], name: 'W2_' + i }));
+        comps.push(c('mac2', 'SUB:MAC3', 840, 236));
+        comps.push(c('act2', 'SUB:ACT',  1030, 266));
+        comps.push(c('y', 'OUTPUT', 1170, 284, { name: 'y' }));
+        for (let i = 0; i < 3; i++) {
+          wires.push(w('w2_' + i,   'out', 'mac2', 'w' + i));
+          wires.push(w('act1_' + i, 's',   'mac2', 'x' + i));
+        }
+        wires.push(w('mac2', 'lo', 'act2', 'lo'));
+        wires.push(w('mac2', 'hi', 'act2', 'hi'));
+        wires.push(w('act2', 's',  'y', 'in'));
+        return { comps, wires };
+      });
+    },
+  },
 };
 
 function loadExampleNamed(name) {
@@ -5333,6 +5483,41 @@ test('Ternary layer computes y = W·x for each row, over a deterministic sample'
       const want = (W[j][0] * x[0] + W[j][1] * x[1] + W[j][2] * x[2]) || 0;
       assertEq(got, want, `layer row ${j} sample ${s} (x=${x}, W${j}=${W[j]}):`);
     }
+  }
+});
+
+test('Ternary MLP runs both layers through the sign activation, sampled', () => {
+  const { comps, wires } = EXAMPLES['ternary-mlp'].build();
+  const inByName = {}, outSrc = {};
+  for (const c of comps) {
+    if (c.type === 'INPUT') inByName[c.state.name] = c;
+    if (c.type === 'OUTPUT') {
+      const wr = wires.find(w => w.toId === c.id && w.toPort === 'in');
+      outSrc[c.state.name] = wr ? `${wr.fromId}:${wr.fromPort}` : null;
+    }
+  }
+  const sgn = v => (v < 0 ? -1 : v > 0 ? 1 : 0);
+  let seed = 9001;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let s = 0; s < 600; s++) {
+    const x = [nextTrit(), nextTrit(), nextTrit()];
+    const W1 = [], W2 = [];
+    for (let j = 0; j < 3; j++) W1.push([nextTrit(), nextTrit(), nextTrit()]);
+    for (let i = 0; i < 3; i++) W2.push(nextTrit());
+    for (let i = 0; i < 3; i++) inByName['x' + i].state.value = x[i];
+    for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++)
+      inByName['W1_' + j + i].state.value = W1[j][i];
+    for (let i = 0; i < 3; i++) inByName['W2_' + i].state.value = W2[i];
+    const scope = { comps, wires, outVals: {} };
+    simulateScope(scope);
+    // Reference: layer-1 dot products → sign → layer-2 dot product → sign.
+    const h = [];
+    for (let j = 0; j < 3; j++)
+      h.push(sgn(W1[j][0] * x[0] + W1[j][1] * x[1] + W1[j][2] * x[2]));
+    const y = sgn(W2[0] * h[0] + W2[1] * h[1] + W2[2] * h[2]);
+    for (let j = 0; j < 3; j++)
+      assertEq(scope.outVals[outSrc['h' + j]], h[j], `MLP h${j} sample ${s}:`);
+    assertEq(scope.outVals[outSrc.y], y, `MLP y sample ${s}:`);
   }
 });
 
