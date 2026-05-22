@@ -4147,7 +4147,7 @@ const COMPONENT_INFO = {
         <li>1 × <b>CONST 0</b> — the zero selected when <code>w = 0</code></li>
         <li>1 × <b>STI</b> — negates <code>x</code> to feed the MUX's
             <code>dT</code> data input</li>
-        <li>1 × <b>MUX</b> — select <code>s = w</code>; data inputs
+        <li>1 × <b>MUX3</b> — select <code>s = w</code>; data inputs
             <code>dT = −x</code>, <code>d0 = 0</code>, <code>dP = x</code></li>
         <li>1 × <b>OUTPUT</b> — the pin <code>p</code></li>
       </ul>
@@ -4194,7 +4194,7 @@ const COMPONENT_INFO = {
             <code>x0,x1,x2</code></li>
         <li>1 × <b>CONST 0</b> — one shared zero, used for the MUX
             <code>d0</code> inputs and the three adder carry-ins</li>
-        <li>3 × <b>STI</b> + 3 × <b>MUX</b> — the three multiply-by-trit cells</li>
+        <li>3 × <b>STI</b> + 3 × <b>MUX3</b> — the three multiply-by-trit cells</li>
         <li>3 × <b>ADDER</b> — the summation tree described above</li>
         <li>2 × <b>OUTPUT</b> — the result pins <code>lo</code> and <code>hi</code></li>
       </ul>
@@ -4251,7 +4251,7 @@ const COMPONENT_INFO = {
       <h4>Internal structure</h4>
       <ul>
         <li>2 × <b>INPUT</b> — the pins <code>lo</code> and <code>hi</code></li>
-        <li>1 × <b>MUX</b> — select <code>s = hi</code>; data inputs
+        <li>1 × <b>MUX3</b> — select <code>s = hi</code>; data inputs
             <code>dT = hi</code>, <code>d0 = lo</code>, <code>dP = hi</code>.
             The high trit is wired to <em>both</em> of its own non-zero
             select cases, so a non-zero <code>hi</code> passes itself
@@ -4312,8 +4312,8 @@ const COMPONENT_INFO = {
       <ul>
         <li>2 × <b>INPUT</b> — <code>x</code>, <code>y</code></li>
         <li>3 × <b>CONST</b> — the trits T, 0, +1</li>
-        <li>2 × <b>MUX</b> — rotate-up and rotate-down of <code>x</code></li>
-        <li>1 × <b>MUX</b> — <code>y</code> selects rotate-down / x / rotate-up</li>
+        <li>2 × <b>MUX3</b> — rotate-up and rotate-down of <code>x</code></li>
+        <li>1 × <b>MUX3</b> — <code>y</code> selects rotate-down / x / rotate-up</li>
         <li>1 × <b>OUTPUT</b> — <code>sum</code></li>
       </ul>
 
@@ -4347,7 +4347,7 @@ const COMPONENT_INFO = {
         <li>2 × <b>INPUT</b> — <code>x</code>, <code>y</code></li>
         <li>1 × <b>CONST 0</b></li>
         <li>1 × <b>MIN</b> + 1 × <b>MAX</b> — clamp x to its negative / positive part</li>
-        <li>1 × <b>MUX</b> — <code>y</code> selects MIN / 0 / MAX</li>
+        <li>1 × <b>MUX3</b> — <code>y</code> selects MIN / 0 / MAX</li>
         <li>1 × <b>OUTPUT</b> — <code>carry</code></li>
       </ul>
 
@@ -4442,7 +4442,7 @@ const COMPONENT_INFO = {
         <li>3 × <b>FADD</b> — the ripple-carry adder. Each FADD is itself a
             subcircuit; middle-click to drill down to TSUM / TCARRY, then to
             the gates.</li>
-        <li>4 × <b>MUX</b> + 1 × <b>CONST 0</b> — the op-selected output</li>
+        <li>4 × <b>MUX3</b> + 1 × <b>CONST 0</b> — the op-selected output</li>
         <li>4 × <b>OUTPUT</b> — <code>r0..r2</code>, <code>cout</code></li>
       </ul>
 
@@ -4468,9 +4468,11 @@ const COMPONENT_INFO = {
       <h4>Why this one matters</h4>
       <p>Every other block in the kit — TMUL, ACT, TSUM, TCARRY — leans on
       the MUX as if it were a fundamental primitive. MUX3 shows it is not:
-      the MUX itself reduces to MIN / MAX / inverters. So the whole tower —
-      <code>ALU3 → FADD → TSUM → MUX</code> — bottoms out at the same handful
-      of gates.</p>
+      the MUX itself reduces to MIN / MAX / inverters. And those blocks now
+      place a <b>MUX3</b> wherever they need a multiplexer — no native MUX
+      anywhere in the kit — so the whole tower,
+      <code>ALU3 → FADD → TSUM → MUX3</code>, bottoms out at one floor:
+      MIN, MAX, and the inverters.</p>
       <p>It also sharpens an earlier claim. TSUM needs a MUX because mod-3
       addition is <em>non-monotone</em> while MIN and MAX are monotone — but
       the MUX is not the only non-monotone primitive. The <b>inverters</b>
@@ -4862,7 +4864,7 @@ function buildTmulDef() {
       c('x',  'INPUT',  40,  110, { value: 0, name: 'x' }),
       c('z',  'CONST',  40,  180, { value: 0 }),
       c('ng', 'STI',    190, 95),
-      c('mx', 'MUX',    330, 78),
+      c('mx', 'SUB:MUX3', 330, 78),
       c('p',  'OUTPUT', 500, 120, { name: 'p' }),
     ],
     wires: [
@@ -4897,7 +4899,7 @@ function buildMac3Def() {
       comps.push(c('w' + i,  'INPUT', 40, y,      { value: 0, name: 'w' + i }));
       comps.push(c('x' + i,  'INPUT', 40, y + 42, { value: 0, name: 'x' + i }));
       comps.push(c('ng' + i, 'STI',   200, y + 24));
-      comps.push(c('mx' + i, 'MUX',   340, y + 12));
+      comps.push(c('mx' + i, 'SUB:MUX3', 340, y + 12));
       wires.push(w('x' + i,  'out', 'ng' + i, 'in'));
       wires.push(w('w' + i,  'out', 'mx' + i, 's'));
       wires.push(w('ng' + i, 'out', 'mx' + i, 'dT'));
@@ -4941,7 +4943,7 @@ function buildActDef() {
     comps: [
       c('lo', 'INPUT',  40,  40,  { value: 0, name: 'lo' }),
       c('hi', 'INPUT',  40,  110, { value: 0, name: 'hi' }),
-      c('mx', 'MUX',    220, 60),
+      c('mx', 'SUB:MUX3', 220, 60),
       c('s',  'OUTPUT', 400, 100, { name: 's' }),
     ],
     wires: [
@@ -4973,9 +4975,9 @@ function buildTsumDef() {
       c('cN',  'CONST',  40,  120, { value: -1 }),
       c('cZ',  'CONST',  40,  170, { value: 0 }),
       c('cP',  'CONST',  40,  220, { value: 1 }),
-      c('rUp', 'MUX',    220, 40),
-      c('rDn', 'MUX',    220, 200),
-      c('mux', 'MUX',    440, 150),
+      c('rUp', 'SUB:MUX3', 220, 40),
+      c('rDn', 'SUB:MUX3', 220, 200),
+      c('mux', 'SUB:MUX3', 440, 150),
       c('s',   'OUTPUT', 620, 190, { name: 'sum' }),
     ],
     wires: [
@@ -5017,7 +5019,7 @@ function buildTcarryDef() {
       c('cZ',  'CONST',  40,  170, { value: 0 }),
       c('mn',  'MIN',    220, 40),
       c('mx',  'MAX',    220, 150),
-      c('mux', 'MUX',    420, 120),
+      c('mux', 'SUB:MUX3', 420, 120),
       c('c',   'OUTPUT', 600, 160, { name: 'carry' }),
     ],
     wires: [
@@ -5103,7 +5105,7 @@ function buildAlu3Def() {
       comps.push(c('mn' + i, 'MIN',     230, yB));
       comps.push(c('mx' + i, 'MAX',     230, yB + 70));
       comps.push(c('fa' + i, 'SUB:FADD',410, yB));
-      comps.push(c('rm' + i, 'MUX',     620, yB + 20));
+      comps.push(c('rm' + i, 'SUB:MUX3', 620, yB + 20));
       comps.push(c('r' + i,  'OUTPUT',  800, yB + 38, { name: 'r' + i }));
       // per-trit MIN and MAX
       wires.push(w('a' + i, 'out', 'mn' + i, 'a'));
@@ -5123,7 +5125,7 @@ function buildAlu3Def() {
       wires.push(w('rm' + i, 'out', 'r' + i,  'in'));
     }
     // carry-out: the ripple carry for ADD, a constant 0 for MIN and MAX
-    comps.push(c('cm', 'MUX',    620, 510));
+    comps.push(c('cm', 'SUB:MUX3', 620, 510));
     comps.push(c('co', 'OUTPUT', 800, 528, { name: 'cout' }));
     wires.push(w('op',  'out',  'cm', 's'));
     wires.push(w('cZ',  'out',  'cm', 'dT'));
