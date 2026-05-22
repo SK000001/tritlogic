@@ -285,20 +285,6 @@
   .sub-cat:first-child { margin-top: 2px; }
   .sub-hint { font-size: 11px; color: var(--muted); padding: 2px 4px 4px; }
 
-  /* Lightweight right-click menu (subcircuit library) */
-  .ctx-menu {
-    position: fixed; z-index: 2000;
-    background: var(--panel-2); border: 1px solid var(--border);
-    border-radius: 6px; padding: 3px; min-width: 150px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.55);
-  }
-  .ctx-item {
-    padding: 6px 10px; font-size: 12px; border-radius: 4px;
-    cursor: pointer; color: var(--text); user-select: none;
-  }
-  .ctx-item:hover { background: var(--accent); color: #11141a; }
-  .ctx-item.danger:hover { background: var(--t-neg); color: #11141a; }
-
   .selection-rect {
     pointer-events: none;
   }
@@ -1989,32 +1975,6 @@ function boundingBox(items) {
 const BUILTIN_SUBCIRCUIT_NAMES = ['TMUL', 'MAC3', 'ACT'];
 function isBuiltinSubcircuit(name) { return BUILTIN_SUBCIRCUIT_NAMES.includes(name); }
 
-// ---- lightweight right-click menu ----------------------------------------
-// A single floating menu, used by the subcircuit library. Created on demand,
-// dismissed on any click elsewhere or on Escape.
-let _ctxMenuEl = null;
-function hideContextMenu() {
-  if (_ctxMenuEl) { _ctxMenuEl.remove(); _ctxMenuEl = null; }
-}
-function showContextMenu(x, y, items) {
-  hideContextMenu();
-  const menu = document.createElement('div');
-  menu.className = 'ctx-menu';
-  for (const it of items) {
-    const row = document.createElement('div');
-    row.className = 'ctx-item' + (it.danger ? ' danger' : '');
-    row.textContent = it.label;
-    row.addEventListener('click', (e) => { e.stopPropagation(); hideContextMenu(); it.fn(); });
-    menu.appendChild(row);
-  }
-  menu.style.left = x + 'px';
-  menu.style.top = y + 'px';
-  document.body.appendChild(menu);
-  _ctxMenuEl = menu;
-}
-document.addEventListener('click', hideContextMenu);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideContextMenu(); });
-
 // Delete a subcircuit definition. Built-ins are protected — only
 // user-created subcircuits can be removed.
 function deleteSubcircuit(name) {
@@ -2067,7 +2027,7 @@ function refreshSubLib() {
     const def = subcircuitDefs[name];
     const el = document.createElement('div');
     el.className = 'sub-entry';
-    el.title = 'Click to place · right-click for options';
+    el.title = 'Click to place · middle-click (scroll-wheel press) to edit on canvas';
     el.innerHTML = ICON +
       `<div>${escapeHtml(name)}</div>` +
       `<span class="pin-counts">${def.inputs.length}→${def.outputs.length}</span>` +
@@ -2076,12 +2036,16 @@ function refreshSubLib() {
       if (e.target.tagName === 'BUTTON') { deleteSubcircuit(e.target.dataset.del); return; }
       setTool('place', 'SUB:' + name);
     });
-    el.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      const items = [{ label: 'Edit on canvas', fn: () => editSubcircuit(name) }];
-      if (deletable) items.push({ label: 'Delete', danger: true, fn: () => deleteSubcircuit(name) });
-      showContextMenu(e.clientX, e.clientY, items);
+    // Middle-click (the scroll-wheel button) edits the subcircuit on the
+    // canvas. The mousedown handler suppresses the browser's middle-click
+    // autoscroll so the gesture is free; auxclick is the actual trigger.
+    el.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+    el.addEventListener('auxclick', (e) => {
+      if (e.button === 1) { e.preventDefault(); editSubcircuit(name); }
     });
+    // Right-click is the canvas's delete gesture — keep the browser's native
+    // menu from popping up on a library entry, but do nothing else with it.
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
     lib.appendChild(el);
   }
 
@@ -4107,11 +4071,12 @@ const COMPONENT_INFO = {
       and reads the inner OUTPUTs back out — clocks and flip-flops inside are
       stepped along with the rest of the design.</p>
       <h4>Editing</h4>
-      <p>A subcircuit is not editable in place, but <b>right-click any entry
-      in the library</b> and choose <b>Edit on canvas</b>: that loads the
-      block's internal components and wires back onto the canvas, where you
-      can change them and <b>Pack</b> them again. Existing instances of the
-      old definition keep working until they are replaced.</p>
+      <p>A subcircuit is not editable in place, but <b>middle-click</b> (a
+      press of the scroll-wheel button) on any entry in the library to
+      <b>edit it on the canvas</b>: that loads the block's internal
+      components and wires back onto the canvas, where you can change them
+      and <b>Pack</b> them again. Existing instances of the old definition
+      keep working until they are replaced.</p>
       <h4>Built-in vs. your own</h4>
       <p>The blocks under the <b>Neural-Net Kit</b> heading
       (<code>TMUL</code>, <code>MAC3</code>, <code>ACT</code>) ship with the
