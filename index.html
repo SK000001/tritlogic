@@ -4157,6 +4157,7 @@ document.getElementById('file-input').addEventListener('change', (e) => {
       view = data.view || { tx: 40, ty: 40, scale: 1 };
       tick = data.tick || 0;
       subcircuitDefs = data.subcircuitDefs || {};
+      registerBuiltinSubcircuits();   // keep the built-ins present after a load
       customGates    = data.customGates    || {};
       selection.clear(); selectedWire = null;
       outVals = {};
@@ -4438,6 +4439,20 @@ function buildActDef() {
     nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
     nextWireId: wires.reduce((m, x) => Math.max(m, x.id), 0) + 1,
   };
+}
+
+// The subcircuits this build ships with — the ternary neural-net toolkit:
+//   TMUL  multiply-by-trit          (w, x → p)
+//   MAC3  3-element dot product     (w0..2, x0..2 → lo, hi)
+//   ACT   sign() activation         (lo, hi → s)
+// Seeded into the library at boot and re-seeded after a load, so they are
+// always available to place — even in a fresh or imported circuit. The
+// `if absent` guard means a loaded file's own same-named definition (which
+// may have been edited) is never overwritten by the built-in.
+function registerBuiltinSubcircuits() {
+  if (!subcircuitDefs['TMUL']) subcircuitDefs['TMUL'] = buildTmulDef();
+  if (!subcircuitDefs['MAC3']) subcircuitDefs['MAC3'] = buildMac3Def();
+  if (!subcircuitDefs['ACT'])  subcircuitDefs['ACT']  = buildActDef();
 }
 
 const EXAMPLES = {
@@ -5521,6 +5536,28 @@ test('Ternary MLP runs both layers through the sign activation, sampled', () => 
   }
 });
 
+test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () => {
+  registerBuiltinSubcircuits();
+  const expect = {
+    TMUL: { inputs: 2, outputs: 1 },
+    MAC3: { inputs: 6, outputs: 2 },
+    ACT:  { inputs: 2, outputs: 1 },
+  };
+  for (const name in expect) {
+    const def = subcircuitDefs[name];
+    if (!def) throw new Error(`built-in subcircuit "${name}" is not registered`);
+    assertEq(def.inputs.length, expect[name].inputs, `${name} input count:`);
+    assertEq(def.outputs.length, expect[name].outputs, `${name} output count:`);
+    // The definition must be self-consistent: every wire endpoint real.
+    const byId = {};
+    for (const ic of def.comps) byId[ic.id] = ic;
+    for (const wr of def.wires) {
+      if (!byId[wr.fromId] || !byId[wr.toId])
+        throw new Error(`${name}: wire references a missing component`);
+    }
+  }
+});
+
 // ---- custom-gate registration & evaluation ----
 test('Custom gate: table-lookup evaluation matches definition', () => {
   const savedGates = customGates;
@@ -5676,6 +5713,7 @@ function validateCircuit() {
 resize();
 loadExample();
 setTool('select');
+registerBuiltinSubcircuits();
 refreshSubLib();
 refreshGateLib();
 </script>
