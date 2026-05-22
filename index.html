@@ -4329,6 +4329,39 @@ function buildExample(buildFn) {
   return result;
 }
 
+// The "multiply-by-trit" cell, packaged as a subcircuit definition so the
+// matrix-vector example can place it as a single block instead of an STI +
+// MUX pair.  Inside: an STI negates the activation x, and a MUX uses the
+// weight trit w to select pass (w=+1) / zero (w=0) / negate (w=T).  The
+// block's output is p = w · x.
+function buildTmulDef() {
+  const { comps, wires } = buildExample((c, w) => ({
+    comps: [
+      c('w',  'INPUT',  40,  40,  { value: 0, name: 'w' }),
+      c('x',  'INPUT',  40,  110, { value: 0, name: 'x' }),
+      c('z',  'CONST',  40,  180, { value: 0 }),
+      c('ng', 'STI',    190, 95),
+      c('mx', 'MUX',    330, 78),
+      c('p',  'OUTPUT', 500, 120, { name: 'p' }),
+    ],
+    wires: [
+      w('x',  'out', 'ng', 'in'),
+      w('w',  'out', 'mx', 's'),
+      w('ng', 'out', 'mx', 'dT'),
+      w('z',  'out', 'mx', 'd0'),
+      w('x',  'out', 'mx', 'dP'),
+      w('mx', 'out', 'p',  'in'),
+    ],
+  }));
+  return {
+    inputs: [{ name: 'w' }, { name: 'x' }],
+    outputs: [{ name: 'p' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, x) => Math.max(m, x.id), 0) + 1,
+  };
+}
+
 const EXAMPLES = {
   'sti-inverter': {
     label: 'STI inverter (NEG)',
@@ -4781,6 +4814,69 @@ const EXAMPLES = {
       return { comps, wires };
     }),
   },
+  'ternary-layer': {
+    label: 'Ternary neural-net layer — matrix × vector',
+    build: () => {
+      // This example places the multiply-by-trit cell as a subcircuit, so
+      // ensure that TMUL definition is registered before it is referenced.
+      subcircuitDefs['TMUL'] = buildTmulDef();
+      return buildExample((c, w) => {
+        // y = W · x — a 3×3 ternary weight matrix times a 3-trit activation
+        // vector.  Each output yⱼ is its own neuron: the dot product of
+        // weight row j with the shared activation vector x.  In other words
+        // it is the ternary-MAC example, stacked three times — which is all
+        // a neural-net layer is.
+        //
+        // Every multiply is one TMUL block (the packed STI+MUX subcircuit);
+        // each row's three products feed an ADDER tree → a 2-trit output,
+        // value = 3·hi + lo.  The shared x inputs fan out to all three rows,
+        // which is exactly the weight-reuse a matrix-vector product is.
+        //
+        // Defaults:  x = (+1, +1, T)
+        //   W row 0 = (+1, 0, T)  → y0 =  2   (identical to the MAC example)
+        //   W row 1 = (T, +1, +1) → y1 = -1
+        //   W row 2 = (0, T,  0)  → y2 = -1
+        const comps = [];
+        const wires = [];
+        const xv = [1, 1, -1];
+        const wm = [[1, 0, -1], [-1, 1, 1], [0, -1, 0]];
+        comps.push(c('zero', 'CONST', 450, 250, { value: 0 }));
+        // Shared activation vector — one column, fanning out to every row.
+        for (let i = 0; i < 3; i++)
+          comps.push(c('x' + i, 'INPUT', 40, 300 + i * 72, { value: xv[i], name: 'x' + i }));
+        for (let j = 0; j < 3; j++) {
+          const rowY = 70 + j * 270;
+          for (let i = 0; i < 3; i++) {
+            const cy = rowY + i * 78;
+            comps.push(c('w' + j + i, 'INPUT', 150, cy + 8, { value: wm[j][i], name: 'w' + j + i }));
+            comps.push(c('m' + j + i, 'SUB:TMUL', 300, cy));
+            // Each TMUL takes a weight trit and a shared activation trit.
+            wires.push(w('w' + j + i, 'out', 'm' + j + i, 'w'));
+            wires.push(w('x' + i,     'out', 'm' + j + i, 'x'));
+          }
+          // Adder tree for row j: (p0 + p1), then + p2; the two carries
+          // sum to the result's high trit.
+          comps.push(c('a' + j + '1', 'ADDER', 470, rowY + 20));
+          comps.push(c('a' + j + '2', 'ADDER', 620, rowY + 96));
+          comps.push(c('a' + j + '3', 'ADDER', 620, rowY + 176));
+          comps.push(c('ylo' + j, 'OUTPUT', 790, rowY + 102, { name: 'y' + j + 'lo' }));
+          comps.push(c('yhi' + j, 'OUTPUT', 790, rowY + 182, { name: 'y' + j + 'hi' }));
+          wires.push(w('m' + j + '0', 'p',    'a' + j + '1', 'a'));
+          wires.push(w('m' + j + '1', 'p',    'a' + j + '1', 'b'));
+          wires.push(w('zero',        'out',  'a' + j + '1', 'cin'));
+          wires.push(w('a' + j + '1', 'sum',  'a' + j + '2', 'a'));
+          wires.push(w('m' + j + '2', 'p',    'a' + j + '2', 'b'));
+          wires.push(w('zero',        'out',  'a' + j + '2', 'cin'));
+          wires.push(w('a' + j + '1', 'cout', 'a' + j + '3', 'a'));
+          wires.push(w('a' + j + '2', 'cout', 'a' + j + '3', 'b'));
+          wires.push(w('zero',        'out',  'a' + j + '3', 'cin'));
+          wires.push(w('a' + j + '2', 'sum',  'ylo' + j, 'in'));
+          wires.push(w('a' + j + '3', 'sum',  'yhi' + j, 'in'));
+        }
+        return { comps, wires };
+      });
+    },
+  },
 };
 
 function loadExampleNamed(name) {
@@ -5152,8 +5248,11 @@ test('every preset example builds with wires connecting real in/out pins', () =>
     for (const wr of wires) {
       const fc = byId[wr.fromId], tc = byId[wr.toId];
       if (!fc || !tc) throw new Error(`${key} wire #${wr.id}: missing component`);
-      const fpin = TYPES[fc.type] && TYPES[fc.type].pins[wr.fromPort];
-      const tpin = TYPES[tc.type] && TYPES[tc.type].pins[wr.toPort];
+      // compDef resolves plain TYPES, GATE:, and SUB: types alike, so an
+      // example that places a subcircuit instance is checked correctly.
+      const fdef = compDef(fc), tdef = compDef(tc);
+      const fpin = fdef && fdef.pins && fdef.pins[wr.fromPort];
+      const tpin = tdef && tdef.pins && tdef.pins[wr.toPort];
       if (!fpin || fpin.kind !== 'out')
         throw new Error(`${key} wire #${wr.id}: ${fc.type}.${wr.fromPort} is not an output pin`);
       if (!tpin || tpin.kind !== 'in')
@@ -5201,6 +5300,39 @@ test('Ternary-weight MAC computes the dot product Σ wᵢ·xᵢ for all 729 inpu
     // The adder tree must accumulate them: value = 3·y1 + y0.
     const got = 3 * scope.outVals[outSrc.y1] + scope.outVals[outSrc.y0];
     assertEq(got, (w0 * x0 + w1 * x1 + w2 * x2) || 0, tag + ' y');
+  }
+});
+
+test('Ternary layer computes y = W·x for each row, over a deterministic sample', () => {
+  const { comps, wires } = EXAMPLES['ternary-layer'].build();
+  const inByName = {}, outSrc = {};
+  for (const c of comps) {
+    if (c.type === 'INPUT') inByName[c.state.name] = c;
+    if (c.type === 'OUTPUT') {
+      const wr = wires.find(w => w.toId === c.id && w.toPort === 'in');
+      outSrc[c.state.name] = wr ? `${wr.fromId}:${wr.fromPort}` : null;
+    }
+  }
+  // A tiny deterministic LCG so the sample is reproducible run-to-run.
+  let seed = 4321;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let s = 0; s < 800; s++) {
+    const x = [nextTrit(), nextTrit(), nextTrit()];
+    const W = [];
+    for (let j = 0; j < 3; j++) W.push([nextTrit(), nextTrit(), nextTrit()]);
+    inByName.x0.state.value = x[0];
+    inByName.x1.state.value = x[1];
+    inByName.x2.state.value = x[2];
+    for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++)
+      inByName['w' + j + i].state.value = W[j][i];
+    const scope = { comps, wires, outVals: {} };
+    simulateScope(scope);
+    for (let j = 0; j < 3; j++) {
+      const got = 3 * scope.outVals[outSrc['y' + j + 'hi']]
+                +     scope.outVals[outSrc['y' + j + 'lo']];
+      const want = (W[j][0] * x[0] + W[j][1] * x[1] + W[j][2] * x[2]) || 0;
+      assertEq(got, want, `layer row ${j} sample ${s} (x=${x}, W${j}=${W[j]}):`);
+    }
   }
 });
 
