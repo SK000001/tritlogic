@@ -55,6 +55,22 @@
     font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
     color: var(--muted); margin: 8px 0 4px 0;
   }
+  .pal-search {
+    position: sticky; top: -8px; z-index: 2;
+    background: var(--panel); padding: 4px 0 6px 0;
+    margin: -8px -8px 4px -8px; border-bottom: 1px solid var(--border);
+  }
+  .pal-search input {
+    width: 100%; box-sizing: border-box;
+    padding: 5px 8px; font-size: 12px; font-family: inherit;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; outline: none;
+  }
+  .pal-search input:focus { border-color: var(--accent); }
+  .pal-search input::placeholder { color: var(--muted); }
+  .pal-empty {
+    padding: 8px; font-size: 11px; color: var(--muted); text-align: center;
+  }
   .pal-item {
     display: flex; align-items: center; gap: 8px;
     padding: 6px 8px; margin-bottom: 3px; border: 1px solid var(--border);
@@ -352,6 +368,11 @@
 </header>
 
 <aside class="palette">
+  <div class="pal-search">
+    <input type="text" id="pal-search" placeholder="Search components…  (Ctrl+F)" autocomplete="off" />
+  </div>
+  <div id="pal-empty" class="pal-empty" style="display:none">No matches.</div>
+
   <h3>Tool</h3>
   <div class="pal-item active" data-tool="select">
     <div class="icon">↖</div><div>Select</div><div class="desc">drag / wire</div>
@@ -466,6 +487,7 @@
     <li>To wire, click an output pin then an input pin.</li>
     <li>Drag on empty space to <b>pan the canvas</b>. <kbd>Shift</kbd>+drag rect-selects.</li>
     <li><kbd>Del</kbd> deletes. <kbd>Esc</kbd> cancels wiring. <kbd>Space</kbd>+drag also pans. Wheel zooms.</li>
+    <li><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> (or <kbd>Ctrl+Shift+Z</kbd>) undo / redo. <kbd>Ctrl+F</kbd> focuses the palette search.</li>
     <li>Right-click deletes the component/wire under the cursor — toggle it with <b>Right-click delete</b> in the palette.</li>
     <li><b>Step</b> advances one clock tick (latches flip-flops, ticks clocks).</li>
     <li><b>Info</b> opens the component reference — select a component first to jump straight to its page.</li>
@@ -1848,6 +1870,7 @@ function cloneSubScope(def) {
 function packSelection(name, pinRenames) {
   const sel = Array.from(selection);
   if (sel.length === 0) return;
+  pushHistory();
   const inSelComps = sel.map(getComp).filter(Boolean);
   const ids = new Set(inSelComps.map(c => c.id));
   const inSelWires = wires.filter(w => ids.has(w.fromId) && ids.has(w.toId));
@@ -2081,6 +2104,7 @@ function refreshSubLib() {
     hint.textContent = 'None yet — select components and press Pack ▢.';
     lib.appendChild(hint);
   }
+  if (typeof filterPalette === 'function') filterPalette();
 }
 function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -2373,6 +2397,7 @@ function refreshGateLib() {
     });
     lib.appendChild(el);
   }
+  if (typeof filterPalette === 'function') filterPalette();
 }
 
 // ============================================================================
@@ -3159,12 +3184,12 @@ function updateInspector() {
           if (val === f.get()) opt.selected = true;
           inputEl.appendChild(opt);
         }
-        inputEl.addEventListener('change', () => { f.set(inputEl.value); simulate(); draw(); updateInspector(); });
+        inputEl.addEventListener('change', () => { pushHistory(); f.set(inputEl.value); simulate(); draw(); updateInspector(); });
       } else {
         inputEl = document.createElement('input');
         inputEl.type = (f.kind === 'number') ? 'number' : 'text';
         inputEl.value = f.get();
-        inputEl.addEventListener('change', () => { f.set(inputEl.value); simulate(); draw(); updateInspector(); });
+        inputEl.addEventListener('change', () => { pushHistory(); f.set(inputEl.value); simulate(); draw(); updateInspector(); });
       }
       form.appendChild(inputEl);
     }
@@ -3197,6 +3222,76 @@ function setTool(t, type = null) {
 document.querySelectorAll('.pal-item').forEach(el => {
   el.addEventListener('click', () => setTool(el.dataset.tool, el.dataset.type || null));
 });
+
+// ---- palette search --------------------------------------------------------
+// Filter palette entries by substring against their visible text + data-type.
+// Library entries inside #gate-lib and #sub-lib are filtered the same way.
+// Section <h3>s hide themselves when none of their items match. Exposed as
+// filterPalette() so a self-test can drive it without DOM events.
+function filterPalette() {
+  const inp = document.getElementById('pal-search');
+  const q = (inp && inp.value || '').trim().toLowerCase();
+  const aside = document.querySelector('aside.palette');
+  if (!aside) return;
+  let anyVisibleTotal = 0;
+  // Filter individual entries first.
+  for (const el of aside.querySelectorAll('.pal-item')) {
+    const text = (el.textContent || '').toLowerCase();
+    const ds   = (el.dataset.type || '').toLowerCase();
+    const hit  = !q || text.includes(q) || ds.includes(q);
+    el.style.display = hit ? '' : 'none';
+    if (hit) anyVisibleTotal++;
+  }
+  for (const el of aside.querySelectorAll('#sub-lib > *, #gate-lib > *')) {
+    const text = (el.textContent || '').toLowerCase();
+    const hit  = !q || text.includes(q);
+    el.style.display = hit ? '' : 'none';
+    if (hit) anyVisibleTotal++;
+  }
+  // Walk top-level children in source order, hiding section <h3>s whose
+  // following block has no visible entries.
+  const kids = Array.from(aside.children);
+  let header = null, groupHasMatch = false;
+  const flushHeader = () => { if (header) header.style.display = groupHasMatch ? '' : 'none'; };
+  for (const el of kids) {
+    if (el.tagName === 'H3') {
+      flushHeader();
+      header = el; groupHasMatch = false;
+    } else if (el.classList && el.classList.contains('pal-search')) {
+      // search bar stays visible always
+    } else if (el.id === 'pal-empty') {
+      // skip — handled at the end
+    } else if (el.id === 'gate-lib' || el.id === 'sub-lib') {
+      // container — visible if any child is visible
+      const any = Array.from(el.children).some(c => c.style.display !== 'none');
+      el.style.display = (!q || any) ? '' : 'none';
+      groupHasMatch = groupHasMatch || any;
+    } else {
+      // pal-item, switch-row, or other div: keep switch-row visible when
+      // not searching, hide when searching unless its text matches.
+      if (el.classList && el.classList.contains('switch-row')) {
+        const text = (el.textContent || '').toLowerCase();
+        const hit  = !q || text.includes(q);
+        el.style.display = hit ? '' : 'none';
+        if (hit) groupHasMatch = true;
+      } else if (el.style.display !== 'none') {
+        groupHasMatch = true;
+      }
+    }
+  }
+  flushHeader();
+  const emptyEl = document.getElementById('pal-empty');
+  if (emptyEl) emptyEl.style.display = (q && anyVisibleTotal === 0) ? '' : 'none';
+}
+{
+  const inp = document.getElementById('pal-search');
+  if (inp) {
+    inp.addEventListener('input', filterPalette);
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { inp.value = ''; filterPalette(); inp.blur(); }
+    });
+  }
+}
 
 // ---- right-click-to-delete -------------------------------------------------
 // When enabled (toggle in the palette), a right-click on the canvas removes
@@ -3249,6 +3344,73 @@ cv.addEventListener('mousemove', (e) => {
   draw();
 });
 
+// ============================================================================
+//  UNDO / REDO
+// ============================================================================
+//
+//  Two stacks of in-memory snapshots. snapshotState() takes a deep-clone of
+//  the user-edited surface (comps + wires + IDs + subcircuit / custom-gate
+//  defs) — it deliberately omits subScope (rebuilt lazily by
+//  simulateSubInstance) and outVals (recomputed by simulate). pushHistory()
+//  is called BEFORE each mutating user action; redo is invalidated on any
+//  new push. Drag-move snapshots are dropped if no movement happened.
+
+const undoStack = [], redoStack = [];
+const UNDO_LIMIT = 50;
+
+function snapshotState() {
+  const cleanComps = comps.map(c => {
+    const cc = { ...c, state: deepClone(c.state) };
+    delete cc.subScope;
+    return cc;
+  });
+  return {
+    comps: cleanComps,
+    wires: deepClone(wires),
+    nextCompId, nextWireId,
+    subcircuitDefs: deepClone(subcircuitDefs),
+    customGates: deepClone(customGates),
+  };
+}
+
+function restoreState(snap) {
+  comps = deepClone(snap.comps);
+  wires = deepClone(snap.wires);
+  nextCompId = snap.nextCompId;
+  nextWireId = snap.nextWireId;
+  subcircuitDefs = deepClone(snap.subcircuitDefs);
+  registerBuiltinSubcircuits();
+  customGates = deepClone(snap.customGates);
+  syncCompMap();
+  selection.clear(); selectedWire = null; pendingWire = null;
+  outVals = {};
+  if (typeof refreshSubLib === 'function') refreshSubLib();
+  if (typeof refreshGateLib === 'function') refreshGateLib();
+  simulate(); draw(); updateInspector();
+}
+
+function pushHistory() {
+  undoStack.push(snapshotState());
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  redoStack.length = 0;
+}
+// Pop the most recently pushed snapshot without restoring — used when a
+// would-be mutation turned out to be a no-op (e.g. a drag with no movement).
+function popHistory() { undoStack.pop(); }
+
+function undo() {
+  if (!undoStack.length) { setStatus('nothing to undo'); return; }
+  redoStack.push(snapshotState());
+  restoreState(undoStack.pop());
+  setStatus(`undo (${undoStack.length} more)`);
+}
+function redo() {
+  if (!redoStack.length) { setStatus('nothing to redo'); return; }
+  undoStack.push(snapshotState());
+  restoreState(redoStack.pop());
+  setStatus(`redo (${redoStack.length} more)`);
+}
+
 cv.addEventListener('mousedown', (e) => {
   const r = cv.getBoundingClientRect();
   mouse.x = e.clientX - r.left;
@@ -3275,6 +3437,7 @@ cv.addEventListener('mousedown', (e) => {
       y: snap(mouse.wy - tdef.h/2),
       state,
     };
+    pushHistory();
     comps.push(c); syncCompMap();
     simulate(); draw();
     return;
@@ -3308,6 +3471,10 @@ cv.addEventListener('mousedown', (e) => {
       const cc = getComp(id);
       return { id, x0: cc.x, y0: cc.y };
     });
+    // Pre-emptive snapshot: if it turns out to be a no-move click, mouseup
+    // pops it; if it was a real drag (movement) or a click on INPUT/CONST
+    // (cycles the value), the snapshot stays.
+    pushHistory();
     drag = { kind: 'comp', startWX: mouse.wx, startWY: mouse.wy, items,
              clickComp: c, startMX: mouse.x, startMY: mouse.y };
     updateInspector(); draw();
@@ -3344,16 +3511,18 @@ cv.addEventListener('mouseup', (e) => {
     const dx = Math.abs(mouse.x - drag.startMX), dy = Math.abs(mouse.y - drag.startMY);
     if (dx < 3 && dy < 3) {
       const c = drag.clickComp;
-      if (c.type === 'INPUT') {
+      const isCycle = c.type === 'INPUT' || c.type === 'CONST';
+      if (isCycle) {
         const order = [-1, 0, 1];
         c.state.value = order[(order.indexOf(c.state.value) + 1) % 3];
         simulate();
-      } else if (c.type === 'CONST') {
-        const order = [-1, 0, 1];
-        c.state.value = order[(order.indexOf(c.state.value) + 1) % 3];
-        simulate();
+      } else {
+        // Pure click on a non-cycling component is a no-op mutation —
+        // discard the pre-emptive history snapshot we took at mousedown.
+        popHistory();
       }
     }
+    // Else: real drag with movement — keep the snapshot pushed at mousedown.
     updateInspector();
   } else if (drag.kind === 'rect') {
     const x0 = Math.min(drag.x0, mouse.wx), y0 = Math.min(drag.y0, mouse.wy);
@@ -3401,7 +3570,10 @@ function handlePinClick(pin) {
   draw();
 }
 
-function deleteComp(id) {
+// Internal delete primitives — no history push here, because callers
+// (deleteSelection, right-click-delete, deleteComp/deleteWire from the
+// Delete tool path) all wrap their own pushHistory() around the call.
+function _deleteCompNoHist(id) {
   comps = comps.filter(c => c.id !== id);
   syncCompMap();
   wires = wires.filter(w => w.fromId !== id && w.toId !== id);
@@ -3410,16 +3582,27 @@ function deleteComp(id) {
     const w = wires.find(w => w.id === selectedWire);
     if (!w) selectedWire = null;
   }
+}
+function _deleteWireNoHist(id) {
+  wires = wires.filter(w => w.id !== id);
+  if (selectedWire === id) selectedWire = null;
+}
+function deleteComp(id) {
+  pushHistory();
+  _deleteCompNoHist(id);
   simulate(); draw(); updateInspector();
 }
 function deleteWire(id) {
-  wires = wires.filter(w => w.id !== id);
-  if (selectedWire === id) selectedWire = null;
+  pushHistory();
+  _deleteWireNoHist(id);
   simulate(); draw(); updateInspector();
 }
 function deleteSelection() {
-  for (const id of Array.from(selection)) deleteComp(id);
-  if (selectedWire) deleteWire(selectedWire);
+  if (selection.size === 0 && !selectedWire) return;
+  pushHistory();
+  for (const id of Array.from(selection)) _deleteCompNoHist(id);
+  if (selectedWire) _deleteWireNoHist(selectedWire);
+  simulate(); draw(); updateInspector();
 }
 
 function addWire(fromId, fromPort, toId, toPort) {
@@ -3429,6 +3612,7 @@ function addWire(fromId, fromPort, toId, toPort) {
   const fdef = compDef(fc), tdef = compDef(tc);
   if (!fdef.pins[fromPort] || fdef.pins[fromPort].kind !== 'out') return;
   if (!tdef.pins[toPort] || tdef.pins[toPort].kind !== 'in') return;
+  pushHistory();
   // Replace any existing wire driving the same input.
   wires = wires.filter(w => !(w.toId === toId && w.toPort === toPort));
   wires.push({ id: nextWireId++, fromId, fromPort, toId, toPort });
@@ -3447,9 +3631,28 @@ cv.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 window.addEventListener('keydown', (e) => {
-  // Don't hijack keys when typing in an input field.
-  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
-  if (document.activeElement && document.activeElement.tagName === 'SELECT') return;
+  // Undo / redo are bound even while focus is in a text field, but ONLY
+  // when the field isn't the palette search box — typing there should
+  // never collide with Ctrl+Z. The browser's built-in undo in the search
+  // input continues to work as usual.
+  const ae = document.activeElement;
+  const inSearch = ae && ae.id === 'pal-search';
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !inSearch) {
+    if (e.key === 'z' || e.key === 'Z') {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+      return;
+    }
+    if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); redo(); return; }
+    if (e.key === 'f' || e.key === 'F') {
+      const s = document.getElementById('pal-search');
+      if (s) { e.preventDefault(); s.focus(); s.select(); }
+      return;
+    }
+  }
+  // Don't hijack other keys when typing in an input field.
+  if (ae && ae.tagName === 'INPUT') return;
+  if (ae && ae.tagName === 'SELECT') return;
   if (e.code === 'Space') { mouse.spaceDown = true; cv.style.cursor = 'grab'; }
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); }
   if (e.key === 'Escape') {
@@ -4916,6 +5119,7 @@ document.getElementById('info-close').addEventListener('click', () => closeModal
 
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (!confirm('Clear the entire circuit? (Subcircuit library is preserved.)')) return;
+  pushHistory();
   comps = []; wires = []; nextCompId = 1; nextWireId = 1; syncCompMap();
   outVals = {}; selection.clear(); selectedWire = null; tick = 0;
   simulate(); draw(); drawWaves(); updateInspector();
@@ -4952,6 +5156,7 @@ document.getElementById('file-input').addEventListener('change', (e) => {
       if (typeof v === 'number' && v > SAVE_FORMAT_VERSION) {
         if (!confirm(`Save file is format version ${v}; this build only knows up to ${SAVE_FORMAT_VERSION}. Load anyway?`)) return;
       }
+      pushHistory();
       comps = data.comps || [];
       wires = data.wires || [];
       syncCompMap();
@@ -6435,6 +6640,7 @@ const EXAMPLES = {
 function loadExampleNamed(name) {
   const ex = EXAMPLES[name];
   if (!ex) return;
+  pushHistory();
   const { comps: newComps, wires: newWires } = ex.build();
   comps = newComps;
   wires = newWires;
@@ -7159,6 +7365,102 @@ test('Sequential kit registered and protected as built-ins', () => {
     assertEq(isBuiltinSubcircuit(n), true, `${n} is built-in:`);
     deleteSubcircuit(n);
     if (!subcircuitDefs[n]) throw new Error(`built-in subcircuit "${n}" was deleted`);
+  }
+});
+
+// ---- Undo / redo ----------------------------------------------------------
+//
+// Sanity-check the snapshot stack against the canonical mutations a user
+// makes from the canvas: add component, add wire, delete, edit-name. After
+// each, undo() must restore the previous state and redo() must reapply it.
+
+test('Undo / redo round-trips component add, wire add, delete', () => {
+  // Save real state, work on an empty scratch state, restore at the end.
+  const savedComps = comps, savedWires = wires;
+  const savedNextC = nextCompId, savedNextW = nextWireId;
+  const savedUndo = undoStack.slice(), savedRedo = redoStack.slice();
+  try {
+    comps = []; wires = []; nextCompId = 1; nextWireId = 1;
+    syncCompMap(); undoStack.length = 0; redoStack.length = 0;
+    // Add a STI.
+    pushHistory();
+    comps.push({ id: nextCompId++, type: 'STI', x: 0, y: 0, state: {} });
+    syncCompMap();
+    assertEq(comps.length, 1, 'one comp after add:');
+    assertEq(undoStack.length, 1, 'one history entry:');
+    // Add a wire from a fake INPUT.
+    pushHistory();
+    comps.push({ id: nextCompId++, type: 'INPUT', x: 0, y: 80, state: { value: 1 } });
+    syncCompMap();
+    pushHistory();
+    wires.push({ id: nextWireId++, fromId: 2, fromPort: 'out', toId: 1, toPort: 'in' });
+    assertEq(comps.length, 2, 'two comps after second add:');
+    assertEq(wires.length, 1, 'one wire after wire add:');
+    assertEq(undoStack.length, 3, 'three history entries:');
+    // Undo the wire.
+    undo();
+    assertEq(wires.length, 0, 'wire gone after first undo:');
+    assertEq(comps.length, 2, 'comps unchanged by wire undo:');
+    assertEq(redoStack.length, 1, 'one redo entry:');
+    // Undo the second comp.
+    undo();
+    assertEq(comps.length, 1, 'one comp after second undo:');
+    // Redo it back.
+    redo();
+    assertEq(comps.length, 2, 'redo brings the comp back:');
+    // Redo the wire.
+    redo();
+    assertEq(wires.length, 1, 'redo brings the wire back:');
+    assertEq(redoStack.length, 0, 'redo stack drained:');
+    // A fresh push invalidates the redo stack.
+    undo(); undo();
+    assertEq(comps.length, 1, 'two undos back to one comp:');
+    pushHistory();
+    comps.push({ id: nextCompId++, type: 'MAX', x: 100, y: 0, state: {} });
+    assertEq(redoStack.length, 0, 'new push clears redo:');
+  } finally {
+    comps = savedComps; wires = savedWires;
+    nextCompId = savedNextC; nextWireId = savedNextW;
+    syncCompMap();
+    undoStack.length = 0; redoStack.length = 0;
+    for (const s of savedUndo) undoStack.push(s);
+    for (const s of savedRedo) redoStack.push(s);
+  }
+});
+
+// ---- palette search -------------------------------------------------------
+//
+// filterPalette() walks the .pal-item entries and hides ones whose text and
+// data-type both miss the query. Section headers go away when their group
+// has no visible items, and the empty-state hint appears for a no-match
+// search.
+
+test('filterPalette() hides non-matching palette items', () => {
+  const inp = document.getElementById('pal-search');
+  const aside = document.querySelector('aside.palette');
+  if (!inp || !aside) return;   // no real DOM (headless runner) — skip cleanly
+  const items = Array.from(aside.querySelectorAll('.pal-item'));
+  const muxItem = items.find(el => (el.dataset || {}).type === 'MUX');
+  const inputItem = items.find(el => (el.dataset || {}).type === 'INPUT');
+  if (!muxItem || !inputItem) return;   // headless stub — palette not parsed
+  const saved = inp.value;
+  try {
+    // Search "mux" — MUX entry visible, INPUT hidden.
+    inp.value = 'mux'; filterPalette();
+    assertEq(muxItem.style.display, '',     'MUX visible for "mux":');
+    assertEq(inputItem.style.display, 'none', 'INPUT hidden for "mux":');
+    // Garbage search — everything hidden, empty hint visible.
+    inp.value = 'zzznotacomp'; filterPalette();
+    assertEq(muxItem.style.display, 'none', 'MUX hidden for no-match:');
+    const empty = document.getElementById('pal-empty');
+    assertEq(empty.style.display, '', 'empty hint shown:');
+    // Clear search — everything back.
+    inp.value = ''; filterPalette();
+    assertEq(muxItem.style.display, '',   'MUX restored after clear:');
+    assertEq(inputItem.style.display, '', 'INPUT restored after clear:');
+    assertEq(empty.style.display, 'none', 'empty hint hidden:');
+  } finally {
+    inp.value = saved; filterPalette();
   }
 });
 
