@@ -1823,11 +1823,25 @@ function simulateSubInstance(instance, vIn) {
 }
 
 function cloneSubScope(def) {
-  return {
+  const scope = {
     comps: deepClone(def.comps),
     wires: deepClone(def.wires),
     outVals: {},
   };
+  // Seed every output to 0 instead of letting it default to null. Cross-
+  // coupled feedback (TLATCH, TFLOP, ...) cannot bootstrap from null —
+  // MIN/MAX/STI all propagate null, so a feedback wire that starts null
+  // can never become anything else. Seeding to 0 gives the fixed-point
+  // solver a defined starting point; combinational subs reach the same
+  // settled values either way.
+  for (const c of scope.comps) {
+    const d = compDef(c);
+    if (!d || !d.pins) continue;
+    for (const port in d.pins) {
+      if (d.pins[port].kind === 'out') scope.outVals[`${c.id}:${port}`] = 0;
+    }
+  }
+  return scope;
 }
 
 // Pack the currently-selected components into a new subcircuit.
@@ -3545,6 +3559,7 @@ const INFO_CATEGORIES = [
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
+  ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
 ];
 
 const COMPONENT_INFO = {
@@ -4508,6 +4523,272 @@ const COMPONENT_INFO = {
       <p>No MUX, and no constants — fifteen components, all gates. No live
       truth table is shown: four trit inputs would be 3⁴ = 81 rows.</p>`,
   },
+
+  'SUB:TLATCH': {
+    name: 'TLATCH — transparent ternary D-latch',
+    tagline: 'A 1-trit level-sensitive latch from cross-coupled MIN/MAX',
+    body: `
+      <p><b>TLATCH</b> is the kit's first <b>feedback</b> circuit: a 1-trit
+      D-latch built from a MAX, two MINs, and an inverter — with a wire that
+      loops the output back to one of the MIN inputs. It is the simplest
+      gate-level memory and the building block of <b>TFLOP</b>.</p>
+
+      <h4>Working mechanism</h4>
+      <p>Two inputs — <code>d</code> (data) and <code>en</code> (enable).
+      While <code>en = +1</code> the latch is <b>transparent</b>: output
+      follows <code>d</code>. While <code>en = T</code> it <b>holds</b> its
+      previous value. The trick is that "previous value" is whatever the
+      feedback wire is carrying — the simulator's fixed-point solver settles
+      to it because <code>q = q</code> is a fixed point.</p>
+      <p>The MIN/MAX algebra works out cleanly:</p>
+      <ul>
+        <li><code>en = +1</code>: <code>load = MIN(d, +1) = d</code>;
+            <code>hold = MIN(q, T) = T</code>;
+            <code>q = MAX(d, T) = d</code>.</li>
+        <li><code>en = T</code>: <code>load = MIN(d, T) = T</code>;
+            <code>hold = MIN(q, +1) = q</code>;
+            <code>q = MAX(T, q) = q</code>.</li>
+      </ul>
+      <p>The enable pin <b>must be +1 or T</b> — at <code>en = 0</code> both
+      paths collapse and the storage breaks. <b>TFLOP</b> derives its
+      latches' enables through <code>PTI</code>, which quantises the
+      tri-state clock to <code>{+1, T}</code> so this constraint is always
+      satisfied.</p>
+
+      <h4>How can pure gates remember?</h4>
+      <p>The simulator's solver runs each <code>simulate()</code> call as a
+      fixed-point iteration: it keeps re-evaluating gates until no output
+      changes. Output values <b>persist between calls</b> — a subcircuit's
+      internal <code>outVals</code> are reused. When <code>en = T</code>, the
+      stable solution is "<code>q</code> stays at whatever the last call left
+      it at," which is exactly what storage means. To get the loop started,
+      a subcircuit's outputs are seeded to <code>0</code> on first use (else
+      <code>null</code> would propagate through MIN/MAX forever).</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>2 × <b>INPUT</b> — <code>d</code>, <code>en</code></li>
+        <li>1 × <b>STI</b> — invert <code>en</code></li>
+        <li>2 × <b>MIN</b> — the load and hold paths</li>
+        <li>1 × <b>MAX</b> — combines them; its output is the feedback wire</li>
+        <li>1 × <b>OUTPUT</b> — <code>q</code></li>
+      </ul>
+      <p>Six components, one feedback loop. The next block, <b>TFLOP</b>,
+      uses two of these in master-slave to build an edge-triggered DFF.</p>`,
+  },
+
+  'SUB:TFLOP': {
+    name: 'TFLOP — gate-level D flip-flop',
+    tagline: 'The native DFF, rebuilt as two TLATCHes in master-slave',
+    body: `
+      <p><b>TFLOP</b> is the structural twin of the native <b>DFF</b>: a
+      1-trit edge-triggered D flip-flop. Samples <code>d</code> on the
+      rising clock edge to <code>+1</code> — exactly the rule the native
+      DFF uses. Built from two <b>TLATCH</b>es in the classic master-slave
+      arrangement, with no primitive flop inside.</p>
+
+      <h4>Working mechanism</h4>
+      <p>Two latches with opposite enables — at most one is transparent at
+      any moment. The enables are derived from <code>clk</code> through
+      <code>PTI</code> (which quantises <code>clk</code> to the {+1, T} the
+      latches need):</p>
+      <ul>
+        <li><code>en_slave = STI(PTI(clk))</code> — <code>+1</code> when
+            <code>clk = +1</code>, <code>T</code> otherwise.</li>
+        <li><code>en_master = STI(en_slave)</code> — the opposite.</li>
+      </ul>
+      <p>While <code>clk</code> is anything except <code>+1</code>, the
+      <b>master</b> is transparent (catching <code>d</code>) and the
+      <b>slave</b> holds. The instant <code>clk</code> reaches
+      <code>+1</code>, master closes on its last <code>d</code> and slave
+      opens — so the slave copies the master's held value. That edge
+      <em>is</em> the sample. As <code>clk</code> drops back below
+      <code>+1</code> the slave closes on the captured value and the master
+      becomes transparent again, ready for the next cycle.</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>2 × <b>INPUT</b> — <code>d</code>, <code>clk</code></li>
+        <li>1 × <b>PTI</b> + 2 × <b>STI</b> — derive the two latch enables</li>
+        <li>2 × <b>TLATCH</b> — master and slave; each itself a subcircuit</li>
+        <li>1 × <b>OUTPUT</b> — <code>q</code></li>
+      </ul>
+
+      <h4>Relation to the native DFF</h4>
+      <p>Same rising-edge sample rule, same hold-otherwise behaviour. A
+      self-test exercises TFLOP through a sequence of clock and data
+      transitions and confirms it matches what the native <code>DFF</code>
+      stores at each step. The one observable difference is the initial
+      stored value: native <code>DFF</code> starts at <code>q = 0</code>
+      (from its defaults), and TFLOP also reaches <code>q = 0</code> after
+      its first settle (via the outVals seed).</p>`,
+  },
+
+  'SUB:TREG3': {
+    name: 'TREG3 — gate-level 3-trit register',
+    tagline: 'Three TFLOPs sharing a clock, with a true ternary load-enable',
+    body: `
+      <p><b>TREG3</b> is the structural twin of the native <b>REG3</b>:
+      three 1-trit flip-flops sharing one clock, plus a load-enable pin.
+      Every flop here is a <b>TFLOP</b>, which is two <b>TLATCH</b>es, which
+      is cross-coupled MIN/MAX — all the way down.</p>
+
+      <h4>Tri-state load-enable</h4>
+      <p>Where the native REG3 treats <code>ld</code> as binary (only
+      <code>+1</code> loads, everything else holds), TREG3 uses the full
+      ternary range — the "fold in the tri-state load" extension this
+      twin adds:</p>
+      <table class="info-tt" style="text-align:center">
+        <thead><tr><th>ld</th><th>action</th><th>d_eff fed to TFLOP</th></tr></thead>
+        <tbody>
+          <tr><td class="trit-P">+1</td><td>load</td><td><code>d</code></td></tr>
+          <tr><td class="trit-0">0</td><td>hold</td><td><code>q</code> (feedback)</td></tr>
+          <tr><td class="trit-T">T</td><td>clear</td><td><code>0</code></td></tr>
+        </tbody>
+      </table>
+      <p>The selection happens per trit through a <b>MUX3</b>:
+      <code>d_eff = MUX3(ld, dT=0, d0=q, dP=d)</code>. The TFLOP samples
+      <code>d_eff</code> on the rising clock edge, so the meaning is
+      "decide what to store; the edge stores it." Hold uses
+      <code>q</code> as its own input — a feedback wire that re-samples the
+      current value on the edge, a no-op.</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>5 × <b>INPUT</b> — <code>d0..d2</code>, <code>clk</code>,
+            <code>ld</code></li>
+        <li>1 × <b>CONST 0</b> — the clear value</li>
+        <li>3 × <b>MUX3</b> — per-trit selector</li>
+        <li>3 × <b>TFLOP</b> — per-trit storage; each itself a subcircuit
+            (drill down through TFLOP → TLATCH → MIN/MAX/STI)</li>
+        <li>3 × <b>OUTPUT</b> — <code>q0..q2</code></li>
+      </ul>
+
+      <h4>Relation to the native REG3</h4>
+      <p>For <code>ld ∈ {+1, 0}</code> TREG3 matches the native REG3
+      exactly — load on the rising edge when <code>ld = +1</code>, hold
+      otherwise. For <code>ld = T</code> TREG3 clears (a behaviour native
+      REG3 doesn't have); a self-test verifies all three cases.</p>`,
+  },
+
+  'SUB:TPC': {
+    name: 'TPC — gate-level program counter',
+    tagline: 'The native PC, rebuilt from TFLOPs + a FADD-based incrementer',
+    body: `
+      <p><b>TPC</b> is the structural twin of the native <b>PC</b>: a 2-trit
+      program counter that increments on each rising clock edge, or jumps
+      to a target address when <code>jmp = +1</code>. Built from two
+      <b>TFLOP</b>s for the address register, two <b>FADD</b> blocks for
+      the +1 incrementer, and two <b>MUX3</b>es for the next-state select.</p>
+
+      <h4>Working mechanism</h4>
+      <p>Three pieces wired around the two stored trits:</p>
+      <ul>
+        <li><b>Increment.</b> <code>inc0 = FADD(p0, +1, 0)</code> and
+            <code>inc1 = FADD(p1, 0, cout0)</code>. The carry off the top
+            trit is <em>discarded</em>, which is exactly what makes the
+            counter wrap word 8 → word 0 in balanced ternary.</li>
+        <li><b>Select.</b> A MUX3 per trit picks either the increment or
+            the jump target, controlled by <code>jmp</code>. The native PC
+            only treats <code>+1</code> as "jump," so increment is wired
+            into both <code>dT</code> and <code>d0</code> of the MUX3 —
+            <em>any</em> non-<code>+1</code> value of <code>jmp</code> still
+            picks the increment.</li>
+        <li><b>Latch.</b> Two TFLOPs sample the MUX3 outputs on the rising
+            edge; their <code>q</code> outputs are <code>p0, p1</code>, fed
+            back into the incrementer for the next cycle.</li>
+      </ul>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>4 × <b>INPUT</b> — <code>clk</code>, <code>jmp</code>,
+            <code>j0</code>, <code>j1</code></li>
+        <li>2 × <b>CONST</b> — <code>+1</code> (low-trit incrementer
+            addend) and <code>0</code> (high-trit addend)</li>
+        <li>2 × <b>FADD</b> — the ripple-carry incrementer; each itself a
+            subcircuit (drill in for TSUM / TCARRY / gates)</li>
+        <li>2 × <b>MUX3</b> — next-state select</li>
+        <li>2 × <b>TFLOP</b> — the stored address; each itself nested
+            (TFLOP → TLATCH → gates)</li>
+        <li>2 × <b>OUTPUT</b> — <code>p0</code>, <code>p1</code></li>
+      </ul>
+
+      <h4>Relation to the native PC</h4>
+      <p>Same rising-edge update rule, same wrap-on-overflow, same
+      "jmp = +1 jumps, anything else increments" semantics — a self-test
+      walks both through ten increments and a jump and confirms TPC
+      tracks the native PC every cycle. One observable difference: the
+      <em>reset state</em>. Native PC's <code>defaults()</code> sets
+      <code>p = [-1, -1]</code> (word 0); TPC's TFLOPs settle to
+      <code>q = 0</code> after their first call (the outVals seed), so
+      TPC's natural reset is word 4 (the centre of balanced ternary).
+      A one-cycle jump to <code>(-1, -1)</code> aligns them.</p>`,
+  },
+
+  'SUB:TRAM': {
+    name: 'TRAM — gate-level 9 × 3-trit RAM',
+    tagline: 'Nine TREG3 words, a one-hot decoder, a MUX3 read tree',
+    body: `
+      <p><b>TRAM</b> is the structural twin of the native <b>RAM</b> block:
+      nine words of three trits each, with the same two-trit address, the
+      same asynchronous read, and the same write-enabled synchronous
+      write. Every trit of storage is a TFLOP (via TREG3); every cell of
+      address decode and read mux is MIN/MAX/STI/NTI/PTI; nothing native is
+      sequential anywhere inside.</p>
+
+      <h4>Address decode (one-hot)</h4>
+      <p>Each address trit gets three detectors — <code>isT</code>,
+      <code>is0</code>, <code>isP</code> — that fire <code>+1</code> when
+      the address trit matches the constant and <code>T</code> otherwise:</p>
+      <ul>
+        <li><code>isT(a) = NTI(a)</code></li>
+        <li><code>isP(a) = STI(PTI(a))</code></li>
+        <li><code>is0(a) = MIN(PTI(a), STI(NTI(a)))</code></li>
+      </ul>
+      <p>One row and column detector are MIN-ANDed into nine per-word
+      select signals <code>sel[i]</code>. The load-enable for word
+      <code>i</code> is <code>MAX(MIN(sel[i], we), 0)</code> — the
+      addressed word loads exactly when <code>we = +1</code>, every other
+      word gets <code>ld = 0</code> (hold). The <code>MAX</code>-with-0
+      clamp is there because TREG3 treats <code>ld = T</code> as
+      <em>clear</em>; without it, eight words would be cleared on every
+      single-word store.</p>
+
+      <h4>Read tree</h4>
+      <p>Reads are combinational: for each output trit, three MUX3s pick
+      within each row (steered by <code>a0</code>), then a final MUX3 picks
+      between rows (steered by <code>a1</code>). Twelve MUX3s in total, no
+      clock involved — change the address and the outputs follow at once,
+      same as native RAM.</p>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>7 × <b>INPUT</b> — <code>a0</code>, <code>a1</code>,
+            <code>d0..d2</code>, <code>we</code>, <code>clk</code></li>
+        <li>16 × inverter (<b>NTI</b> / <b>PTI</b> / <b>STI</b>) — address
+            trit equality detectors</li>
+        <li>2 × <b>MIN</b> — the <code>is0</code> AND-combine</li>
+        <li>9 × <b>MIN</b> + 9 × <b>MIN</b> + 9 × <b>MAX</b> + 1 ×
+            <b>CONST 0</b> — per-word selects, write enables, and the
+            clamp-to-non-negative</li>
+        <li>9 × <b>TREG3</b> — the storage array (3 trits × 9 words; each
+            TREG3 holds three TFLOPs)</li>
+        <li>12 × <b>MUX3</b> — the 2-level read tree</li>
+        <li>3 × <b>OUTPUT</b> — <code>q0..q2</code></li>
+      </ul>
+      <p>The deepest path is six levels deep:
+      <code>TRAM → TREG3 → TFLOP → TLATCH → MIN/MAX/STI → gates</code> —
+      every layer middle-clickable, every gate inspectable.</p>
+
+      <h4>Relation to the native RAM</h4>
+      <p>For every driven input, TRAM stores and reads the same words the
+      native RAM does. One difference: the native RAM emits all-
+      <code>null</code> when the address is floating, whereas TRAM (like
+      every subcircuit) treats a floating input as <code>0</code>, so a
+      floating address reads <em>word 4</em> (the centre) rather than
+      <code>null</code>. A self-test exercises store-then-read across
+      several addresses and confirms the contents match.</p>`,
+  },
 };
 
 // Pin table read straight from the live TYPES definition.
@@ -5199,6 +5480,338 @@ function buildMux3Def() {
   };
 }
 
+// ============================================================================
+//  SEQUENTIAL KIT — gate-level structural twins of the stateful primitives
+// ============================================================================
+//
+//  The combinational kit (TSUM/TCARRY/FADD/MUX3/ALU3) proved every native
+//  arithmetic component can be opened up. The sequential kit does the same
+//  for the stateful side: DFF / REG3 / RAM / PC, all rebuilt from
+//  cross-coupled gate networks with no native sequential primitive inside.
+//
+//  How can pure combinational gates store state? Through the fixed-point
+//  solver. The subcircuit's outVals carry between simulate() calls (the
+//  subScope is reused), and cloneSubScope seeds them to 0 — so a feedback
+//  loop like q = MAX(MIN(d, en), MIN(q, NOT en)) has a defined starting
+//  value, and the solver settles on it. When en holds, the loop is q := q,
+//  a stable fixed point at whatever the previous call left.
+
+// TLATCH — a transparent ternary D-latch (one trit, level-sensitive).
+// While en=+1 the output follows d ("transparent"); while en=T the latch
+// holds its previous value. The en pin MUST be either +1 or T — at en=0
+// the storage formula breaks. (The TFLOP master-slave wrapper makes sure
+// of this by deriving en through PTI.)
+//
+// Mechanism:
+//   en_n = STI(en)        — invert the enable
+//   load = MIN(d, en)     — pass d when en=+1, give T when en=T
+//   hold = MIN(q, en_n)   — pass q when en=T, give T when en=+1
+//   q    = MAX(load, hold) — feedback closes the loop
+function buildTlatchDef() {
+  const { comps, wires } = buildExample((c, w) => ({
+    comps: [
+      c('d',    'INPUT',  40,  40,  { value: 0, name: 'd'  }),
+      c('en',   'INPUT',  40,  130, { value: 0, name: 'en' }),
+      c('inv',  'STI',    210, 130),
+      c('ld',   'MIN',    400, 40),
+      c('hl',   'MIN',    400, 160),
+      c('mx',   'MAX',    600, 100),
+      c('q',    'OUTPUT', 780, 110, { name: 'q' }),
+    ],
+    wires: [
+      w('en',  'out', 'inv', 'in'),
+      w('d',   'out', 'ld',  'a'),
+      w('en',  'out', 'ld',  'b'),
+      w('mx',  'out', 'hl',  'a'),   // feedback: hold path reads current q
+      w('inv', 'out', 'hl',  'b'),
+      w('ld',  'out', 'mx',  'a'),
+      w('hl',  'out', 'mx',  'b'),
+      w('mx',  'out', 'q',   'in'),
+    ],
+  }));
+  return {
+    inputs: [{ name: 'd' }, { name: 'en' }],
+    outputs: [{ name: 'q' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
+// TFLOP — the gate-level structural twin of the native DFF: an edge-
+// triggered D flip-flop built master-slave from two TLATCHes, with no
+// primitive flop inside. Samples d on the rising clock edge to +1.
+//
+// Clock derivation (PTI quantises the tri-state clock to {T,+1} so the
+// latches never see en=0):
+//   en_slave  = STI(PTI(clk))   = +1 when clk=+1, else T
+//   en_master = STI(en_slave)   = T when clk=+1, else +1
+//
+// Master is transparent while clk is not +1 (catches d), holds at clk=+1.
+// Slave is the opposite — transparent at clk=+1, holds otherwise. So the
+// edge from non-+1 → +1 closes the master on its last d and opens the
+// slave to copy it: exactly the rising-edge sample the native DFF does.
+function buildTflopDef() {
+  const { comps, wires } = buildExample((c, w) => ({
+    comps: [
+      c('d',    'INPUT',  40,  40,  { value: 0, name: 'd'   }),
+      c('clk',  'INPUT',  40,  160, { value: 0, name: 'clk' }),
+      c('pti',  'PTI',    210, 160),
+      c('iSl',  'STI',    370, 160),   // en_slave
+      c('iMa',  'STI',    530, 160),   // en_master
+      c('lm',   'SUB:TLATCH', 700, 40), // master
+      c('ls',   'SUB:TLATCH', 900, 90), // slave
+      c('q',    'OUTPUT', 1090, 110, { name: 'q' }),
+    ],
+    wires: [
+      w('clk', 'out', 'pti', 'in'),
+      w('pti', 'out', 'iSl', 'in'),
+      w('iSl', 'out', 'iMa', 'in'),
+      w('d',   'out', 'lm',  'd'),
+      w('iMa', 'out', 'lm',  'en'),
+      w('lm',  'q',   'ls',  'd'),
+      w('iSl', 'out', 'ls',  'en'),
+      w('ls',  'q',   'q',   'in'),
+    ],
+  }));
+  return {
+    inputs: [{ name: 'd' }, { name: 'clk' }],
+    outputs: [{ name: 'q' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
+// TREG3 — gate-level 3-trit register. Three TFLOPs sharing one clock, plus
+// a per-trit MUX3 that interprets the load-enable line as a TRUE ternary
+// control (this is the "fold in the tri-state load" extension the native
+// REG3 lacks):
+//
+//   ld = +1  → load:  d_eff = d_in        (sample new data on the edge)
+//   ld =  0  → hold:  d_eff = q           (feedback — re-store current q)
+//   ld =  T  → clear: d_eff = 0           (sample a zero constant)
+//
+// So one TREG3 is three TFLOPs + three MUX3 selectors + one CONST 0. The
+// q→MUX3→TFLOP.d feedback in hold mode is harmless: on a non-edge the
+// TFLOP doesn't sample, and on an edge it samples q itself, a no-op.
+function buildTreg3Def() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [], wires = [];
+    comps.push(c('clk', 'INPUT', 40, 400, { value: 0, name: 'clk' }));
+    comps.push(c('ld',  'INPUT', 40, 460, { value: 0, name: 'ld'  }));
+    comps.push(c('cZ',  'CONST', 40, 520, { value: 0 }));
+    for (let i = 0; i < 3; i++) {
+      const yB = 40 + i * 130;
+      comps.push(c('d' + i, 'INPUT',      40,  yB,      { value: 0, name: 'd' + i }));
+      comps.push(c('mx' + i, 'SUB:MUX3',  240, yB - 10));
+      comps.push(c('ff' + i, 'SUB:TFLOP', 470, yB - 10));
+      comps.push(c('q' + i,  'OUTPUT',    690, yB + 5,  { name: 'q' + i }));
+      // ld selects: dT = clear (0), d0 = hold (q feedback), dP = load (d)
+      wires.push(w('ld',     'out', 'mx' + i, 's'));
+      wires.push(w('cZ',     'out', 'mx' + i, 'dT'));
+      wires.push(w('ff' + i, 'q',   'mx' + i, 'd0'));   // hold-feedback
+      wires.push(w('d' + i,  'out', 'mx' + i, 'dP'));
+      wires.push(w('mx' + i, 'out', 'ff' + i, 'd'));
+      wires.push(w('clk',    'out', 'ff' + i, 'clk'));
+      wires.push(w('ff' + i, 'q',   'q' + i,  'in'));
+    }
+    return { comps, wires };
+  });
+  return {
+    inputs: [{ name: 'd0' }, { name: 'd1' }, { name: 'd2' },
+             { name: 'clk' }, { name: 'ld' }],
+    outputs: [{ name: 'q0' }, { name: 'q1' }, { name: 'q2' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
+// TPC — gate-level 2-trit program counter, the structural twin of native
+// PC. Two TFLOPs hold the address; two FADDs do the +1 increment (with
+// the top carry discarded, which naturally wraps word 8 → 0); a MUX3 per
+// trit picks between the increment and the jump target.
+//
+// jmp selector: native PC only looks at jmp=+1, treating anything else
+// as "increment". So the MUX3 wires increment to BOTH dT and d0, and the
+// jump target to dP — every non-+1 jmp value still picks the increment.
+function buildTpcDef() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [], wires = [];
+    comps.push(c('clk', 'INPUT', 40, 360, { value: 0, name: 'clk' }));
+    comps.push(c('jmp', 'INPUT', 40, 420, { value: 0, name: 'jmp' }));
+    comps.push(c('j0',  'INPUT', 40, 60,  { value: 0, name: 'j0'  }));
+    comps.push(c('j1',  'INPUT', 40, 200, { value: 0, name: 'j1'  }));
+    comps.push(c('cZ',  'CONST', 40, 480, { value: 0 }));
+    comps.push(c('cP',  'CONST', 40, 530, { value: 1 }));
+    // Per-trit: FADD adds 1 with carry chained low → high, then a MUX3
+    // selects increment vs jump target. TFLOP latches the selection.
+    comps.push(c('fa0', 'SUB:FADD', 240,  60));
+    comps.push(c('fa1', 'SUB:FADD', 240, 200));
+    comps.push(c('mx0', 'SUB:MUX3', 470,  80));
+    comps.push(c('mx1', 'SUB:MUX3', 470, 220));
+    comps.push(c('ff0', 'SUB:TFLOP', 690,  80));
+    comps.push(c('ff1', 'SUB:TFLOP', 690, 220));
+    comps.push(c('p0',  'OUTPUT',   900,  95, { name: 'p0' }));
+    comps.push(c('p1',  'OUTPUT',   900, 235, { name: 'p1' }));
+    // Low trit: a=p0, b=+1, cin=0 → sum=inc0, cout=c01
+    wires.push(w('ff0', 'q',   'fa0', 'a'));
+    wires.push(w('cP',  'out', 'fa0', 'b'));
+    wires.push(w('cZ',  'out', 'fa0', 'cin'));
+    // High trit: a=p1, b=0, cin=c01 → sum=inc1, cout discarded (wrap)
+    wires.push(w('ff1', 'q',   'fa1', 'a'));
+    wires.push(w('cZ',  'out', 'fa1', 'b'));
+    wires.push(w('fa0', 'cout', 'fa1', 'cin'));
+    // MUX3: s=jmp; dT=inc, d0=inc (any non-+1 increments), dP=jump target
+    for (const i of [0, 1]) {
+      wires.push(w('jmp', 'out', 'mx' + i, 's'));
+      wires.push(w('fa' + i, 'sum', 'mx' + i, 'dT'));
+      wires.push(w('fa' + i, 'sum', 'mx' + i, 'd0'));
+      wires.push(w('j'  + i, 'out', 'mx' + i, 'dP'));
+      wires.push(w('mx' + i, 'out', 'ff' + i, 'd'));
+      wires.push(w('clk',    'out', 'ff' + i, 'clk'));
+      wires.push(w('ff' + i, 'q',   'p'  + i, 'in'));
+    }
+    return { comps, wires };
+  });
+  return {
+    inputs: [{ name: 'clk' }, { name: 'jmp' }, { name: 'j0' }, { name: 'j1' }],
+    outputs: [{ name: 'p0' }, { name: 'p1' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
+// TRAM — gate-level 9-word × 3-trit RAM, the structural twin of native
+// RAM. Nine TREG3 instances form the storage array; a one-hot address
+// decoder steers writes; a 2-level MUX3 tree reads the addressed word.
+//
+// Address decoding: detect a0 ∈ {T,0,+1} and a1 ∈ {T,0,+1} separately
+// using NTI / is0 / STI∘PTI, then MIN-AND the row and column detectors
+// into nine per-word selects. Each word's load-enable is MIN(sel_i, we) —
+// the addressed word loads when we=+1 and the address is matched.
+//
+// Reading: MUX3 selects between the three trits, no clock required. Two
+// levels — a0 picks within each row, a1 picks between rows.
+function buildTramDef() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [], wires = [];
+    // ── inputs and constants ──
+    comps.push(c('a0',  'INPUT', 40,  40,  { value: 0, name: 'a0'  }));
+    comps.push(c('a1',  'INPUT', 40,  80,  { value: 0, name: 'a1'  }));
+    comps.push(c('d0',  'INPUT', 40,  140, { value: 0, name: 'd0'  }));
+    comps.push(c('d1',  'INPUT', 40,  180, { value: 0, name: 'd1'  }));
+    comps.push(c('d2',  'INPUT', 40,  220, { value: 0, name: 'd2'  }));
+    comps.push(c('we',  'INPUT', 40,  280, { value: 0, name: 'we'  }));
+    comps.push(c('clk', 'INPUT', 40,  320, { value: 0, name: 'clk' }));
+
+    // ── trit-equality detectors for a0 and a1 ──
+    // isT = NTI; isP = STI∘PTI; is0 = MIN(PTI, STI∘NTI). Each detector
+    // returns +1 when the address trit matches the constant, T otherwise.
+    function buildDetectors(addrLabel, prefix, yBase) {
+      // isT(addr): NTI
+      comps.push(c(prefix + 'T', 'NTI', 220, yBase));
+      wires.push(w(addrLabel, 'out', prefix + 'T', 'in'));
+      // isP(addr): STI∘PTI
+      comps.push(c(prefix + 'P_pti', 'PTI', 220, yBase + 30));
+      comps.push(c(prefix + 'P',     'STI', 320, yBase + 30));
+      wires.push(w(addrLabel,        'out', prefix + 'P_pti', 'in'));
+      wires.push(w(prefix + 'P_pti', 'out', prefix + 'P',     'in'));
+      // is0(addr): MIN(PTI(addr), STI(NTI(addr)))  — PTI reused from above
+      comps.push(c(prefix + '0_nti', 'NTI', 220, yBase + 70));
+      comps.push(c(prefix + '0_sti', 'STI', 320, yBase + 70));
+      comps.push(c(prefix + '0',     'MIN', 420, yBase + 50));
+      wires.push(w(addrLabel,        'out', prefix + '0_nti', 'in'));
+      wires.push(w(prefix + '0_nti', 'out', prefix + '0_sti', 'in'));
+      wires.push(w(prefix + 'P_pti', 'out', prefix + '0',     'a'));
+      wires.push(w(prefix + '0_sti', 'out', prefix + '0',     'b'));
+    }
+    buildDetectors('a0', 'd0_', 40);   // detectors for a0
+    buildDetectors('a1', 'd1_', 200);  // detectors for a1
+
+    // ── per-word select (one-hot) and write enable, then 9 TREG3 words ──
+    // Word index follows native RAM: idx = (a0+1) + (a1+1)*3, so the
+    // ordering of detector pairs below matches the native decoder.
+    //
+    // Note on ld clamping: TREG3 interprets ld = T as *clear* (its
+    // tri-state extension). The naïve formula ld_i = MIN(sel_i, we)
+    // would feed T to every non-selected word during a write — clearing
+    // eight words on every store. So ld_i is MAX'd against a CONST 0 to
+    // clip negatives up to 0 (hold) — selected words still receive +1,
+    // every other word gets 0 (hold), nothing accidentally clears.
+    comps.push(c('cZero', 'CONST', 480, 1080, { value: 0 }));
+    const a0sel = ['d0_T', 'd0_0', 'd0_P'];   // a0 = T, 0, +1 (col)
+    const a1sel = ['d1_T', 'd1_0', 'd1_P'];   // a1 = T, 0, +1 (row)
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 3; col++) {
+        const idx = col + row * 3;
+        const yB = 40 + idx * 120;
+        // sel_i = MIN(a0_match, a1_match)
+        comps.push(c('sel' + idx, 'MIN', 600, yB));
+        wires.push(w(a0sel[col], 'out', 'sel' + idx, 'a'));
+        wires.push(w(a1sel[row], 'out', 'sel' + idx, 'b'));
+        // ld_raw = MIN(sel_i, we)
+        comps.push(c('ldR' + idx, 'MIN', 720, yB));
+        wires.push(w('sel' + idx, 'out', 'ldR' + idx, 'a'));
+        wires.push(w('we',        'out', 'ldR' + idx, 'b'));
+        // ld_i = MAX(ld_raw, 0) — clamp to {0, +1} so non-selected words
+        // see ld=0 (hold) rather than ld=T (clear).
+        comps.push(c('ld' + idx, 'MAX', 800, yB));
+        wires.push(w('ldR' + idx, 'out', 'ld' + idx, 'a'));
+        wires.push(w('cZero',     'out', 'ld' + idx, 'b'));
+        // The storage word — a TREG3 (which itself wraps three TFLOPs)
+        comps.push(c('w' + idx, 'SUB:TREG3', 880, yB - 20));
+        wires.push(w('d0',       'out',   'w' + idx, 'd0'));
+        wires.push(w('d1',       'out',   'w' + idx, 'd1'));
+        wires.push(w('d2',       'out',   'w' + idx, 'd2'));
+        wires.push(w('clk',      'out',   'w' + idx, 'clk'));
+        wires.push(w('ld' + idx, 'out',   'w' + idx, 'ld'));
+      }
+    }
+
+    // ── 2-level MUX3 read tree, one per output trit ──
+    // For each trit i, a0 picks within each row (mid_row_i), then a1
+    // picks between rows (q_i). Matches the native (a0+1)+(a1+1)*3.
+    const outNames = ['q0', 'q1', 'q2'];
+    for (let i = 0; i < 3; i++) {
+      const port = 'q' + i;
+      // Row mux per a1 value — selects within a row using a0
+      comps.push(c('mr' + i + 'T', 'SUB:MUX3', 1100, 100 + i * 380));
+      comps.push(c('mr' + i + '0', 'SUB:MUX3', 1100, 200 + i * 380));
+      comps.push(c('mr' + i + 'P', 'SUB:MUX3', 1100, 300 + i * 380));
+      // Final mux — a1 picks between rows
+      comps.push(c('out' + i, 'SUB:MUX3', 1320, 200 + i * 380));
+      comps.push(c(outNames[i], 'OUTPUT', 1530, 215 + i * 380, { name: outNames[i] }));
+      // Row T = words 0/1/2; Row 0 = 3/4/5; Row P = 6/7/8
+      const rowWords = [[0, 1, 2], [3, 4, 5], [6, 7, 8]];
+      const tags = ['T', '0', 'P'];
+      for (let r = 0; r < 3; r++) {
+        const mr = 'mr' + i + tags[r];
+        wires.push(w('a0', 'out', mr, 's'));
+        wires.push(w('w' + rowWords[r][0], port, mr, 'dT'));
+        wires.push(w('w' + rowWords[r][1], port, mr, 'd0'));
+        wires.push(w('w' + rowWords[r][2], port, mr, 'dP'));
+      }
+      wires.push(w('a1',          'out', 'out' + i, 's'));
+      wires.push(w('mr' + i + 'T', 'out', 'out' + i, 'dT'));
+      wires.push(w('mr' + i + '0', 'out', 'out' + i, 'd0'));
+      wires.push(w('mr' + i + 'P', 'out', 'out' + i, 'dP'));
+      wires.push(w('out' + i, 'out', outNames[i], 'in'));
+    }
+    return { comps, wires };
+  });
+  return {
+    inputs: [{ name: 'a0' }, { name: 'a1' }, { name: 'd0' }, { name: 'd1' },
+             { name: 'd2' }, { name: 'we' }, { name: 'clk' }],
+    outputs: [{ name: 'q0' }, { name: 'q1' }, { name: 'q2' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
 // The subcircuits this build ships with. Each names its builder and the kit
 // (library-panel heading) it belongs to.
 const BUILTIN_SUBCIRCUITS = {
@@ -5210,11 +5823,17 @@ const BUILTIN_SUBCIRCUITS = {
   FADD:   { kit: 'Arithmetic Kit', build: buildFaddDef },
   ALU3:   { kit: 'Arithmetic Kit', build: buildAlu3Def },
   MUX3:   { kit: 'Arithmetic Kit', build: buildMux3Def },
+  TLATCH: { kit: 'Sequential Kit', build: buildTlatchDef },
+  TFLOP:  { kit: 'Sequential Kit', build: buildTflopDef },
+  TREG3:  { kit: 'Sequential Kit', build: buildTreg3Def },
+  TPC:    { kit: 'Sequential Kit', build: buildTpcDef },
+  TRAM:   { kit: 'Sequential Kit', build: buildTramDef },
 };
 // Kit headings, in library-panel order.
 const BUILTIN_SUBCIRCUIT_KITS = [
   { label: 'Neural-Net Kit', names: ['TMUL', 'MAC3', 'ACT'] },
   { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3', 'MUX3'] },
+  { label: 'Sequential Kit', names: ['TLATCH', 'TFLOP', 'TREG3', 'TPC', 'TRAM'] },
 ];
 // Seed the built-ins into the library. Called at boot and re-called after a
 // load; the `if absent` guard means a loaded file's own same-named
@@ -6404,6 +7023,142 @@ test('Gate-level MUX3 subcircuit matches the native MUX for all 81 inputs', () =
     const got  = simulateSubInstance({ type: 'SUB:MUX3', state: {} }, { s, dT, d0, dP });
     const want = TYPES.MUX.eval(null, { s, dT, d0, dP });
     assertEq(got.out, want.out, `MUX3 (s=${s},dT=${dT},d0=${d0},dP=${dP}):`);
+  }
+});
+
+// ---- Sequential kit (TLATCH / TFLOP / TREG3 / TPC / TRAM) ------------------
+//
+// Stateful subcircuits — driven by repeatedly calling simulateSubInstance on
+// the SAME instance, which reuses its subScope (and so retains its outVals)
+// across calls. That's exactly how the cross-coupled feedback stores state.
+
+test('Gate-level TLATCH is transparent at en=+1 and holds at en=T', () => {
+  registerBuiltinSubcircuits();
+  const inst = { type: 'SUB:TLATCH', state: {} };
+  // Initial settle with en=T should produce 0 (the seed value).
+  assertEq(simulateSubInstance(inst, { d: 1, en: -1 }).q, 0, 'init holds at 0:');
+  // Open the latch (en=+1) and write each ternary value in turn; close it
+  // (en=T) and confirm the value persists across the close.
+  for (const v of [1, -1, 0, 1, -1]) {
+    assertEq(simulateSubInstance(inst, { d: v,  en: 1  }).q, v, `load d=${v}:`);
+    assertEq(simulateSubInstance(inst, { d: -v, en: -1 }).q, v, `hold after ${v}:`);
+  }
+});
+
+test('Gate-level TFLOP samples d on the rising clock edge to +1', () => {
+  registerBuiltinSubcircuits();
+  const inst = { type: 'SUB:TFLOP', state: {} };
+  // Initial state is 0 (the outVals seed). A flat clock or a falling edge
+  // must not change q. A 0→+1 transition with the right d does.
+  assertEq(simulateSubInstance(inst, { d: 1, clk: -1 }).q, 0, 'init=0, clk low:');
+  assertEq(simulateSubInstance(inst, { d: 1, clk:  0 }).q, 0, 'still 0 at clk=0:');
+  assertEq(simulateSubInstance(inst, { d: 1, clk:  1 }).q, 1, 'latches +1 on rise:');
+  assertEq(simulateSubInstance(inst, { d: 0, clk:  1 }).q, 1, 'flat clk=1 holds:');
+  assertEq(simulateSubInstance(inst, { d: 0, clk: -1 }).q, 1, 'falling edge holds:');
+  assertEq(simulateSubInstance(inst, { d: 0, clk:  1 }).q, 0, 'latches 0 on next rise:');
+  assertEq(simulateSubInstance(inst, { d: -1, clk: -1 }).q, 0, 'drop clk, still 0:');
+  assertEq(simulateSubInstance(inst, { d: -1, clk:  1 }).q, -1, 'latches T on rise:');
+});
+
+test('Gate-level TREG3 loads, holds, and clears via tri-state ld', () => {
+  registerBuiltinSubcircuits();
+  const inst = { type: 'SUB:TREG3', state: {} };
+  const step = (d0, d1, d2, ld) => {
+    simulateSubInstance(inst, { d0, d1, d2, ld, clk: -1 });
+    return simulateSubInstance(inst, { d0, d1, d2, ld, clk: 1 });
+  };
+  // Load a value with ld=+1 on a real edge.
+  let r = step(1, -1, 1, 1);
+  assertDeepEq([r.q0, r.q1, r.q2], [1, -1, 1], 'loaded on ld=+1:');
+  // Hold with ld=0 — data is ignored.
+  r = step(-1, -1, -1, 0);
+  assertDeepEq([r.q0, r.q1, r.q2], [1, -1, 1], 'held on ld=0:');
+  // Load a different value to confirm reload works.
+  r = step(0, 1, -1, 1);
+  assertDeepEq([r.q0, r.q1, r.q2], [0, 1, -1], 'reloaded:');
+  // Clear with ld=T — the tri-state extension this twin adds.
+  r = step(1, 1, 1, -1);
+  assertDeepEq([r.q0, r.q1, r.q2], [0, 0, 0], 'cleared on ld=T:');
+});
+
+test('Gate-level TPC increments and wraps, and jumps when jmp=+1', () => {
+  registerBuiltinSubcircuits();
+  const inst = { type: 'SUB:TPC', state: {} };
+  const native = { type: 'PC', state: TYPES.PC.defaults() };
+  const tick = (jmp, j0, j1) => {
+    // Two simulateSubInstance calls per "step" — one with clk low, one
+    // with clk high — so the TFLOPs see a genuine rising edge.
+    simulateSubInstance(inst, { clk: -1, jmp, j0, j1 });
+    const r = simulateSubInstance(inst, { clk: 1, jmp, j0, j1 });
+    // Mirror on the native PC.
+    TYPES.PC.latch(native, { clk: -1, jmp, j0, j1 });
+    TYPES.PC.latch(native, { clk:  1, jmp, j0, j1 });
+    return r;
+  };
+  // The TFLOPs inside TPC start at q=0 (the cross-coupled-loop bootstrap
+  // seed), so TPC's natural reset is word 4 — not word 0 like native PC,
+  // whose defaults() sets p=[-1,-1]. Align both to a known address with
+  // one jump tick before comparing increment behaviour.
+  tick(1, -1, -1);
+  // Ten increments — walks 1..8, wraps to 0, then steps to 1. Compare
+  // as integers (via tritsToInt) rather than per-trit, because native
+  // intToTrits can return -0 for some high trits and Object.is treats
+  // -0 ≠ 0; the integer comparison is the meaning we actually want.
+  for (let i = 1; i <= 10; i++) {
+    const r = tick(0, 0, 0);
+    assertEq(tritsToInt([r.p0, r.p1]), tritsToInt(native.state.p),
+             `TPC address after ${i} ticks:`);
+  }
+  // Jump to balanced 3 → word index 7.
+  const tgt = intToTrits(3, 2);
+  const r = tick(1, tgt[0], tgt[1]);
+  assertEq(tritsToInt([r.p0, r.p1]), 3, 'TPC jump address:');
+});
+
+test('Gate-level TRAM stores and reads back across multiple addresses', () => {
+  registerBuiltinSubcircuits();
+  const inst = { type: 'SUB:TRAM', state: {} };
+  // Write a distinct word to each of three addresses, then read back all
+  // three — proves both the per-word load enable and the read-mux tree.
+  const writes = [
+    { a0: -1, a1: -1, d: [1, -1, 1] },   // word 0
+    { a0:  1, a1: -1, d: [-1, 1, -1] },  // word 2
+    { a0:  0, a1:  1, d: [1, 1, -1] },   // word 7
+  ];
+  for (const wr of writes) {
+    simulateSubInstance(inst, { a0: wr.a0, a1: wr.a1,
+                                 d0: wr.d[0], d1: wr.d[1], d2: wr.d[2],
+                                 we: 1, clk: -1 });
+    simulateSubInstance(inst, { a0: wr.a0, a1: wr.a1,
+                                 d0: wr.d[0], d1: wr.d[1], d2: wr.d[2],
+                                 we: 1, clk: 1 });
+  }
+  for (const wr of writes) {
+    const r = simulateSubInstance(inst, { a0: wr.a0, a1: wr.a1,
+                                           d0: 0, d1: 0, d2: 0,
+                                           we: -1, clk: -1 });
+    assertDeepEq([r.q0, r.q1, r.q2], wr.d,
+                 `TRAM read back (a0=${wr.a0},a1=${wr.a1}):`);
+  }
+  // Suppress a write with we=T — addressed word must keep its prior value.
+  const before = simulateSubInstance(inst, { a0: -1, a1: -1, d0: 0, d1: 0, d2: 0,
+                                              we: -1, clk: -1 });
+  simulateSubInstance(inst, { a0: -1, a1: -1, d0: -1, d1: -1, d2: -1,
+                               we: -1, clk: -1 });
+  simulateSubInstance(inst, { a0: -1, a1: -1, d0: -1, d1: -1, d2: -1,
+                               we: -1, clk: 1 });
+  const after = simulateSubInstance(inst, { a0: -1, a1: -1, d0: 0, d1: 0, d2: 0,
+                                             we: -1, clk: -1 });
+  assertDeepEq([after.q0, after.q1, after.q2],
+               [before.q0, before.q1, before.q2], 'TRAM held on we=T:');
+});
+
+test('Sequential kit registered and protected as built-ins', () => {
+  registerBuiltinSubcircuits();
+  for (const n of ['TLATCH', 'TFLOP', 'TREG3', 'TPC', 'TRAM']) {
+    assertEq(isBuiltinSubcircuit(n), true, `${n} is built-in:`);
+    deleteSubcircuit(n);
+    if (!subcircuitDefs[n]) throw new Error(`built-in subcircuit "${n}" was deleted`);
   }
 });
 
