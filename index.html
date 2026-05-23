@@ -350,6 +350,7 @@
   <button id="btn-tt" title="Generate truth table from selected inputs/outputs">Truth Table</button>
   <button id="btn-pack" title="Pack selected components into a new subcircuit">Pack ▢</button>
   <button id="btn-gate" title="Define a new gate from a truth table">Build Gate</button>
+  <button id="btn-asm" title="Assemble a ternary-assembly program into the CPU's IMEM">Assemble</button>
   <button id="btn-wave" title="Toggle waveform panel">Wave</button>
   <button id="btn-tests" title="Run the built-in self-test suite">Tests</button>
   <button id="btn-info" title="Component reference — select a component first to jump to its page">Info</button>
@@ -598,6 +599,53 @@
     <div style="margin-top: 10px;">
       <button class="btn" id="pack-confirm" style="border-color: var(--accent);">Pack</button>
     </div>
+  </div>
+</div>
+
+<!-- Assembler modal -->
+<div class="modal-bg" id="asm-modal">
+  <div class="modal" style="min-width: 640px;">
+    <h2>Assemble a program <button class="btn close" id="asm-close">close</button></h2>
+    <p style="color: var(--muted); font-size: 12px; margin: 0 0 8px 0;">
+      Write a ternary-assembly program — three mnemonics, at most 9 instructions.
+      Assemble &amp; Load fills the CPU preset's <b>IMEM</b> (the RAM block) with
+      the resulting word image. Load the <em>CPU</em> example first if it isn't
+      open. Words after the last instruction are padded with 0.
+    </p>
+    <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start;">
+      <textarea id="asm-source" spellcheck="false"
+        style="width: 100%; height: 220px; box-sizing: border-box;
+               font-family: monospace; font-size: 12px;
+               background: var(--panel-2); color: var(--text);
+               border: 1px solid var(--border); border-radius: 4px; padding: 8px;
+               resize: vertical; outline: none;"></textarea>
+      <div style="min-width: 180px; font-size: 11px; color: var(--muted);">
+        <b style="color: var(--text); display: block; margin-bottom: 4px;">Mnemonics</b>
+        <code>ADDI &lt;n&gt;</code> ACC += n<br>
+        <code>MAXI &lt;n&gt;</code> ACC = max(ACC, n)<br>
+        <code>JMP  &lt;addr&gt;</code> PC ← addr<br>
+        <div style="margin-top: 8px;">
+          n: −4..+4 &nbsp; addr: 0..8 or label<br>
+          Labels: <code>LOOP:</code> at the start of a line.<br>
+          Comments: <code>;</code> to end of line.
+        </div>
+        <div style="margin-top: 8px;">
+          <b style="color: var(--text); display: block;">Examples</b>
+          <select id="asm-example" style="width: 100%; margin-top: 3px;
+            background: var(--panel-2); color: var(--text);
+            border: 1px solid var(--border); border-radius: 4px; padding: 3px;
+            font-size: 11px;">
+            <option value="">— pick one —</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top: 10px;">
+      <button class="btn" id="asm-load" style="border-color: var(--accent);">Assemble &amp; Load into IMEM</button>
+      <button class="btn" id="asm-check" style="margin-left: 6px;">Assemble (check only)</button>
+      <span id="asm-status" style="margin-left: 12px; color: var(--muted); font-size: 11px;"></span>
+    </div>
+    <div id="asm-result" style="margin-top: 10px; font-family: monospace; font-size: 11px;"></div>
   </div>
 </div>
 
@@ -3763,6 +3811,7 @@ const INFO_CATEGORIES = [
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
   ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
+  ['ISA',            ['_asm']],
 ];
 
 const COMPONENT_INFO = {
@@ -3798,6 +3847,68 @@ const COMPONENT_INFO = {
       simulator), its <b>working mechanism</b>, any internal <b>state</b> it
       keeps, and — for gates — a <b>truth table generated live</b> by running
       the simulator's evaluation function.</p>`,
+  },
+
+  _asm: {
+    name: 'Ternary assembler',
+    tagline: 'Text → 9-word IMEM image for the Phase 7 CPU',
+    body: `
+      <p>Open the <b>Assemble</b> button in the toolbar to write a small
+      program in the CPU's 3-op ISA, check it, and load the encoded image
+      straight into the CPU example's <b>IMEM</b> (the RAM block whose
+      address is driven by the PC). One source line per instruction; the
+      RAM holds at most <b>nine</b> instructions.</p>
+
+      <h4>The three mnemonics</h4>
+      <table class="info-tt" style="text-align:left">
+        <thead><tr><th>Mnemonic</th><th>Opcode trit</th><th>Operation</th><th>Operand</th></tr></thead>
+        <tbody>
+          <tr><td><code>ADDI &lt;n&gt;</code></td><td class="trit-0">0</td>
+              <td><code>ACC = ACC + n</code></td>
+              <td>signed integer <code>−4..+4</code></td></tr>
+          <tr><td><code>MAXI &lt;n&gt;</code></td><td class="trit-P">+1</td>
+              <td><code>ACC = max(ACC, n)</code></td>
+              <td>signed integer <code>−4..+4</code></td></tr>
+          <tr><td><code>JMP &nbsp;&lt;addr&gt;</code></td><td class="trit-T">T</td>
+              <td><code>PC ← addr</code> on the next rising edge</td>
+              <td>word index <code>0..8</code> or a label</td></tr>
+        </tbody>
+      </table>
+      <p>The opcode trit is wired straight into the ALU's <code>op</code>
+      pin (T = MIN, 0 = ADD, +1 = MAX), and into the decoder. For ADDI
+      and MAXI the decoder leaves <code>accWrite = +1</code>, so the ALU
+      result lands in ACC; for JMP it raises <code>pcSrc</code> instead.</p>
+
+      <h4>Word layout</h4>
+      <p>Each instruction is one RAM word — three trits <em>low-first</em>:</p>
+      <p style="text-align:center"><code>[ operand_low, operand_high, opcode ]</code></p>
+      <p>The operand's two trits are <code>intToTrits(n, 2)</code> for
+      ADDI / MAXI immediates, and <code>intToTrits(addr − 4, 2)</code>
+      for JMP — that's the encoding the PC uses for its stored address
+      (so <code>JMP 0</code> is <code>[T, T, T]</code>).</p>
+
+      <h4>Labels and comments</h4>
+      <p>A bare <code>NAME:</code> at the start of a line names the next
+      instruction's word index, and any JMP referring to it resolves to
+      that index. Comments run from <code>;</code> to end of line.</p>
+      <pre style="background: var(--panel-2); padding: 8px; border-radius: 4px; font-size: 11px; line-height: 1.4;">; Saturating counter — stops climbing at +3
+LOOP:
+  ADDI +1
+  MAXI +3
+  JMP  LOOP</pre>
+
+      <h4>Errors</h4>
+      <p>The check-only path is non-destructive — it just lists the
+      problems with line numbers. Common ones: an immediate outside
+      <code>−4..+4</code>, a JMP address outside <code>0..8</code>, an
+      unresolved label, more than nine instructions total, or an unknown
+      mnemonic. Fix and re-Assemble.</p>
+
+      <h4>Round-trip with the built-in CPU example</h4>
+      <p>The default <em>CPU</em> preset hand-encodes the
+      "<code>ADDI +1 / JMP 0</code>" program directly into RAM. That same
+      program assembled here produces exactly the same word image, byte
+      for byte — there's a self-test that confirms it.</p>`,
   },
 
   INPUT: {
@@ -5117,6 +5228,98 @@ function openInfoModal() {
 document.getElementById('btn-info').addEventListener('click', openInfoModal);
 document.getElementById('info-close').addEventListener('click', () => closeModal('info-modal'));
 
+// ---- assembler modal ------------------------------------------------------
+function openAsmModal() {
+  // Populate the examples dropdown on first open (idempotent — clearing
+  // first lets a hot reload still see new entries).
+  const sel = document.getElementById('asm-example');
+  if (sel) {
+    sel.innerHTML = '<option value="">— pick one —</option>';
+    for (const key in ASM_EXAMPLES) {
+      const opt = document.createElement('option');
+      opt.value = key; opt.textContent = ASM_EXAMPLES[key].label;
+      sel.appendChild(opt);
+    }
+  }
+  // Seed the textarea with the default counter program on a blank field.
+  const ta = document.getElementById('asm-source');
+  if (ta && !ta.value.trim()) ta.value = ASM_EXAMPLES['counter'].src.trimEnd();
+  document.getElementById('asm-status').textContent = '';
+  document.getElementById('asm-result').innerHTML = '';
+  openModal('asm-modal');
+}
+function renderAsmResult(res) {
+  const out = document.getElementById('asm-result');
+  if (res.errors.length) {
+    out.innerHTML = `<div style="color: var(--t-neg)">
+      ${res.errors.length} error(s):</div>` +
+      res.errors.map(e => `<div style="color: var(--t-neg); padding-left: 8px;">` +
+        `line ${e.line}: ${escapeHtml(e.msg)}</div>`).join('');
+    return;
+  }
+  // Print the encoded word image — one line per word, low trit first.
+  const rows = res.mem.map((w, i) => {
+    const used = i < res.words ? '' : ' style="color: var(--muted)"';
+    const trits = w.map(t => t === -1 ? 'T' : t === 1 ? '+1' : ' 0').join(' ');
+    return `<div${used}>  word ${i}: [${trits}]</div>`;
+  }).join('');
+  out.innerHTML =
+    `<div style="color: var(--accent)">Assembled ${res.words} instruction${res.words === 1 ? '' : 's'}` +
+    ` (${ASM_PROGRAM_WORDS - res.words} word${ASM_PROGRAM_WORDS - res.words === 1 ? '' : 's'} padded with 0).</div>` +
+    `<div style="margin-top: 4px;">${rows}</div>`;
+}
+// Find the RAM block that's wired up as IMEM (address pins driven by a PC).
+// Falls back to the first RAM in the circuit if no PC is present.
+function findImem(scope) {
+  scope = scope || { comps, wires };
+  const rams = scope.comps.filter(c => c.type === 'RAM');
+  if (rams.length === 0) return null;
+  for (const r of rams) {
+    const a0Wire = scope.wires.find(w => w.toId === r.id && w.toPort === 'a0');
+    if (!a0Wire) continue;
+    const src = scope.comps.find(c => c.id === a0Wire.fromId);
+    if (src && src.type === 'PC') return r;
+  }
+  return rams[0];
+}
+function loadProgramIntoImem(mem) {
+  const ram = findImem();
+  if (!ram) return { ok: false, msg: 'No RAM block found — load the CPU example first.' };
+  pushHistory();
+  ram.state.mem = mem.map(w => w.slice());
+  ram.state.clkPrev = 0;
+  outVals = {}; tick = 0;
+  simulate(); draw(); drawWaves();
+  return { ok: true, msg: `Loaded ${mem.length} words into RAM #${ram.id}.` };
+}
+document.getElementById('btn-asm').addEventListener('click', openAsmModal);
+document.getElementById('asm-close').addEventListener('click', () => closeModal('asm-modal'));
+document.getElementById('asm-example').addEventListener('change', (e) => {
+  const ex = ASM_EXAMPLES[e.target.value];
+  if (!ex) return;
+  document.getElementById('asm-source').value = ex.src.trimEnd();
+  document.getElementById('asm-status').textContent = '';
+  document.getElementById('asm-result').innerHTML = '';
+  e.target.value = '';
+});
+document.getElementById('asm-check').addEventListener('click', () => {
+  const res = assemble(document.getElementById('asm-source').value);
+  renderAsmResult(res);
+  document.getElementById('asm-status').textContent =
+    res.errors.length ? `${res.errors.length} error(s)` : 'assembled cleanly';
+});
+document.getElementById('asm-load').addEventListener('click', () => {
+  const res = assemble(document.getElementById('asm-source').value);
+  renderAsmResult(res);
+  if (res.errors.length) {
+    document.getElementById('asm-status').textContent = `${res.errors.length} error(s) — fix before loading`;
+    return;
+  }
+  const r = loadProgramIntoImem(res.mem);
+  document.getElementById('asm-status').textContent = r.msg;
+  if (r.ok) setStatus(`asm: ${r.msg}`);
+});
+
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (!confirm('Clear the entire circuit? (Subcircuit library is preserved.)')) return;
   pushHistory();
@@ -6047,6 +6250,152 @@ function registerBuiltinSubcircuits() {
   for (const name in BUILTIN_SUBCIRCUITS)
     if (!subcircuitDefs[name]) subcircuitDefs[name] = BUILTIN_SUBCIRCUITS[name].build();
 }
+
+// ============================================================================
+//  ASSEMBLER (Phase 8 — ternary ISA)
+// ============================================================================
+//
+//  Tiny text-to-trit assembler for the Phase 7 CPU's 3-op ISA. One
+//  instruction per RAM word (9 words max). Each word is encoded as
+//  [operand_low, operand_high, opcode] — same layout the CPU preset uses,
+//  so the output goes straight into IMEM with no further translation.
+//
+//  Mnemonics  (opcode trit drives the ALU's op pin directly):
+//    ADDI <n>     opcode  0   ACC = ACC + n        (n in -4..+4)
+//    MAXI <n>     opcode +1   ACC = max(ACC, n)    (n in -4..+4)
+//    JMP  <addr>  opcode  T   PC  ← addr           (addr in 0..8 or a label)
+//
+//  Labels: `LABEL:` at the start of a line names the next instruction's
+//  address. Comments: `;` to end of line. Blank lines ignored.
+//
+//  Address encoding: the PC's stored trits p map to word index via
+//  index = tritsToInt(p) + 4 (range 0..8). So `JMP 0` encodes its operand
+//  as intToTrits(-4, 2) = [T, T]. The CPU example's existing program
+//  (ADDI +1 / JMP 0) round-trips byte-for-byte through this assembler.
+
+const ASM_OPCODES = {
+  ADDI: { opTrit:  0, operandKind: 'imm'  },
+  MAXI: { opTrit:  1, operandKind: 'imm'  },
+  JMP:  { opTrit: -1, operandKind: 'addr' },
+};
+const ASM_PROGRAM_WORDS = 9;
+
+function assemble(text) {
+  const errors = [];
+  const lines = String(text || '').split(/\r?\n/);
+  // Pass 1 — strip comments, collect labels, accumulate statements.
+  const stmts = [];   // { srcLine, mnem, operand }
+  const labels = {};
+  let pc = 0;
+  for (let i = 0; i < lines.length; i++) {
+    let s = lines[i].replace(/;.*/, '').trim();
+    if (!s) continue;
+    const labMatch = s.match(/^([A-Za-z_][\w]*)\s*:\s*(.*)$/);
+    if (labMatch) {
+      const name = labMatch[1];
+      if (Object.prototype.hasOwnProperty.call(labels, name)) {
+        errors.push({ line: i + 1, msg: `duplicate label "${name}"` });
+      } else {
+        labels[name] = pc;
+      }
+      s = labMatch[2].trim();
+      if (!s) continue;
+    }
+    if (pc >= ASM_PROGRAM_WORDS) {
+      errors.push({ line: i + 1, msg: `program exceeds ${ASM_PROGRAM_WORDS} words (IMEM is ${ASM_PROGRAM_WORDS} deep)` });
+      continue;
+    }
+    const m = s.match(/^([A-Za-z]+)\s+(\S.*?)\s*$/);
+    if (!m) {
+      errors.push({ line: i + 1, msg: `expected "MNEM operand", got: ${s}` });
+      continue;
+    }
+    stmts.push({ srcLine: i + 1, mnem: m[1].toUpperCase(), operand: m[2] });
+    pc++;
+  }
+  // Pass 2 — encode each statement.
+  const mem = Array.from({ length: ASM_PROGRAM_WORDS }, () => [0, 0, 0]);
+  for (let idx = 0; idx < stmts.length; idx++) {
+    const st = stmts[idx];
+    const op = ASM_OPCODES[st.mnem];
+    if (!op) {
+      errors.push({ line: st.srcLine, msg: `unknown mnemonic "${st.mnem}" (use ADDI / MAXI / JMP)` });
+      continue;
+    }
+    let value;
+    if (op.operandKind === 'addr') {
+      // Label first, then a decimal integer 0..8.
+      if (Object.prototype.hasOwnProperty.call(labels, st.operand)) {
+        value = labels[st.operand];
+      } else {
+        const n = Number(st.operand);
+        if (!Number.isFinite(n) || !Number.isInteger(n)) {
+          errors.push({ line: st.srcLine, msg: `unknown label or non-integer address: ${st.operand}` });
+          continue;
+        }
+        value = n;
+      }
+      if (value < 0 || value > 8) {
+        errors.push({ line: st.srcLine, msg: `JMP address ${value} out of range 0..8` });
+        continue;
+      }
+      // PC stores p where tritsToInt(p) + 4 = word index → operand trits are intToTrits(addr − 4, 2).
+      const tr = intToTrits(value - 4, 2);
+      mem[idx] = [tr[0], tr[1], op.opTrit];
+    } else {
+      // 'imm' — signed integer, two-trit balanced range −4..+4.
+      const n = Number(st.operand);
+      if (!Number.isFinite(n) || !Number.isInteger(n)) {
+        errors.push({ line: st.srcLine, msg: `expected integer operand, got: ${st.operand}` });
+        continue;
+      }
+      if (n < -4 || n > 4) {
+        errors.push({ line: st.srcLine, msg: `${st.mnem} immediate ${n} out of range −4..+4 (operand is two trits)` });
+        continue;
+      }
+      const tr = intToTrits(n, 2);
+      mem[idx] = [tr[0], tr[1], op.opTrit];
+    }
+  }
+  return { errors, mem, labels, words: stmts.length };
+}
+
+// A small library of pre-written programs the modal's example dropdown
+// surfaces. Each is a string of assembly text.
+const ASM_EXAMPLES = {
+  'counter': {
+    label: 'Counter — ADDI +1 / JMP 0 (the default CPU program)',
+    src:
+`; Increments ACC by 1 every two clock ticks, forever.
+LOOP:
+  ADDI +1
+  JMP  LOOP
+`,
+  },
+  'saturating-counter': {
+    label: 'Saturating counter — counts up, clamps at +3',
+    src:
+`; ACC counts up, MAXI clamps it at +3, JMP loops.
+; Settles to ACC = +3 and stays there.
+LOOP:
+  ADDI +1
+  MAXI +3
+  JMP  LOOP
+`,
+  },
+  'down-up': {
+    label: 'Bounce — adds +1, then subtracts back via MAXI floor',
+    src:
+`; Toggles ACC between two values by alternating ADDI +1 and ADDI -1,
+; using MAXI to ensure a floor. Demonstrates negative immediates.
+LOOP:
+  ADDI +1
+  ADDI -1
+  MAXI -2
+  JMP  LOOP
+`,
+  },
+};
 
 const EXAMPLES = {
   'sti-inverter': {
@@ -7365,6 +7714,115 @@ test('Sequential kit registered and protected as built-ins', () => {
     assertEq(isBuiltinSubcircuit(n), true, `${n} is built-in:`);
     deleteSubcircuit(n);
     if (!subcircuitDefs[n]) throw new Error(`built-in subcircuit "${n}" was deleted`);
+  }
+});
+
+// ---- Phase 8 assembler ----------------------------------------------------
+
+test('Assembler encodes ADDI / MAXI / JMP exactly as the CPU preset expects', () => {
+  // The default CPU example hand-encodes "ADDI +1 / JMP 0" — assembling that
+  // textual program must produce the same first two words. Any drift here
+  // means the assembler and the live CPU have desynced.
+  const res = assemble(`
+    ADDI +1
+    JMP  0
+  `);
+  if (res.errors.length) throw new Error('clean source produced errors: ' + JSON.stringify(res.errors));
+  assertDeepEq(res.mem[0], [1, 0, 0],    'ADDI +1 word:');
+  assertDeepEq(res.mem[1], [-1, -1, -1], 'JMP 0 word:');
+  // Remaining words padded with 0 — the CPU example does the same.
+  for (let i = 2; i < 9; i++) assertDeepEq(res.mem[i], [0, 0, 0], `padding word ${i}:`);
+});
+
+test('Assembler resolves labels and handles negative immediates', () => {
+  const res = assemble(`
+LOOP:
+  ADDI +2
+  ADDI -3
+  MAXI +1
+  JMP  LOOP
+  `);
+  if (res.errors.length) throw new Error('errors: ' + JSON.stringify(res.errors));
+  assertDeepEq(res.mem[0], [-1, 1, 0],   'ADDI +2 = intToTrits(2,2)=[T,+1] + op 0:');
+  assertDeepEq(res.mem[1], [0, -1, 0],   'ADDI -3 = intToTrits(-3,2)=[0,T] + op 0:');
+  assertDeepEq(res.mem[2], [1, 0, 1],    'MAXI +1 + op +1:');
+  assertDeepEq(res.mem[3], [-1, -1, -1], 'JMP LOOP (label = word 0, addr-4=-4 → [T,T]) + op T:');
+  assertEq(res.labels.LOOP, 0, 'LOOP label resolves to 0:');
+  assertEq(res.words, 4, '4 instructions assembled:');
+});
+
+test('Assembler rejects out-of-range immediates, bad labels, overlong programs', () => {
+  // Immediate out of range.
+  let r = assemble('ADDI +5');
+  assertEq(r.errors.length, 1, 'ADDI +5 → 1 error:');
+  if (!/out of range/.test(r.errors[0].msg)) throw new Error('expected range msg, got: ' + r.errors[0].msg);
+  // Unknown mnemonic.
+  r = assemble('FOO 1');
+  assertEq(r.errors.length, 1, 'FOO → 1 error:');
+  if (!/unknown mnemonic/.test(r.errors[0].msg)) throw new Error('expected unknown-mnem msg');
+  // Unknown label.
+  r = assemble('JMP NOWHERE');
+  assertEq(r.errors.length, 1, 'JMP NOWHERE → 1 error:');
+  // JMP address out of range.
+  r = assemble('JMP 9');
+  assertEq(r.errors.length, 1, 'JMP 9 → 1 error:');
+  // Too many instructions (10 > 9).
+  r = assemble(Array(10).fill('ADDI +1').join('\n'));
+  if (r.errors.length === 0) throw new Error('expected an "exceeds" error for 10 instructions');
+  if (!r.errors.some(e => /exceeds/.test(e.msg))) throw new Error('expected exceeds-9 message');
+});
+
+test('Assembler examples library exposes 3 programs that assemble cleanly', () => {
+  const names = Object.keys(ASM_EXAMPLES);
+  assertEq(names.length, 3, 'three canned examples:');
+  for (const k of names) {
+    const ex = ASM_EXAMPLES[k];
+    if (!ex.label || !ex.src) throw new Error(`example ${k} missing label or src`);
+    const res = assemble(ex.src);
+    if (res.errors.length) {
+      throw new Error(`example "${k}" failed to assemble: ` + JSON.stringify(res.errors));
+    }
+    if (res.words < 1 || res.words > 9) throw new Error(`example "${k}" has ${res.words} instructions`);
+  }
+});
+
+test('Assembled "counter" program executes ACC=1,2,3,... on the live CPU', () => {
+  // Round-trip: assemble the canned counter, slap its word image straight
+  // into IMEM of a fresh CPU instance, and step ten clock edges. ACC must
+  // climb 1,1,2,2,3,3,... — the same pattern verify-cpu.cjs checks.
+  const res = assemble(ASM_EXAMPLES['counter'].src);
+  if (res.errors.length) throw new Error('counter failed to assemble: ' + JSON.stringify(res.errors));
+  // Build the CPU example from scratch (independent of the live top-level
+  // `comps`, so the test doesn't disturb the user's circuit).
+  const ex = EXAMPLES['cpu'].build();
+  const imem = ex.comps.find(c => c.type === 'RAM');
+  imem.state.mem = res.mem.map(w => w.slice());
+  imem.state.clkPrev = 0;
+  const pc  = ex.comps.find(c => c.type === 'PC');
+  const acc = ex.comps.find(c => c.type === 'REG3');
+  // Run ten clock ticks through the scope-aware engine. The 4-phase step
+  // engine wants a real top-level scope, so swap `comps`/`wires` briefly.
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    comps = ex.comps; wires = ex.wires; outVals = {}; tick = 0;
+    syncCompMap(); simulate();
+    const seen = [];
+    for (let i = 0; i < 10; i++) {
+      stepSequential();
+      seen.push({ acc: tritsToInt(acc.state.q), pc: tritsToInt(pc.state.p) + 4 });
+    }
+    const expect = [
+      { acc: 1, pc: 1 }, { acc: 1, pc: 1 }, { acc: 1, pc: 0 }, { acc: 1, pc: 0 },
+      { acc: 2, pc: 1 }, { acc: 2, pc: 1 }, { acc: 2, pc: 0 }, { acc: 2, pc: 0 },
+      { acc: 3, pc: 1 }, { acc: 3, pc: 1 },
+    ];
+    for (let i = 0; i < expect.length; i++) {
+      assertEq(seen[i].acc, expect[i].acc, `step ${i+1} ACC:`);
+      assertEq(seen[i].pc,  expect[i].pc,  `step ${i+1} PC:`);
+    }
+  } finally {
+    comps = savedComps; wires = savedWires; outVals = savedOutVals; tick = savedTick;
+    syncCompMap();
   }
 });
 
