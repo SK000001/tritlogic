@@ -351,6 +351,7 @@
   <button id="btn-pack" title="Pack selected components into a new subcircuit">Pack ▢</button>
   <button id="btn-gate" title="Define a new gate from a truth table">Build Gate</button>
   <button id="btn-asm" title="Assemble a ternary-assembly program into the CPU's IMEM">Assemble</button>
+  <button id="btn-debug" title="Open the CPU debugger — step the program, set breakpoints, watch ACC/PC">Debug</button>
   <button id="btn-wave" title="Toggle waveform panel">Wave</button>
   <button id="btn-tests" title="Run the built-in self-test suite">Tests</button>
   <button id="btn-info" title="Component reference — select a component first to jump to its page">Info</button>
@@ -646,6 +647,64 @@
       <span id="asm-status" style="margin-left: 12px; color: var(--muted); font-size: 11px;"></span>
     </div>
     <div id="asm-result" style="margin-top: 10px; font-family: monospace; font-size: 11px;"></div>
+  </div>
+</div>
+
+<!-- Debugger panel — non-modal, floats over the canvas so the user can keep
+     stepping while watching the live CPU. Toggled by the Debug toolbar
+     button. Drag-to-move not provided; fixed bottom-right. -->
+<div id="dbg-panel" style="display: none; position: fixed; right: 16px; bottom: 16px;
+     width: 460px; max-height: 78vh; background: var(--panel); color: var(--text);
+     border: 1px solid var(--border-strong); border-radius: 6px;
+     box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-size: 12px; z-index: 50;
+     flex-direction: column;">
+  <div style="display: flex; align-items: center; padding: 6px 10px;
+       border-bottom: 1px solid var(--border); background: var(--panel-2);
+       border-radius: 6px 6px 0 0;">
+    <b style="color: var(--accent);">CPU Debugger</b>
+    <span id="dbg-status" style="margin-left: 10px; color: var(--muted); font-size: 11px;"></span>
+    <span style="flex: 1;"></span>
+    <button class="btn close" id="dbg-close" style="padding: 2px 8px;">close</button>
+  </div>
+  <div style="padding: 8px 10px; display: flex; gap: 6px; align-items: center;
+       border-bottom: 1px solid var(--border); flex-wrap: wrap;">
+    <button class="btn" id="dbg-step"      title="One stepSequential — half a clock period">Step</button>
+    <button class="btn" id="dbg-step-cyc"  title="Two steps — a full rising+falling clock period">Step Cycle</button>
+    <button class="btn" id="dbg-run"       title="Auto-step until a breakpoint or Pause" style="border-color: var(--accent-2); color: var(--accent-2);">Run</button>
+    <button class="btn" id="dbg-pause"     title="Stop auto-step">Pause</button>
+    <button class="btn" id="dbg-reset"     title="Reset PC and ACC to zero (does not wipe IMEM)">Reset PC</button>
+    <span style="flex:1;"></span>
+    <label style="font-size: 11px; color: var(--muted);">
+      max steps: <input id="dbg-runmax" type="number" min="1" max="9999" value="200"
+        style="width: 50px; background: var(--panel-2); color: var(--text);
+               border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px;" />
+    </label>
+  </div>
+  <div style="padding: 8px 10px; display: grid; grid-template-columns: 70px 1fr 60px 1fr; gap: 4px 8px;
+       font-family: monospace; border-bottom: 1px solid var(--border);">
+    <span style="color: var(--muted);">PC</span>      <span id="dbg-pc">—</span>
+    <span style="color: var(--muted);">ACC</span>     <span id="dbg-acc">—</span>
+    <span style="color: var(--muted);">instr</span>   <span id="dbg-instr" style="grid-column: span 3;">—</span>
+    <span style="color: var(--muted);">tick</span>    <span id="dbg-tick">0</span>
+    <span style="color: var(--muted);">brks</span>    <span id="dbg-brks">—</span>
+  </div>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+       overflow: hidden; flex: 1; min-height: 220px;">
+    <div style="overflow: auto; border-right: 1px solid var(--border);">
+      <div style="padding: 4px 8px; color: var(--muted); font-size: 11px;
+           background: var(--panel-2); border-bottom: 1px solid var(--border);">
+        Source <span style="color: var(--muted);">— click ● to set breakpoint</span>
+      </div>
+      <div id="dbg-src" style="font-family: monospace; font-size: 11px;
+           padding: 4px 0; white-space: pre;"></div>
+    </div>
+    <div style="overflow: auto;">
+      <div style="padding: 4px 8px; color: var(--muted); font-size: 11px;
+           background: var(--panel-2); border-bottom: 1px solid var(--border);">
+        IMEM (9 words) <span style="color: var(--muted);">— current word highlighted</span>
+      </div>
+      <div id="dbg-mem" style="font-family: monospace; font-size: 11px; padding: 4px 0;"></div>
+    </div>
   </div>
 </div>
 
@@ -1812,6 +1871,7 @@ function stepSequential() {
   document.getElementById('stat-tick').textContent = tick;
   drawWaves();
   draw();
+  if (typeof refreshDebugger === 'function') refreshDebugger();
 }
 
 // ============================================================================
@@ -3811,7 +3871,7 @@ const INFO_CATEGORIES = [
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
   ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
-  ['ISA',            ['_asm']],
+  ['ISA',            ['_asm', '_debugger']],
 ];
 
 const COMPONENT_INFO = {
@@ -3847,6 +3907,50 @@ const COMPONENT_INFO = {
       simulator), its <b>working mechanism</b>, any internal <b>state</b> it
       keeps, and — for gates — a <b>truth table generated live</b> by running
       the simulator's evaluation function.</p>`,
+  },
+
+  _debugger: {
+    name: 'CPU debugger',
+    tagline: 'Step the Phase 7 CPU, set breakpoints, watch ACC/PC live',
+    body: `
+      <p>The <b>Debug</b> toolbar button opens a floating panel that single-
+      steps the CPU example. It reads the live <b>PC</b> and <b>ACC</b>
+      registers and the <b>IMEM</b> contents straight from the canvas — so
+      it is always in sync with whatever Step / Play has done.</p>
+      <h4>What it shows</h4>
+      <ul>
+        <li><b>PC / ACC</b> as both signed integers and trit triples.</li>
+        <li><b>Source listing</b> of the program you last assembled
+            (<b>Assemble &amp; Load into IMEM</b>); the line currently being
+            executed is highlighted.</li>
+        <li><b>IMEM dump</b> of all 9 words, each decoded back to its
+            mnemonic (<code>ADDI</code> / <code>MAXI</code> / <code>JMP</code>);
+            the current word is highlighted.</li>
+      </ul>
+      <h4>Controls</h4>
+      <ul>
+        <li><b>Step</b> — one <code>stepSequential()</code> call, i.e. half
+            a clock period. The PC only advances on the rising edge, so
+            you may need two Steps to see it move.</li>
+        <li><b>Step Cycle</b> — two steps, a full rising+falling clock
+            period. One assembly instruction per Step Cycle.</li>
+        <li><b>Run</b> — auto-steps at ~12 Hz until either (a) PC lands on a
+            breakpoint, (b) the max-steps budget is exhausted, or (c) you
+            click <b>Pause</b>.</li>
+        <li><b>Reset PC</b> — zeroes PC and ACC without touching IMEM.</li>
+      </ul>
+      <h4>Breakpoints</h4>
+      <p>Click the small ● next to any source line or any IMEM word to set
+      a breakpoint on that address (0..8). Click again to clear. Run halts
+      <em>after</em> the step whose post-state has PC pointing at the
+      breakpoint address — so the highlighted line is the one about to
+      execute next.</p>
+      <h4>Limits</h4>
+      <p>The debugger only attaches when the canvas contains the CPU
+      shape: one <code>PC</code>, one <code>RAM</code> addressed by that
+      PC, and ideally a <code>REG3</code> driven by the <code>ALU</code>
+      output (the ACC). For other circuits the panel still opens but
+      shows "no CPU on canvas".</p>`,
   },
 
   _asm: {
@@ -5292,6 +5396,10 @@ function loadProgramIntoImem(mem) {
   simulate(); draw(); drawWaves();
   return { ok: true, msg: `Loaded ${mem.length} words into RAM #${ram.id}.` };
 }
+
+// Stash the last-loaded assembly + asm result so the debugger can render
+// source lines and map PC → source line. Set when "Assemble & Load" succeeds.
+let lastAsmProgram = null;   // { source, mem, addrToLine, labels, words }
 document.getElementById('btn-asm').addEventListener('click', openAsmModal);
 document.getElementById('asm-close').addEventListener('click', () => closeModal('asm-modal'));
 document.getElementById('asm-example').addEventListener('change', (e) => {
@@ -5317,7 +5425,230 @@ document.getElementById('asm-load').addEventListener('click', () => {
   }
   const r = loadProgramIntoImem(res.mem);
   document.getElementById('asm-status').textContent = r.msg;
-  if (r.ok) setStatus(`asm: ${r.msg}`);
+  if (r.ok) {
+    lastAsmProgram = {
+      source:     document.getElementById('asm-source').value,
+      mem:        res.mem.map(w => w.slice()),
+      addrToLine: res.addrToLine.slice(),
+      labels:     { ...res.labels },
+      words:      res.words,
+    };
+    refreshDebugger();
+    setStatus(`asm: ${r.msg}`);
+  }
+});
+
+// ---- CPU debugger ---------------------------------------------------------
+//
+//  A floating panel that single-steps the Phase 7 CPU and shows the live
+//  program counter and accumulator alongside the source we last assembled
+//  & loaded into IMEM. It depends only on the standard CPU shape used by
+//  EXAMPLES['cpu']: one RAM driven by one PC, with a REG3 acting as ACC.
+//  Breakpoints are stored as a Set of IMEM word addresses (0..8). The Run
+//  loop reuses the same stepSequential() the toolbar Step / Play buttons
+//  call, so the debugger is just observation + a stop condition; the
+//  simulator itself is untouched.
+
+const debuggerState = {
+  breakpoints: new Set(),  // word addresses 0..8
+  running: false,
+  runTimer: null,
+};
+
+function decodeImemWord(word) {
+  // [operand_low, operand_high, opcode] → human-readable mnemonic. Matches
+  // the assembler's ASM_OPCODES mapping exactly. Floating trits show as "?".
+  const opTrit = word[2];
+  const lo = word[0], hi = word[1];
+  if (lo == null || hi == null || opTrit == null) return '?';
+  const operandInt = lo + hi * 3;
+  if (opTrit === 0)  return `ADDI ${operandInt >= 0 ? '+' : ''}${operandInt}`;
+  if (opTrit === 1)  return `MAXI ${operandInt >= 0 ? '+' : ''}${operandInt}`;
+  if (opTrit === -1) return `JMP  ${operandInt + 4}`;  // PC index = stored value + 4
+  return '?';
+}
+
+function findDebuggerTargets(scope) {
+  // Returns { pc, imem, acc } or null if the canvas doesn't hold a CPU.
+  // ACC = the REG3 whose d-pins are driven by the ALU; falls back to first
+  // REG3. The CPU example wires the ALU outputs straight into ACC.
+  scope = scope || { comps, wires };
+  const pc = scope.comps.find(c => c.type === 'PC');
+  const imem = findImem(scope);
+  if (!pc || !imem) return null;
+  const regs = scope.comps.filter(c => c.type === 'REG3');
+  let acc = null;
+  for (const r of regs) {
+    const dWire = scope.wires.find(w => w.toId === r.id && w.toPort === 'd0');
+    if (!dWire) continue;
+    const src = scope.comps.find(c => c.id === dWire.fromId);
+    if (src && src.type === 'ALU') { acc = r; break; }
+  }
+  if (!acc) acc = regs[0] || null;
+  return { pc, imem, acc };
+}
+
+function escapeHtmlSafe(s) {
+  return String(s).replace(/[&<>"']/g, ch =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+}
+
+function refreshDebugger() {
+  const panel = document.getElementById('dbg-panel');
+  if (!panel || panel.style.display === 'none') return;
+  const targets = findDebuggerTargets();
+  const pcEl    = document.getElementById('dbg-pc');
+  const accEl   = document.getElementById('dbg-acc');
+  const instrEl = document.getElementById('dbg-instr');
+  const tickEl  = document.getElementById('dbg-tick');
+  const brksEl  = document.getElementById('dbg-brks');
+  const srcEl   = document.getElementById('dbg-src');
+  const memEl   = document.getElementById('dbg-mem');
+  tickEl.textContent = tick;
+  brksEl.textContent = debuggerState.breakpoints.size
+    ? Array.from(debuggerState.breakpoints).sort((a,b)=>a-b).join(', ')
+    : '(none)';
+
+  if (!targets) {
+    pcEl.textContent = '—'; accEl.textContent = '—';
+    instrEl.innerHTML = '<span style="color: var(--muted);">no CPU on canvas — load the CPU example</span>';
+    srcEl.innerHTML = ''; memEl.innerHTML = '';
+    return;
+  }
+  const pcAddr = tritsToInt(targets.pc.state.p) + 4;
+  const accVal = tritsToInt(targets.acc ? targets.acc.state.q : [0,0,0]);
+  pcEl.textContent  = `${pcAddr}  [${targets.pc.state.p.map(tritLabel).join(' ')}]`;
+  accEl.textContent = `${accVal >= 0 ? '+' : ''}${accVal}  ` +
+    (targets.acc ? `[${targets.acc.state.q.map(tritLabel).join(' ')}]` : '');
+  const curWord = targets.imem.state.mem[pcAddr] || [0,0,0];
+  instrEl.textContent = `word ${pcAddr}: ${decodeImemWord(curWord)}`;
+
+  // Source listing.
+  if (lastAsmProgram) {
+    const lines = lastAsmProgram.source.split(/\r?\n/);
+    // Reverse lookup: which IMEM addr (if any) lives on each source line.
+    const lineToAddr = {};
+    for (let i = 0; i < lastAsmProgram.addrToLine.length; i++) {
+      const ln = lastAsmProgram.addrToLine[i];
+      if (ln != null && !(ln in lineToAddr)) lineToAddr[ln] = i;
+    }
+    const pcLine = lastAsmProgram.addrToLine[pcAddr];
+    srcEl.innerHTML = lines.map((raw, idx) => {
+      const ln = idx + 1;
+      const addr = lineToAddr[ln];
+      const isPc = (ln === pcLine);
+      const hasBp = (addr != null) && debuggerState.breakpoints.has(addr);
+      const bpDot = addr != null
+        ? `<span class="dbg-bp" data-addr="${addr}" style="cursor: pointer;
+             color: ${hasBp ? 'var(--t-neg)' : 'var(--muted)'};">●</span>`
+        : `<span style="color: transparent;">●</span>`;
+      const bg = isPc ? 'background: rgba(110,168,255,0.18);' : '';
+      const lnLabel = String(ln).padStart(2, ' ');
+      return `<div style="padding: 1px 6px; ${bg}">${bpDot} <span style="color: var(--muted);">${lnLabel}</span>  ${escapeHtmlSafe(raw) || '&nbsp;'}</div>`;
+    }).join('');
+  } else {
+    srcEl.innerHTML = `<div style="padding: 8px; color: var(--muted);">No assembled program yet. Open <b>Assemble</b>, write a program, and click <b>Assemble &amp; Load into IMEM</b>.</div>`;
+  }
+
+  // IMEM dump.
+  memEl.innerHTML = targets.imem.state.mem.map((w, i) => {
+    const isPc = (i === pcAddr);
+    const hasBp = debuggerState.breakpoints.has(i);
+    const trits = w.map(t => t == null ? '?' : tritLabel(t)).join(' ');
+    const bg = isPc ? 'background: rgba(110,168,255,0.18);' : '';
+    const bpDot = `<span class="dbg-bp-mem" data-addr="${i}" style="cursor: pointer;
+       color: ${hasBp ? 'var(--t-neg)' : 'var(--muted)'};">●</span>`;
+    return `<div style="padding: 1px 6px; ${bg}">${bpDot} <span style="color: var(--muted);">w${i}</span>  [${trits}]  ${escapeHtmlSafe(decodeImemWord(w))}</div>`;
+  }).join('');
+}
+
+function openDebugger() {
+  const panel = document.getElementById('dbg-panel');
+  panel.style.display = 'flex';
+  refreshDebugger();
+}
+function closeDebugger() {
+  debuggerStopRun();
+  document.getElementById('dbg-panel').style.display = 'none';
+}
+function debuggerHitBreakpoint() {
+  const targets = findDebuggerTargets();
+  if (!targets) return false;
+  const pcAddr = tritsToInt(targets.pc.state.p) + 4;
+  return debuggerState.breakpoints.has(pcAddr);
+}
+function debuggerStopRun() {
+  debuggerState.running = false;
+  if (debuggerState.runTimer != null) {
+    clearInterval(debuggerState.runTimer);
+    debuggerState.runTimer = null;
+  }
+  const s = document.getElementById('dbg-status');
+  if (s) s.textContent = '';
+}
+function debuggerStartRun() {
+  if (debuggerState.running) return;
+  const maxStepsInput = document.getElementById('dbg-runmax');
+  let budget = Math.max(1, Math.min(9999, Number(maxStepsInput.value) || 200));
+  debuggerState.running = true;
+  document.getElementById('dbg-status').textContent = `running (budget ${budget})…`;
+  debuggerState.runTimer = setInterval(() => {
+    if (!debuggerState.running) return;
+    stepSequential();
+    refreshDebugger();
+    budget--;
+    if (debuggerHitBreakpoint()) {
+      debuggerStopRun();
+      document.getElementById('dbg-status').textContent = `halted at breakpoint`;
+    } else if (budget <= 0) {
+      debuggerStopRun();
+      document.getElementById('dbg-status').textContent = `budget exhausted`;
+    }
+  }, 80);
+}
+
+// Headless version of Run (no setInterval) used by the self-test suite:
+// step up to `maxSteps` ticks, halting early when PC matches a breakpoint.
+// Returns { steps, halted: 'breakpoint' | 'budget' }.
+function debuggerRunHeadless(maxSteps) {
+  let steps = 0;
+  for (let i = 0; i < maxSteps; i++) {
+    stepSequential();
+    steps++;
+    if (debuggerHitBreakpoint()) return { steps, halted: 'breakpoint' };
+  }
+  return { steps, halted: 'budget' };
+}
+
+document.getElementById('btn-debug').addEventListener('click', openDebugger);
+document.getElementById('dbg-close').addEventListener('click', closeDebugger);
+document.getElementById('dbg-step').addEventListener('click', () => {
+  stepSequential(); refreshDebugger();
+});
+document.getElementById('dbg-step-cyc').addEventListener('click', () => {
+  stepSequential(); stepSequential(); refreshDebugger();
+});
+document.getElementById('dbg-run').addEventListener('click', debuggerStartRun);
+document.getElementById('dbg-pause').addEventListener('click', debuggerStopRun);
+document.getElementById('dbg-reset').addEventListener('click', () => {
+  const targets = findDebuggerTargets();
+  if (!targets) return;
+  pushHistory();
+  targets.pc.state.p = [-1, -1]; targets.pc.state.clkPrev = 0;
+  if (targets.acc) { targets.acc.state.q = [0,0,0]; targets.acc.state.clkPrev = 0; }
+  outVals = {}; tick = 0;
+  simulate(); draw(); drawWaves(); refreshDebugger();
+});
+// Click a breakpoint dot — toggle the address. Listener on the panel so it
+// keeps working after each innerHTML re-render.
+document.getElementById('dbg-panel').addEventListener('click', (e) => {
+  const t = e.target;
+  if (!t || !(t.classList.contains('dbg-bp') || t.classList.contains('dbg-bp-mem'))) return;
+  const a = Number(t.dataset.addr);
+  if (!Number.isInteger(a)) return;
+  if (debuggerState.breakpoints.has(a)) debuggerState.breakpoints.delete(a);
+  else debuggerState.breakpoints.add(a);
+  refreshDebugger();
 });
 
 document.getElementById('btn-clear').addEventListener('click', () => {
@@ -6357,7 +6688,12 @@ function assemble(text) {
       mem[idx] = [tr[0], tr[1], op.opTrit];
     }
   }
-  return { errors, mem, labels, words: stmts.length };
+  // addrToLine[i] = 1-based source line of the instruction at IMEM word i,
+  // or null for the trailing padding words. The debugger uses this to map
+  // the live PC back onto the source listing.
+  const addrToLine = Array.from({ length: ASM_PROGRAM_WORDS }, () => null);
+  for (let i = 0; i < stmts.length; i++) addrToLine[i] = stmts[i].srcLine;
+  return { errors, mem, labels, words: stmts.length, addrToLine };
 }
 
 // A small library of pre-written programs the modal's example dropdown
@@ -7822,6 +8158,76 @@ test('Assembled "counter" program executes ACC=1,2,3,... on the live CPU', () =>
     }
   } finally {
     comps = savedComps; wires = savedWires; outVals = savedOutVals; tick = savedTick;
+    syncCompMap();
+  }
+});
+
+// ---- CPU debugger ---------------------------------------------------------
+//
+// The panel just observes; the simulator does the real work. So the tests
+// focus on (a) the debug-side data the assembler produces and (b) the
+// breakpoint stop condition, by running the same headless CPU instance the
+// round-trip test uses.
+
+test('Assembler emits addrToLine mapping each IMEM word to its source line', () => {
+  const res = assemble(`
+; comment
+LOOP:
+  ADDI +1     ; word 0, source line 4
+  MAXI +3     ; word 1, source line 5
+  JMP  LOOP   ; word 2, source line 6
+`);
+  assertEq(res.errors.length, 0, 'no errors:');
+  assertEq(res.words, 3, '3 instructions:');
+  assertEq(res.addrToLine[0], 4, 'word 0 ← line 4:');
+  assertEq(res.addrToLine[1], 5, 'word 1 ← line 5:');
+  assertEq(res.addrToLine[2], 6, 'word 2 ← line 6:');
+  assertEq(res.addrToLine[3], null, 'word 3 (padding) is null:');
+  assertEq(res.addrToLine[8], null, 'word 8 (padding) is null:');
+});
+
+test('decodeImemWord round-trips ADDI / MAXI / JMP from assembler output', () => {
+  const res = assemble(`
+ADDI +2
+MAXI -3
+JMP  5
+`);
+  assertEq(res.errors.length, 0, 'no errors:');
+  assertEq(decodeImemWord(res.mem[0]), 'ADDI +2', 'ADDI decode:');
+  assertEq(decodeImemWord(res.mem[1]), 'MAXI -3', 'MAXI decode:');
+  assertEq(decodeImemWord(res.mem[2]), 'JMP  5',  'JMP decode:');
+});
+
+test('Debugger Run halts at a breakpoint on the live CPU', () => {
+  // Same scaffolding as the round-trip test: assemble the counter, swap
+  // the top-level scope to a fresh CPU instance, set a breakpoint, run.
+  const res = assemble(ASM_EXAMPLES['counter'].src);
+  if (res.errors.length) throw new Error('counter failed: ' + JSON.stringify(res.errors));
+  const ex = EXAMPLES['cpu'].build();
+  const imem = ex.comps.find(c => c.type === 'RAM');
+  imem.state.mem = res.mem.map(w => w.slice());
+  imem.state.clkPrev = 0;
+  const pc  = ex.comps.find(c => c.type === 'PC');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  const savedBps = new Set(debuggerState.breakpoints);
+  try {
+    comps = ex.comps; wires = ex.wires; outVals = {}; tick = 0;
+    syncCompMap(); simulate();
+    debuggerState.breakpoints = new Set([1]);   // halt when PC == word 1
+    const r = debuggerRunHeadless(50);
+    assertEq(r.halted, 'breakpoint', 'halted reason:');
+    assertEq(tritsToInt(pc.state.p) + 4, 1, 'PC is at the breakpoint word:');
+    // And it should NOT have run the full budget — counter program hits the
+    // breakpoint on the first rising edge (after step 1).
+    if (r.steps > 4) throw new Error(`expected halt within 4 steps, got ${r.steps}`);
+    // Empty breakpoints — Run exhausts the budget cleanly.
+    debuggerState.breakpoints = new Set();
+    const r2 = debuggerRunHeadless(6);
+    assertEq(r2.halted, 'budget', 'no-bp run exhausts budget:');
+    assertEq(r2.steps, 6, 'budget steps consumed:');
+  } finally {
+    comps = savedComps; wires = savedWires; outVals = savedOutVals; tick = savedTick;
+    debuggerState.breakpoints = savedBps;
     syncCompMap();
   }
 });
