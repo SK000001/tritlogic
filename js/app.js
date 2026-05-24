@@ -1,3 +1,10 @@
+import {
+  comps, wires, nextCompId, nextWireId, outVals, subcircuitDefs, customGates, view, tick, autoPlay, tool, placeType, mouse, drag, rmbDelete, pendingWire, hoverPin, selection, selectedWire, lastClickPos, compById, lastAsmProgram, _subDepth, animTime, _lastAnim,
+  setComps, setWires, setNextCompId, setNextWireId, setOutVals, setSubcircuitDefs, setCustomGates, setView, setTick, assignAutoPlay, assignTool, setPlaceType, setMouse, setDrag, setRmbDelete, setPendingWire, setHoverPin, setSelection, setSelectedWire, setLastClickPos, setCompById, setLastAsmProgram, setSubDepth, setAnimTime, setLastAnim,
+  _pathCache, _wireOccupied, undoStack, redoStack,
+  cv, ctx, statusEl, selInfo, waveCv, waveCtx
+} from './state.js';
+
 // ============================================================================
 //  TRIT VALUES & UTILITIES
 // ============================================================================
@@ -572,35 +579,11 @@ TYPES.PC = {
 //  WORLD STATE
 // ============================================================================
 
-let comps = [];     // { id, type, x, y, state, subScope? }
-let wires = [];     // { id, fromId, fromPort, toId, toPort }
-let nextCompId = 1, nextWireId = 1;
-let outVals = {};
 
-let subcircuitDefs = {};   // name -> { inputs:[{name}], outputs:[{name}], comps, wires, nextCompId, nextWireId }
 
-let view = { tx: 40, ty: 40, scale: 1 };
-let tick = 0;
-let autoPlay = null;
 
 // Tool / interaction state
-let tool = 'select';
-let placeType = null;
-let mouse = { x: 0, y: 0, wx: 0, wy: 0, down: false, spaceDown: false };
-let drag = null;             // { kind:'comp'|'pan'|'rect', startX, startY, ... }
-let rmbDelete = true;        // right-click deletes the comp/wire under the cursor
-let pendingWire = null;
-let hoverPin = null;
-let selection = new Set();   // Set of component IDs
-let selectedWire = null;
-let lastClickPos = null;
 
-const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d');
-const statusEl = document.getElementById('status');
-const selInfo = document.getElementById('sel-info');
-const waveCv = document.getElementById('wave-cv');
-const waveCtx = waveCv.getContext('2d');
 
 function resize() {
   cv.width = cv.parentElement.clientWidth;
@@ -624,8 +607,7 @@ function snap(v, g = 10) { return Math.round(v / g) * g; }
 // Map for O(1) component lookup.  Kept in sync via syncCompMap() at each
 // place that mutates the comps array; getComp falls back to a full rebuild
 // if it detects the map and array have drifted.
-let compById = new Map();
-function syncCompMap() { compById = new Map(comps.map(c => [c.id, c])); }
+function syncCompMap() { setCompById(new Map(comps.map(c => [c.id, c]))); }
 function getComp(id) {
   if (compById.size !== comps.length) syncCompMap();
   return compById.get(id);
@@ -860,13 +842,11 @@ function _simplifyOrthoPath(p) {
 
 // Per-draw cache so the many callers (drawWire, drawWireGhost,
 // computeWireCrossings, fanoutPins, hitTestWire) don't each re-run A*.
-let _pathCache = new Map();
 // Per-cell occupancy: gridKey -> sourceKey ('fromId:fromPort').  Wires
 // route in id order; each one marks its cells so subsequent wires with a
 // DIFFERENT source pin steer around them (rather than overlapping
 // longitudinally).  Same-source wires (fan-out) are free to share cells
 // since their carried signal is identical.
-let _wireOccupied = new Map();
 function invalidatePathCache() { _pathCache.clear(); _wireOccupied.clear(); }
 
 function wirePath(w) {
@@ -1045,7 +1025,7 @@ function simulateScope(scope) {
 function simulate() {
   const root = { comps, wires, outVals };
   const { iters, stable } = simulateScope(root);
-  outVals = root.outVals;
+  setOutVals(root.outVals);
   // Count floating (undriven) input pins.  Cheap O(C·W) scan; acceptable
   // for circuits of the size this tool is meant for.
   let floating = 0;
@@ -1145,7 +1125,7 @@ function stepSequential() {
   latchFlops({ comps, wires, outVals });
   simulate();                                  // phase 4 settle
   recordWaves({ comps, wires, outVals });
-  tick++;
+  setTick(tick + 1);
   document.getElementById('stat-tick').textContent = tick;
   drawWaves();
   draw();
@@ -1191,7 +1171,6 @@ function subInstanceDef(c) {
 
 // Module-level counter so a runaway recursion (subcircuit cycle) doesn't
 // blow the JS stack with a confusing trace — we bail at a sensible depth.
-let _subDepth = 0;
 function simulateSubInstance(instance, vIn) {
   const def = subcircuitDefs[instance.type.slice(4)];
   if (!def) return {};
@@ -1214,9 +1193,9 @@ function simulateSubInstance(instance, vIn) {
       c => c.type === 'INPUT' && (c.state.name || '') === p.name);
     if (ic) ic.state.value = (v == null) ? 0 : v;
   }
-  _subDepth++;
+  setSubDepth(_subDepth + 1);
   try { simulateScope(instance.subScope); }
-  finally { _subDepth--; }
+  finally { setSubDepth(_subDepth - 1); }
   // Pull outputs
   const out = {};
   for (const p of def.outputs) {
@@ -1345,14 +1324,14 @@ function packSelection(name, pinRenames) {
   // Replace selection in the main canvas with a single subcircuit instance.
   const bbox = boundingBox(inSelComps);
   const instance = {
-    id: nextCompId++,
+    id: setNextCompId(nextCompId + 1),
     type: 'SUB:' + name,
     x: snap(bbox.x),
     y: snap(bbox.y),
     state: {},
   };
-  comps = comps.filter(c => !ids.has(c.id));
-  wires = wires.filter(w => !ids.has(w.fromId) && !ids.has(w.toId));
+  setComps(comps.filter(c => !ids.has(c.id)));
+  setWires(wires.filter(w => !ids.has(w.fromId) && !ids.has(w.toId)));
   comps.push(instance); syncCompMap();
 
   // Re-route external wires.  Inbound (... → input) become wires from the
@@ -1361,7 +1340,7 @@ function packSelection(name, pinRenames) {
     const target = inSelComps.find(c => c.id === w.toId);
     const inputPin = inputs.find(p => p.srcId === target.id);
     if (inputPin) {
-      wires.push({ id: nextWireId++, fromId: w.fromId, fromPort: w.fromPort,
+      wires.push({ id: setNextWireId(nextWireId + 1), fromId: w.fromId, fromPort: w.fromPort,
                    toId: instance.id, toPort: inputPin.name });
     }
   }
@@ -1369,12 +1348,12 @@ function packSelection(name, pinRenames) {
     const source = inSelComps.find(c => c.id === w.fromId);
     const outputPin = outputs.find(p => p.srcId === source.id);
     if (outputPin) {
-      wires.push({ id: nextWireId++, fromId: instance.id, fromPort: outputPin.name,
+      wires.push({ id: setNextWireId(nextWireId + 1), fromId: instance.id, fromPort: outputPin.name,
                    toId: w.toId, toPort: w.toPort });
     }
   }
 
-  selection.clear(); selectedWire = null;
+  selection.clear(); setSelectedWire(null);
   refreshSubLib();
   simulate(); draw();
   setStatus(`Packed ${inSelComps.length} components into subcircuit "${name}"`);
@@ -1422,13 +1401,13 @@ function editSubcircuit(name) {
   if (!confirm(`Load the internals of "${name}" onto the canvas for editing?\n\n` +
                `This replaces the current circuit. When done, select the parts ` +
                `and press Pack ▢ to save them back as a subcircuit.`)) return;
-  comps = deepClone(def.comps);
-  wires = deepClone(def.wires);
+  setComps(deepClone(def.comps));
+  setWires(deepClone(def.wires));
   syncCompMap();
-  nextCompId = comps.reduce((m, c) => Math.max(m, c.id), 0) + 1;
-  nextWireId = wires.reduce((m, w) => Math.max(m, w.id), 0) + 1;
-  view = { tx: 40, ty: 40, scale: 1 };
-  selection.clear(); selectedWire = null; tick = 0; outVals = {};
+  setNextCompId(comps.reduce((m, c) => Math.max(m, c.id), 0) + 1);
+  setNextWireId(wires.reduce((m, w) => Math.max(m, w.id), 0) + 1);
+  setView({ tx: 40, ty: 40, scale: 1 });
+  selection.clear(); setSelectedWire(null); setTick(0); setOutVals({});
   setTool('select');
   simulate(); drawWaves(); draw(); updateInspector();
   setStatus(`Editing "${name}" — its INPUT / OUTPUT components are the block's pins`);
@@ -1507,7 +1486,6 @@ function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&
 //  string is "GATE:<name>".  compDef() routes them to customGateDef() which
 //  synthesises a TYPES-like def on the fly.
 
-let customGates = {};   // name -> { numInputs, table }
 
 // Generate every input combination for n inputs in {-1,0,1}^n, in a stable
 // order so the UI and the storage agree.  Returns an array of arrays.
@@ -2588,7 +2566,7 @@ function updateInspector() {
 
 function setStatus(s) { statusEl.textContent = s; }
 function setTool(t, type = null) {
-  tool = t; placeType = type;
+  assignTool(t); setPlaceType(type);
   document.querySelectorAll('.pal-item').forEach(el => el.classList.remove('active'));
   // SUB: and GATE: types come from the library panels, not the static palette,
   // so there's no palette item to highlight.  Skip the data-type filter and
@@ -2601,7 +2579,7 @@ function setTool(t, type = null) {
     const target = document.querySelector(sel);
     if (target) target.classList.add('active');
   }
-  pendingWire = null;
+  setPendingWire(null);
   setStatus(`tool: ${t}${type ? ' / ' + type : ''}`);
   draw();
 }
@@ -2696,11 +2674,11 @@ cv.addEventListener('contextmenu', (e) => {
 });
 const rmbToggle = document.getElementById('rmb-delete-toggle');
 try {
-  if (localStorage.getItem('tritlogic.rmbDelete') === '0') rmbDelete = false;
+  if (localStorage.getItem('tritlogic.rmbDelete') === '0') setRmbDelete(false);
 } catch (e) {}
 rmbToggle.checked = rmbDelete;
 rmbToggle.addEventListener('change', () => {
-  rmbDelete = rmbToggle.checked;
+  setRmbDelete(rmbToggle.checked);
   try { localStorage.setItem('tritlogic.rmbDelete', rmbDelete ? '1' : '0'); }
   catch (e) {}
   setStatus(`right-click delete ${rmbDelete ? 'enabled' : 'disabled'}`);
@@ -2724,9 +2702,9 @@ cv.addEventListener('mousemove', (e) => {
       if (c) { c.x = item.x0 + dx; c.y = item.y0 + dy; }
     }
   }
-  hoverPin = hitTestPin(mouse.wx, mouse.wy);
-  if (hoverPin) hoverPin = { compId: hoverPin.comp.id, port: hoverPin.port,
-                             kind: hoverPin.kind, x: hoverPin.x, y: hoverPin.y };
+  setHoverPin(hitTestPin(mouse.wx, mouse.wy));
+  if (hoverPin) setHoverPin({ compId: hoverPin.comp.id, port: hoverPin.port,
+                             kind: hoverPin.kind, x: hoverPin.x, y: hoverPin.y });
   draw();
 });
 
@@ -2741,7 +2719,6 @@ cv.addEventListener('mousemove', (e) => {
 //  is called BEFORE each mutating user action; redo is invalidated on any
 //  new push. Drag-move snapshots are dropped if no movement happened.
 
-const undoStack = [], redoStack = [];
 const UNDO_LIMIT = 50;
 
 function snapshotState() {
@@ -2760,16 +2737,16 @@ function snapshotState() {
 }
 
 function restoreState(snap) {
-  comps = deepClone(snap.comps);
-  wires = deepClone(snap.wires);
-  nextCompId = snap.nextCompId;
-  nextWireId = snap.nextWireId;
-  subcircuitDefs = deepClone(snap.subcircuitDefs);
+  setComps(deepClone(snap.comps));
+  setWires(deepClone(snap.wires));
+  setNextCompId(snap.nextCompId);
+  setNextWireId(snap.nextWireId);
+  setSubcircuitDefs(deepClone(snap.subcircuitDefs));
   registerBuiltinSubcircuits();
-  customGates = deepClone(snap.customGates);
+  setCustomGates(deepClone(snap.customGates));
   syncCompMap();
-  selection.clear(); selectedWire = null; pendingWire = null;
-  outVals = {};
+  selection.clear(); setSelectedWire(null); setPendingWire(null);
+  setOutVals({});
   if (typeof refreshSubLib === 'function') refreshSubLib();
   if (typeof refreshGateLib === 'function') refreshGateLib();
   simulate(); draw(); updateInspector();
@@ -2806,7 +2783,7 @@ cv.addEventListener('mousedown', (e) => {
 
   // Pan
   if (e.button === 1 || (e.button === 0 && mouse.spaceDown)) {
-    drag = { kind: 'pan', mx0: mouse.x, my0: mouse.y, tx0: view.tx, ty0: view.ty };
+    setDrag({ kind: 'pan', mx0: mouse.x, my0: mouse.y, tx0: view.tx, ty0: view.ty });
     return;
   }
   if (e.button !== 0) return;
@@ -2817,7 +2794,7 @@ cv.addEventListener('mousedown', (e) => {
     const state = (tdef.defaults || (() => ({})))();
     // If WAVE, ensure trace is a fresh array (defaults() already does it)
     const c = {
-      id: nextCompId++,
+      id: setNextCompId(nextCompId + 1),
       type: placeType,
       x: snap(mouse.wx - tdef.w/2),
       y: snap(mouse.wy - tdef.h/2),
@@ -2852,7 +2829,7 @@ cv.addEventListener('mousedown', (e) => {
       if (!e.shiftKey) selection.clear();
       selection.add(c.id);
     }
-    selectedWire = null;
+    setSelectedWire(null);
     const items = Array.from(selection).map(id => {
       const cc = getComp(id);
       return { id, x0: cc.x, y0: cc.y };
@@ -2861,8 +2838,8 @@ cv.addEventListener('mousedown', (e) => {
     // pops it; if it was a real drag (movement) or a click on INPUT/CONST
     // (cycles the value), the snapshot stays.
     pushHistory();
-    drag = { kind: 'comp', startWX: mouse.wx, startWY: mouse.wy, items,
-             clickComp: c, startMX: mouse.x, startMY: mouse.y };
+    setDrag({ kind: 'comp', startWX: mouse.wx, startWY: mouse.wy, items,
+             clickComp: c, startMX: mouse.x, startMY: mouse.y });
     updateInspector(); draw();
     return;
   }
@@ -2870,7 +2847,7 @@ cv.addEventListener('mousedown', (e) => {
   const wr = hitTestWire(mouse.wx, mouse.wy);
   if (wr) {
     selection.clear();
-    selectedWire = wr.id;
+    setSelectedWire(wr.id);
     updateInspector(); draw();
     return;
   }
@@ -2878,12 +2855,12 @@ cv.addEventListener('mousedown', (e) => {
   // (Space+drag and middle-mouse-drag also pan, handled in the early-return
   // branch above.)
   if (e.shiftKey) {
-    drag = { kind: 'rect', x0: mouse.wx, y0: mouse.wy };
+    setDrag({ kind: 'rect', x0: mouse.wx, y0: mouse.wy });
     updateInspector(); draw();
   } else {
     selection.clear();
-    selectedWire = null;
-    drag = { kind: 'pan', mx0: mouse.x, my0: mouse.y, tx0: view.tx, ty0: view.ty };
+    setSelectedWire(null);
+    setDrag({ kind: 'pan', mx0: mouse.x, my0: mouse.y, tx0: view.tx, ty0: view.ty });
     cv.style.cursor = 'grabbing';
     updateInspector(); draw();
   }
@@ -2924,7 +2901,7 @@ cv.addEventListener('mouseup', (e) => {
     }
     updateInspector();
   }
-  drag = null;
+  setDrag(null);
   draw();
 });
 
@@ -2940,17 +2917,17 @@ function handlePinClick(pin) {
       toId = pendingWire.compId; toPort = pendingWire.port;
     } else {
       // Restart from new pin
-      pendingWire = { compId: pin.comp.id, port: pin.port, fromKind: pin.kind,
-                      fromXY: { x: pin.x, y: pin.y } };
+      setPendingWire({ compId: pin.comp.id, port: pin.port, fromKind: pin.kind,
+                      fromXY: { x: pin.x, y: pin.y } });
       setStatus('wire start (click an opposite-kind pin)');
       draw(); return;
     }
     addWire(fromId, fromPort, toId, toPort);
-    pendingWire = null;
+    setPendingWire(null);
     setStatus('wire placed');
   } else {
-    pendingWire = { compId: pin.comp.id, port: pin.port, fromKind: pin.kind,
-                    fromXY: { x: pin.x, y: pin.y } };
+    setPendingWire({ compId: pin.comp.id, port: pin.port, fromKind: pin.kind,
+                    fromXY: { x: pin.x, y: pin.y } });
     setStatus(`wire start (${pin.kind}) — click an opposite-kind pin`);
   }
   draw();
@@ -2960,18 +2937,18 @@ function handlePinClick(pin) {
 // (deleteSelection, right-click-delete, deleteComp/deleteWire from the
 // Delete tool path) all wrap their own pushHistory() around the call.
 function _deleteCompNoHist(id) {
-  comps = comps.filter(c => c.id !== id);
+  setComps(comps.filter(c => c.id !== id));
   syncCompMap();
-  wires = wires.filter(w => w.fromId !== id && w.toId !== id);
+  setWires(wires.filter(w => w.fromId !== id && w.toId !== id));
   selection.delete(id);
   if (selectedWire) {
     const w = wires.find(w => w.id === selectedWire);
-    if (!w) selectedWire = null;
+    if (!w) setSelectedWire(null);
   }
 }
 function _deleteWireNoHist(id) {
-  wires = wires.filter(w => w.id !== id);
-  if (selectedWire === id) selectedWire = null;
+  setWires(wires.filter(w => w.id !== id));
+  if (selectedWire === id) setSelectedWire(null);
 }
 function deleteComp(id) {
   pushHistory();
@@ -3000,8 +2977,8 @@ function addWire(fromId, fromPort, toId, toPort) {
   if (!tdef.pins[toPort] || tdef.pins[toPort].kind !== 'in') return;
   pushHistory();
   // Replace any existing wire driving the same input.
-  wires = wires.filter(w => !(w.toId === toId && w.toPort === toPort));
-  wires.push({ id: nextWireId++, fromId, fromPort, toId, toPort });
+  setWires(wires.filter(w => !(w.toId === toId && w.toPort === toPort)));
+  wires.push({ id: setNextWireId(nextWireId + 1), fromId, fromPort, toId, toPort });
   simulate(); draw();
 }
 
@@ -3042,7 +3019,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { mouse.spaceDown = true; cv.style.cursor = 'grab'; }
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); }
   if (e.key === 'Escape') {
-    pendingWire = null; selection.clear(); selectedWire = null;
+    setPendingWire(null); selection.clear(); setSelectedWire(null);
     updateInspector(); draw();
   }
 });
@@ -3061,10 +3038,10 @@ document.getElementById('btn-step').addEventListener('click', stepSequential);
 function setAutoPlay(on) {
   const btn = document.getElementById('btn-play');
   if (on && !autoPlay) {
-    autoPlay = setInterval(stepSequential, 250);
+    assignAutoPlay(setInterval(stepSequential, 250));
     btn.classList.add('active'); btn.textContent = '⏸ Pause';
   } else if (!on && autoPlay) {
-    clearInterval(autoPlay); autoPlay = null;
+    clearInterval(autoPlay); assignAutoPlay(null);
     btn.classList.remove('active'); btn.textContent = '▶ Play';
   }
 }
@@ -3088,7 +3065,7 @@ document.getElementById('btn-reset').addEventListener('click', () => {
     }
   }
   resetScope({comps, wires});
-  tick = 0; outVals = {};
+  setTick(0); setOutVals({});
   simulate(); drawWaves(); draw();
 });
 
@@ -4670,14 +4647,13 @@ function loadProgramIntoImem(mem) {
   pushHistory();
   ram.state.mem = mem.map(w => w.slice());
   ram.state.clkPrev = 0;
-  outVals = {}; tick = 0;
+  setOutVals({}); setTick(0);
   simulate(); draw(); drawWaves();
   return { ok: true, msg: `Loaded ${mem.length} words into RAM #${ram.id}.` };
 }
 
 // Stash the last-loaded assembly + asm result so the debugger can render
 // source lines and map PC → source line. Set when "Assemble & Load" succeeds.
-let lastAsmProgram = null;   // { source, mem, addrToLine, labels, words }
 document.getElementById('btn-asm').addEventListener('click', openAsmModal);
 document.getElementById('asm-close').addEventListener('click', () => closeModal('asm-modal'));
 document.getElementById('asm-example').addEventListener('change', (e) => {
@@ -4704,13 +4680,13 @@ document.getElementById('asm-load').addEventListener('click', () => {
   const r = loadProgramIntoImem(res.mem);
   document.getElementById('asm-status').textContent = r.msg;
   if (r.ok) {
-    lastAsmProgram = {
+    setLastAsmProgram({
       source:     document.getElementById('asm-source').value,
       mem:        res.mem.map(w => w.slice()),
       addrToLine: res.addrToLine.slice(),
       labels:     { ...res.labels },
       words:      res.words,
-    };
+    });
     refreshDebugger();
     setStatus(`asm: ${r.msg}`);
   }
@@ -4914,7 +4890,7 @@ document.getElementById('dbg-reset').addEventListener('click', () => {
   pushHistory();
   targets.pc.state.p = [-1, -1]; targets.pc.state.clkPrev = 0;
   if (targets.acc) { targets.acc.state.q = [0,0,0]; targets.acc.state.clkPrev = 0; }
-  outVals = {}; tick = 0;
+  setOutVals({}); setTick(0);
   simulate(); draw(); drawWaves(); refreshDebugger();
 });
 // Click a breakpoint dot — toggle the address. Listener on the panel so it
@@ -4932,8 +4908,8 @@ document.getElementById('dbg-panel').addEventListener('click', (e) => {
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (!confirm('Clear the entire circuit? (Subcircuit library is preserved.)')) return;
   pushHistory();
-  comps = []; wires = []; nextCompId = 1; nextWireId = 1; syncCompMap();
-  outVals = {}; selection.clear(); selectedWire = null; tick = 0;
+  setComps([]); setWires([]); setNextCompId(1); setNextWireId(1); syncCompMap();
+  setOutVals({}); selection.clear(); setSelectedWire(null); setTick(0);
   simulate(); draw(); drawWaves(); updateInspector();
 });
 document.getElementById('btn-save').addEventListener('click', () => {
@@ -4969,18 +4945,18 @@ document.getElementById('file-input').addEventListener('change', (e) => {
         if (!confirm(`Save file is format version ${v}; this build only knows up to ${SAVE_FORMAT_VERSION}. Load anyway?`)) return;
       }
       pushHistory();
-      comps = data.comps || [];
-      wires = data.wires || [];
+      setComps(data.comps || []);
+      setWires(data.wires || []);
       syncCompMap();
-      nextCompId = data.nextCompId || (comps.reduce((m,c) => Math.max(m,c.id), 0) + 1);
-      nextWireId = data.nextWireId || (wires.reduce((m,w) => Math.max(m,w.id), 0) + 1);
-      view = data.view || { tx: 40, ty: 40, scale: 1 };
-      tick = data.tick || 0;
-      subcircuitDefs = data.subcircuitDefs || {};
+      setNextCompId(data.nextCompId || (comps.reduce((m,c) => Math.max(m,c.id), 0) + 1));
+      setNextWireId(data.nextWireId || (wires.reduce((m,w) => Math.max(m,w.id), 0) + 1));
+      setView(data.view || { tx: 40, ty: 40, scale: 1 });
+      setTick(data.tick || 0);
+      setSubcircuitDefs(data.subcircuitDefs || {});
       registerBuiltinSubcircuits();   // keep the built-ins present after a load
-      customGates    = data.customGates    || {};
-      selection.clear(); selectedWire = null;
-      outVals = {};
+      setCustomGates(data.customGates    || {});
+      selection.clear(); setSelectedWire(null);
+      setOutVals({});
       refreshSubLib();
       refreshGateLib();
       simulate(); draw(); updateInspector();
@@ -6605,13 +6581,13 @@ function loadExampleNamed(name) {
   if (!ex) return;
   pushHistory();
   const { comps: newComps, wires: newWires } = ex.build();
-  comps = newComps;
-  wires = newWires;
+  setComps(newComps);
+  setWires(newWires);
   syncCompMap();
-  nextCompId = comps.reduce((m, c) => Math.max(m, c.id), 0) + 1;
-  nextWireId = wires.reduce((m, w) => Math.max(m, w.id), 0) + 1;
-  view = { tx: 40, ty: 40, scale: 1 };
-  selection.clear(); selectedWire = null; tick = 0; outVals = {};
+  setNextCompId(comps.reduce((m, c) => Math.max(m, c.id), 0) + 1);
+  setNextWireId(wires.reduce((m, w) => Math.max(m, w.id), 0) + 1);
+  setView({ tx: 40, ty: 40, scale: 1 });
+  selection.clear(); setSelectedWire(null); setTick(0); setOutVals({});
   simulate(); drawWaves(); draw(); updateInspector();
 }
 
@@ -7418,7 +7394,7 @@ test('Assembled "counter" program executes ACC=1,2,3,... on the live CPU', () =>
   // engine wants a real top-level scope, so swap `comps`/`wires` briefly.
   const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
   try {
-    comps = ex.comps; wires = ex.wires; outVals = {}; tick = 0;
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
     syncCompMap(); simulate();
     const seen = [];
     for (let i = 0; i < 10; i++) {
@@ -7435,7 +7411,7 @@ test('Assembled "counter" program executes ACC=1,2,3,... on the live CPU', () =>
       assertEq(seen[i].pc,  expect[i].pc,  `step ${i+1} PC:`);
     }
   } finally {
-    comps = savedComps; wires = savedWires; outVals = savedOutVals; tick = savedTick;
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     syncCompMap();
   }
 });
@@ -7489,7 +7465,7 @@ test('Debugger Run halts at a breakpoint on the live CPU', () => {
   const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
   const savedBps = new Set(debuggerState.breakpoints);
   try {
-    comps = ex.comps; wires = ex.wires; outVals = {}; tick = 0;
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
     syncCompMap(); simulate();
     debuggerState.breakpoints = new Set([1]);   // halt when PC == word 1
     const r = debuggerRunHeadless(50);
@@ -7504,7 +7480,7 @@ test('Debugger Run halts at a breakpoint on the live CPU', () => {
     assertEq(r2.halted, 'budget', 'no-bp run exhausts budget:');
     assertEq(r2.steps, 6, 'budget steps consumed:');
   } finally {
-    comps = savedComps; wires = savedWires; outVals = savedOutVals; tick = savedTick;
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     debuggerState.breakpoints = savedBps;
     syncCompMap();
   }
@@ -7522,20 +7498,20 @@ test('Undo / redo round-trips component add, wire add, delete', () => {
   const savedNextC = nextCompId, savedNextW = nextWireId;
   const savedUndo = undoStack.slice(), savedRedo = redoStack.slice();
   try {
-    comps = []; wires = []; nextCompId = 1; nextWireId = 1;
+    setComps([]); setWires([]); setNextCompId(1); setNextWireId(1);
     syncCompMap(); undoStack.length = 0; redoStack.length = 0;
     // Add a STI.
     pushHistory();
-    comps.push({ id: nextCompId++, type: 'STI', x: 0, y: 0, state: {} });
+    comps.push({ id: setNextCompId(nextCompId + 1), type: 'STI', x: 0, y: 0, state: {} });
     syncCompMap();
     assertEq(comps.length, 1, 'one comp after add:');
     assertEq(undoStack.length, 1, 'one history entry:');
     // Add a wire from a fake INPUT.
     pushHistory();
-    comps.push({ id: nextCompId++, type: 'INPUT', x: 0, y: 80, state: { value: 1 } });
+    comps.push({ id: setNextCompId(nextCompId + 1), type: 'INPUT', x: 0, y: 80, state: { value: 1 } });
     syncCompMap();
     pushHistory();
-    wires.push({ id: nextWireId++, fromId: 2, fromPort: 'out', toId: 1, toPort: 'in' });
+    wires.push({ id: setNextWireId(nextWireId + 1), fromId: 2, fromPort: 'out', toId: 1, toPort: 'in' });
     assertEq(comps.length, 2, 'two comps after second add:');
     assertEq(wires.length, 1, 'one wire after wire add:');
     assertEq(undoStack.length, 3, 'three history entries:');
@@ -7558,11 +7534,11 @@ test('Undo / redo round-trips component add, wire add, delete', () => {
     undo(); undo();
     assertEq(comps.length, 1, 'two undos back to one comp:');
     pushHistory();
-    comps.push({ id: nextCompId++, type: 'MAX', x: 100, y: 0, state: {} });
+    comps.push({ id: setNextCompId(nextCompId + 1), type: 'MAX', x: 100, y: 0, state: {} });
     assertEq(redoStack.length, 0, 'new push clears redo:');
   } finally {
-    comps = savedComps; wires = savedWires;
-    nextCompId = savedNextC; nextWireId = savedNextW;
+    setComps(savedComps); setWires(savedWires);
+    setNextCompId(savedNextC); setNextWireId(savedNextW);
     syncCompMap();
     undoStack.length = 0; redoStack.length = 0;
     for (const s of savedUndo) undoStack.push(s);
@@ -7610,7 +7586,7 @@ test('filterPalette() hides non-matching palette items', () => {
 test('Custom gate: table-lookup evaluation matches definition', () => {
   const savedGates = customGates;
   try {
-    customGates = {};
+    setCustomGates({});
     const table = {};
     for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) {
       table[`${a},${b}`] = -Math.min(a, b);
@@ -7628,7 +7604,7 @@ test('Custom gate: table-lookup evaluation matches definition', () => {
     }
     assertEq(def.eval(fakeInstance, { in0: null, in1: 0 }).out, null, 'null input:');
   } finally {
-    customGates = savedGates;
+    setCustomGates(savedGates);
   }
 });
 test('Custom gate: enumerateInputs returns 3^n combinations in stable order', () => {
@@ -7686,12 +7662,10 @@ try {
 // used by drawWire() for the dashed-line offset.  We only schedule a draw
 // when the page is visible and at least one wire actually has a non-null
 // value to animate — static or all-floating circuits don't burn cycles.
-let animTime = 0;
-let _lastAnim = 0;
 function animLoop(t) {
   if (t - _lastAnim > 100 && !document.hidden) {
-    _lastAnim = t;
-    animTime++;
+    setLastAnim(t);
+    setAnimTime(animTime + 1);
     let live = false;
     for (const w of wires) {
       if (outVals[`${w.fromId}:${w.fromPort}`] != null) { live = true; break; }
