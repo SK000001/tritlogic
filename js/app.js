@@ -3017,7 +3017,7 @@ const INFO_CATEGORIES = [
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
   ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
-  ['ISA',            ['_asm', '_debugger']],
+  ['ISA',            ['_asm', '_isa2', '_debugger']],
 ];
 
 const COMPONENT_INFO = {
@@ -3097,6 +3097,78 @@ const COMPONENT_INFO = {
       PC, and ideally a <code>REG3</code> driven by the <code>ALU</code>
       output (the ACC). For other circuits the panel still opens but
       shows "no CPU on canvas".</p>`,
+  },
+
+  _isa2: {
+    name: 'ISA v2 (CPU2)',
+    tagline: 'Wider 2-trit opcode, 9 ops, parallel-RAM IMEM',
+    body: `
+      <p>The original CPU (Phase 7) ships a 1-opcode-trit ISA with three
+      ops (ADDI / MAXI / JMP). v2 widens the opcode to <b>2 trits</b>
+      (9 codepoints) and the instruction word to <b>6 trits</b>, packed
+      across two parallel 3-trit RAM blocks that share the PC's address
+      pins. Both CPUs ship as separate presets; pick <code>CPU2</code>
+      from the Examples menu to load the wider one. Full design spec is
+      in <code>tritlogic/ISA_v2.md</code>.</p>
+      <h4>Word layout (6 trits / instruction)</h4>
+      <table class="info-tt" style="text-align:left">
+        <thead><tr><th>Bank</th><th>q0</th><th>q1</th><th>q2</th></tr></thead>
+        <tbody>
+          <tr><td><code>imem_lo</code></td><td>opL</td><td>opH</td><td>oper0</td></tr>
+          <tr><td><code>imem_hi</code></td><td>oper1</td><td>oper2</td><td>oper3</td></tr>
+        </tbody>
+      </table>
+      <h4>9-op codepoint table</h4>
+      <table class="info-tt" style="text-align:left">
+        <thead><tr><th>Mnemonic</th><th>opH opL</th><th>Operand</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><code>NOP</code></td><td class="trit-T">T</td>
+              <td class="trit-T">T</td><td>(ignored)</td><td>Phase A ✓</td></tr>
+          <tr><td><code>JMP &lt;addr&gt;</code></td><td class="trit-T">T</td>
+              <td class="trit-0">0</td><td>0..8</td><td>Phase A ✓</td></tr>
+          <tr><td><code>JMPP &lt;addr&gt;</code></td><td class="trit-T">T</td>
+              <td class="trit-P">+</td><td>if ACC&nbsp;&gt;&nbsp;0</td><td>Phase B (assembler only)</td></tr>
+          <tr><td><code>JMPZ &lt;addr&gt;</code></td><td class="trit-0">0</td>
+              <td class="trit-T">T</td><td>if ACC&nbsp;==&nbsp;0</td><td>Phase B (assembler only)</td></tr>
+          <tr><td><code>ADDI &lt;n&gt;</code></td><td class="trit-0">0</td>
+              <td class="trit-0">0</td><td>signed −40..+40</td><td>Phase A ✓</td></tr>
+          <tr><td><code>MAXI &lt;n&gt;</code></td><td class="trit-0">0</td>
+              <td class="trit-P">+</td><td>signed</td><td>Phase A ✓</td></tr>
+          <tr><td><code>MINI &lt;n&gt;</code></td><td class="trit-P">+</td>
+              <td class="trit-T">T</td><td>signed</td><td>Phase A ✓</td></tr>
+          <tr><td><code>LOAD &lt;addr&gt;</code></td><td class="trit-P">+</td>
+              <td class="trit-0">0</td><td>DMEM 0..8</td><td>Phase C (assembler only)</td></tr>
+          <tr><td><code>STORE &lt;addr&gt;</code></td><td class="trit-P">+</td>
+              <td class="trit-P">+</td><td>DMEM 0..8</td><td>Phase C (assembler only)</td></tr>
+        </tbody>
+      </table>
+      <p style="color: var(--muted); font-size: 11px;">"assembler only" means
+      the v2 assembler emits the right bits, but the CPU2 preset's datapath
+      hasn't wired up the side-effect yet — those land in phases B and C.</p>
+      <h4>The DECODE2 subcircuit</h4>
+      <p>Inside the new Control Kit. Takes <code>opL</code> + <code>opH</code>
+      and emits 9 enable outputs — one for each codepoint — in the
+      <code>{0, +1}</code> convention (active-high, 0-inactive). The
+      <code>{0, +1}</code> choice lets the CPU2 datapath compute the ALU op
+      selector as a single TSUM gate:
+      <code>aluOpSel = TSUM(en_MAXI, NEG(en_MINI))</code> — which gives 0
+      for ADDI, +1 for MAXI, and −1 for MINI.</p>
+      <p>Per opcode trit, three trit-equality detectors are built from the
+      native inverters PTI (+1 unless input is +1) and NTI (+1 only when
+      input is −1):</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+isP(x) = MAX(STI(MAX(PTI(x), NTI(x))), 0)   ; +1 iff x = +1
+isT(x) = MAX(NTI(x), 0)                     ; +1 iff x = −1
+is0(x) = MAX(MIN(PTI(x), STI(NTI(x))), 0)   ; +1 iff x =  0</pre>
+      <p>Each enable is then <code>MIN(is_H, is_L)</code> for that
+      opcode's target pair.</p>
+      <h4>Running v2 programs</h4>
+      <p>Open the <b>Assemble</b> button as usual. The modal auto-detects
+      which CPU is on the canvas — load <code>CPU2</code> from the Examples
+      menu first and the assembler routes to <code>assembleV2()</code>
+      automatically. The Examples dropdown inside the modal splits into
+      "ISA v1 (CPU)" and "ISA v2 (CPU2)" groups; pick a v2 program to
+      see the wider format.</p>`,
   },
 
   _asm: {
@@ -4485,15 +4557,24 @@ function openAsmModal() {
   const sel = document.getElementById('asm-example');
   if (sel) {
     sel.innerHTML = '<option value="">— pick one —</option>';
-    for (const key in ASM_EXAMPLES) {
-      const opt = document.createElement('option');
-      opt.value = key; opt.textContent = ASM_EXAMPLES[key].label;
-      sel.appendChild(opt);
-    }
+    const addGroup = (label, examples) => {
+      const og = document.createElement('optgroup'); og.label = label;
+      for (const key in examples) {
+        const opt = document.createElement('option');
+        opt.value = key; opt.textContent = examples[key].label;
+        og.appendChild(opt);
+      }
+      sel.appendChild(og);
+    };
+    addGroup('ISA v1 (CPU)',  ASM_EXAMPLES);
+    addGroup('ISA v2 (CPU2)', ASM2_EXAMPLES);
   }
-  // Seed the textarea with the default counter program on a blank field.
+  // Seed the textarea with a sensible default based on which CPU is on canvas.
   const ta = document.getElementById('asm-source');
-  if (ta && !ta.value.trim()) ta.value = ASM_EXAMPLES['counter'].src.trimEnd();
+  if (ta && !ta.value.trim()) {
+    const version = detectIsaVersion();
+    ta.value = (version === 2 ? ASM2_EXAMPLES['counter2'].src : ASM_EXAMPLES['counter'].src).trimEnd();
+  }
   document.getElementById('asm-status').textContent = '';
   document.getElementById('asm-result').innerHTML = '';
   openModal('asm-modal');
@@ -4507,16 +4588,28 @@ function renderAsmResult(res) {
         `line ${e.line}: ${escapeHtml(e.msg)}</div>`).join('');
     return;
   }
-  // Print the encoded word image — one line per word, low trit first.
-  const rows = res.mem.map((w, i) => {
-    const used = i < res.words ? '' : ' style="color: var(--muted)"';
-    const trits = w.map(t => t === -1 ? 'T' : t === 1 ? '+1' : ' 0').join(' ');
-    return `<div${used}>  word ${i}: [${trits}]</div>`;
-  }).join('');
+  // Print the encoded word image — one line per word, low trit first. v2
+  // shows the two parallel RAM rows side by side.
+  const fmt = t => t === -1 ? 'T' : t === 1 ? '+1' : ' 0';
+  let rows;
+  if (res.mem_lo && res.mem_hi) {
+    rows = res.mem_lo.map((w, i) => {
+      const used = i < res.words ? '' : ' style="color: var(--muted)"';
+      const lo = w.map(fmt).join(' ');
+      const hi = res.mem_hi[i].map(fmt).join(' ');
+      return `<div${used}>  w${i}: lo[${lo}]  hi[${hi}]</div>`;
+    }).join('');
+  } else {
+    rows = res.mem.map((w, i) => {
+      const used = i < res.words ? '' : ' style="color: var(--muted)"';
+      const trits = w.map(fmt).join(' ');
+      return `<div${used}>  word ${i}: [${trits}]</div>`;
+    }).join('');
+  }
   out.innerHTML =
     `<div style="color: var(--accent)">Assembled ${res.words} instruction${res.words === 1 ? '' : 's'}` +
     ` (${ASM_PROGRAM_WORDS - res.words} word${ASM_PROGRAM_WORDS - res.words === 1 ? '' : 's'} padded with 0).</div>` +
-    `<div style="margin-top: 4px;">${rows}</div>`;
+    `<div style="margin-top: 4px; font-family: monospace;">${rows}</div>`;
 }
 // Find the RAM block that's wired up as IMEM (address pins driven by a PC).
 // Falls back to the first RAM in the circuit if no PC is present.
@@ -4543,37 +4636,101 @@ function loadProgramIntoImem(mem) {
   return { ok: true, msg: `Loaded ${mem.length} words into RAM #${ram.id}.` };
 }
 
+// v2 IMEM finder — locate two RAM blocks that share the PC's address pins
+// (the parallel-RAM shape used by the CPU2 preset). Returns
+// { ramLo, ramHi } where ramLo is wired to imem.q0=opL and ramHi is the
+// other one, or null if the canvas isn't v2-shaped.
+function findImemV2(scope) {
+  scope = scope || { comps, wires };
+  const pcs = scope.comps.filter(c => c.type === 'PC');
+  if (pcs.length === 0) return null;
+  const pc = pcs[0];
+  const pcRams = scope.comps.filter(c => {
+    if (c.type !== 'RAM') return false;
+    const a0Wire = scope.wires.find(w => w.toId === c.id && w.toPort === 'a0' && w.fromId === pc.id);
+    return !!a0Wire;
+  });
+  if (pcRams.length !== 2) return null;
+  // The "lo" RAM is the one whose q0 feeds the DECODE2 subcircuit's opL
+  // pin. Fall back to whichever one feeds the ALU.b0 if the decoder isn't
+  // present (CPU2 phase A always has it, but be defensive).
+  for (const r of pcRams) {
+    const opLWire = scope.wires.find(w => w.fromId === r.id && w.fromPort === 'q0' &&
+      scope.comps.find(c => c.id === w.toId && c.type === 'SUB:DECODE2' && w.toPort === 'opL'));
+    if (opLWire) {
+      return { ramLo: r, ramHi: pcRams.find(x => x.id !== r.id) };
+    }
+  }
+  // Fallback: pick the one with lower id as "lo".
+  pcRams.sort((a, b) => a.id - b.id);
+  return { ramLo: pcRams[0], ramHi: pcRams[1] };
+}
+
+function loadProgramIntoImemV2(mem_lo, mem_hi) {
+  const pair = findImemV2();
+  if (!pair) return { ok: false, msg: 'No CPU2-shaped IMEM (two PC-addressed RAMs) on canvas — load the CPU2 example.' };
+  pushHistory();
+  pair.ramLo.state.mem = mem_lo.map(w => w.slice());
+  pair.ramHi.state.mem = mem_hi.map(w => w.slice());
+  pair.ramLo.state.clkPrev = 0;
+  pair.ramHi.state.clkPrev = 0;
+  setOutVals({}); setTick(0);
+  simulate(); draw(); drawWaves();
+  return { ok: true, msg: `Loaded ${mem_lo.length} words into RAMs #${pair.ramLo.id} / #${pair.ramHi.id}.` };
+}
+
+// Decide which ISA the canvas is wired for. Returns 2 if a CPU2-style
+// parallel-RAM IMEM is present, 1 otherwise (default to v1).
+function detectIsaVersion(scope) {
+  return findImemV2(scope) ? 2 : 1;
+}
+
 // Stash the last-loaded assembly + asm result so the debugger can render
 // source lines and map PC → source line. Set when "Assemble & Load" succeeds.
 document.getElementById('btn-asm').addEventListener('click', openAsmModal);
 document.getElementById('asm-close').addEventListener('click', () => closeModal('asm-modal'));
 document.getElementById('asm-example').addEventListener('change', (e) => {
-  const ex = ASM_EXAMPLES[e.target.value];
+  const ex = ASM_EXAMPLES[e.target.value] || ASM2_EXAMPLES[e.target.value];
   if (!ex) return;
   document.getElementById('asm-source').value = ex.src.trimEnd();
   document.getElementById('asm-status').textContent = '';
   document.getElementById('asm-result').innerHTML = '';
   e.target.value = '';
 });
+// Auto-dispatch by detecting which CPU is on canvas: v2 if a two-RAM
+// parallel-IMEM is wired up, v1 otherwise. The "Assemble (check only)"
+// button reports against the SAME version so the user sees errors that
+// match what loading would produce.
+function assembleForCanvas(src) {
+  const version = detectIsaVersion();
+  const res = (version === 2) ? assembleV2(src) : assemble(src);
+  res.version = version;
+  return res;
+}
 document.getElementById('asm-check').addEventListener('click', () => {
-  const res = assemble(document.getElementById('asm-source').value);
+  const res = assembleForCanvas(document.getElementById('asm-source').value);
   renderAsmResult(res);
   document.getElementById('asm-status').textContent =
-    res.errors.length ? `${res.errors.length} error(s)` : 'assembled cleanly';
+    res.errors.length ? `${res.errors.length} error(s) (ISA v${res.version})` : `assembled cleanly (ISA v${res.version})`;
 });
 document.getElementById('asm-load').addEventListener('click', () => {
-  const res = assemble(document.getElementById('asm-source').value);
+  const res = assembleForCanvas(document.getElementById('asm-source').value);
   renderAsmResult(res);
   if (res.errors.length) {
     document.getElementById('asm-status').textContent = `${res.errors.length} error(s) — fix before loading`;
     return;
   }
-  const r = loadProgramIntoImem(res.mem);
+  const r = (res.version === 2)
+    ? loadProgramIntoImemV2(res.mem_lo, res.mem_hi)
+    : loadProgramIntoImem(res.mem);
   document.getElementById('asm-status').textContent = r.msg;
   if (r.ok) {
     setLastAsmProgram({
       source:     document.getElementById('asm-source').value,
-      mem:        res.mem.map(w => w.slice()),
+      version:    res.version,
+      mem:        res.mem    ? res.mem.map(w => w.slice())    : null,
+      mem_lo:     res.mem_lo ? res.mem_lo.map(w => w.slice()) : null,
+      mem_hi:     res.mem_hi ? res.mem_hi.map(w => w.slice()) : null,
       addrToLine: res.addrToLine.slice(),
       labels:     { ...res.labels },
       words:      res.words,
@@ -4614,13 +4771,16 @@ function decodeImemWord(word) {
 }
 
 function findDebuggerTargets(scope) {
-  // Returns { pc, imem, acc } or null if the canvas doesn't hold a CPU.
+  // Returns { pc, imem, imemHi, acc, version } or null if the canvas doesn't
+  // hold a CPU. version is 1 (one IMEM RAM) or 2 (two parallel IMEMs).
   // ACC = the REG3 whose d-pins are driven by the ALU; falls back to first
   // REG3. The CPU example wires the ALU outputs straight into ACC.
   scope = scope || { comps, wires };
   const pc = scope.comps.find(c => c.type === 'PC');
-  const imem = findImem(scope);
-  if (!pc || !imem) return null;
+  if (!pc) return null;
+  const pairV2 = findImemV2(scope);
+  const imem = pairV2 ? pairV2.ramLo : findImem(scope);
+  if (!imem) return null;
   const regs = scope.comps.filter(c => c.type === 'REG3');
   let acc = null;
   for (const r of regs) {
@@ -4630,7 +4790,7 @@ function findDebuggerTargets(scope) {
     if (src && src.type === 'ALU') { acc = r; break; }
   }
   if (!acc) acc = regs[0] || null;
-  return { pc, imem, acc };
+  return { pc, imem, imemHi: pairV2 ? pairV2.ramHi : null, acc, version: pairV2 ? 2 : 1 };
 }
 
 function refreshDebugger() {
@@ -4660,8 +4820,10 @@ function refreshDebugger() {
   pcEl.textContent  = `${pcAddr}  [${targets.pc.state.p.map(tritLabel).join(' ')}]`;
   accEl.textContent = `${accVal >= 0 ? '+' : ''}${accVal}  ` +
     (targets.acc ? `[${targets.acc.state.q.map(tritLabel).join(' ')}]` : '');
-  const curWord = targets.imem.state.mem[pcAddr] || [0,0,0];
-  instrEl.textContent = `word ${pcAddr}: ${decodeImemWord(curWord)}`;
+  const decodeWord = (i) => targets.version === 2
+    ? decodeImemWordV2(targets.imem.state.mem[i], targets.imemHi.state.mem[i])
+    : decodeImemWord(targets.imem.state.mem[i] || [0,0,0]);
+  instrEl.textContent = `word ${pcAddr}: ${decodeWord(pcAddr)}  (ISA v${targets.version})`;
 
   // Source listing.
   if (lastAsmProgram) {
@@ -4690,15 +4852,18 @@ function refreshDebugger() {
     srcEl.innerHTML = `<div style="padding: 8px; color: var(--muted);">No assembled program yet. Open <b>Assemble</b>, write a program, and click <b>Assemble &amp; Load into IMEM</b>.</div>`;
   }
 
-  // IMEM dump.
+  // IMEM dump. v2 shows both parallel-RAM rows side by side.
   memEl.innerHTML = targets.imem.state.mem.map((w, i) => {
     const isPc = (i === pcAddr);
     const hasBp = debuggerState.breakpoints.has(i);
-    const trits = w.map(t => t == null ? '?' : tritLabel(t)).join(' ');
+    const triFmt = arr => arr.map(t => t == null ? '?' : tritLabel(t)).join(' ');
     const bg = isPc ? 'background: rgba(110,168,255,0.18);' : '';
     const bpDot = `<span class="dbg-bp-mem" data-addr="${i}" style="cursor: pointer;
        color: ${hasBp ? 'var(--t-neg)' : 'var(--muted)'};">●</span>`;
-    return `<div style="padding: 1px 6px; ${bg}">${bpDot} <span style="color: var(--muted);">w${i}</span>  [${trits}]  ${escapeHtml(decodeImemWord(w))}</div>`;
+    const trits = targets.version === 2
+      ? `lo[${triFmt(w)}] hi[${triFmt(targets.imemHi.state.mem[i] || [0,0,0])}]`
+      : `[${triFmt(w)}]`;
+    return `<div style="padding: 1px 6px; ${bg}">${bpDot} <span style="color: var(--muted);">w${i}</span>  ${trits}  ${escapeHtml(decodeWord(i))}</div>`;
   }).join('');
 }
 
@@ -5360,6 +5525,112 @@ function buildMux3Def() {
 }
 
 // ============================================================================
+//  CONTROL KIT — decoders and other CPU control glue
+// ============================================================================
+//
+//  DECODE2 — 2-trit opcode → 9 one-hot enable lines for the v2 ISA (see
+//  tritlogic/ISA_v2.md). Each enable is active-high in the {0, +1}
+//  convention: +1 when its op is selected, 0 otherwise. The {0,+1} choice
+//  (rather than {T,+1}) lets the CPU2 datapath compute the ALU op selector
+//  as a single TSUM gate: aluOpSel = TSUM(en_MAXI, NEG(en_MINI)).
+//
+//  Per opcode trit x ∈ {T, 0, +1} we extract three detectors. The native
+//  inverters PTI / NTI here output +1 *unless* the input matches their
+//  target trit — PTI(+1) = T, PTI(other) = +1; NTI(-1) = +1, NTI(other) =
+//  T — so the trit-equality formulas have to negate accordingly:
+//    isP(x) = MAX(STI(MAX(PTI(x), NTI(x))), 0)   ; +1 iff x = +1
+//    isT(x) = MAX(NTI(x), 0)                     ; +1 iff x = -1
+//    is0(x) = MAX(MIN(PTI(x), STI(NTI(x))), 0)   ; +1 iff x =  0
+//  Each enable = MIN(is_H, is_L) (MIN acts as AND on the {0,+1} domain).
+//
+//  Opcode assignment (matches ISA_v2.md):
+//    NOP  TT  | JMP  T0  | JMPP T+
+//    JMPZ 0T  | ADDI 00  | MAXI 0+
+//    MINI +T  | LOAD +0  | STORE ++
+function buildDecode2Def() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [];
+    const wires = [];
+    // Inputs.
+    comps.push(c('opL', 'INPUT', 40, 30, { value: 0, name: 'opL' }));
+    comps.push(c('opH', 'INPUT', 40, 80, { value: 0, name: 'opH' }));
+    // The {T,+1} → {0,+1} clamp needs a constant 0 to MAX against.
+    comps.push(c('zero', 'CONST', 40, 140, { value: 0 }));
+
+    // Per-trit detector block. Builds three trit-equality detectors that
+    // output +1 iff the input matches the target trit (else 0).
+    function detectorBlock(trit, x0, y0) {
+      // Raw inverters (T-active outputs, ∈ {-1, +1}).
+      comps.push(c(`pti_${trit}`,   'PTI',  x0,      y0));
+      comps.push(c(`nti_${trit}`,   'NTI',  x0,      y0 + 60));
+      // Building blocks needed by the corrected formulas.
+      comps.push(c(`mxPN_${trit}`,  'MAX',  x0 + 140, y0 - 10));   // MAX(PTI, NTI) ∈ {-1, +1}
+      comps.push(c(`sNeg_${trit}`,  'STI',  x0 + 290, y0 - 10));   // STI(mxPN) — +1 iff x=+1
+      comps.push(c(`isP_${trit}`,   'MAX',  x0 + 430, y0));        // clamp to {0,+1}
+      comps.push(c(`isT_${trit}`,   'MAX',  x0 + 430, y0 + 60));   // clamp NTI to {0,+1}
+      comps.push(c(`notNti_${trit}`, 'STI', x0 + 290, y0 + 130));  // STI(NTI) — +1 unless x=-1
+      comps.push(c(`is0t_${trit}`,  'MIN',  x0 + 430, y0 + 140));  // MIN(PTI, notNti) — +1 iff x=0
+      comps.push(c(`is0_${trit}`,   'MAX',  x0 + 580, y0 + 140));  // clamp to {0,+1}
+
+      // Input trit fans out to PTI, NTI.
+      wires.push(w(trit,            'out', `pti_${trit}`,    'in'));
+      wires.push(w(trit,            'out', `nti_${trit}`,    'in'));
+      // isP = MAX(STI(MAX(PTI, NTI)), 0).
+      wires.push(w(`pti_${trit}`,   'out', `mxPN_${trit}`,   'a'));
+      wires.push(w(`nti_${trit}`,   'out', `mxPN_${trit}`,   'b'));
+      wires.push(w(`mxPN_${trit}`,  'out', `sNeg_${trit}`,   'in'));
+      wires.push(w(`sNeg_${trit}`,  'out', `isP_${trit}`,    'a'));
+      wires.push(w('zero',          'out', `isP_${trit}`,    'b'));
+      // isT = MAX(NTI, 0).
+      wires.push(w(`nti_${trit}`,   'out', `isT_${trit}`,    'a'));
+      wires.push(w('zero',          'out', `isT_${trit}`,    'b'));
+      // is0 = MAX(MIN(PTI, STI(NTI)), 0).
+      wires.push(w(`nti_${trit}`,   'out', `notNti_${trit}`, 'in'));
+      wires.push(w(`pti_${trit}`,   'out', `is0t_${trit}`,   'a'));
+      wires.push(w(`notNti_${trit}`,'out', `is0t_${trit}`,   'b'));
+      wires.push(w(`is0t_${trit}`,  'out', `is0_${trit}`,    'a'));
+      wires.push(w('zero',          'out', `is0_${trit}`,    'b'));
+    }
+    detectorBlock('opH', 210, 30);
+    detectorBlock('opL', 210, 430);
+
+    // Enable combiners — one MIN gate per opcode codepoint.
+    // Each row: [enable_name, opH_detector, opL_detector, yPos]
+    const combos = [
+      ['en_NOP',   'isT_opH', 'isT_opL'],
+      ['en_JMP',   'isT_opH', 'is0_opL'],
+      ['en_JMPP',  'isT_opH', 'isP_opL'],
+      ['en_JMPZ',  'is0_opH', 'isT_opL'],
+      ['en_ADDI',  'is0_opH', 'is0_opL'],
+      ['en_MAXI',  'is0_opH', 'isP_opL'],
+      ['en_MINI',  'isP_opH', 'isT_opL'],
+      ['en_LOAD',  'isP_opH', 'is0_opL'],
+      ['en_STORE', 'isP_opH', 'isP_opL'],
+    ];
+    combos.forEach(([name, dH, dL], i) => {
+      const y = 30 + i * 70;
+      comps.push(c(name, 'MIN', 820, y));
+      comps.push(c('out_' + name, 'OUTPUT', 1000, y + 10, { name }));
+      wires.push(w(dH,   'out', name,            'a'));
+      wires.push(w(dL,   'out', name,            'b'));
+      wires.push(w(name, 'out', 'out_' + name,   'in'));
+    });
+    return { comps, wires };
+  });
+  return {
+    inputs:  [{ name: 'opL' }, { name: 'opH' }],
+    outputs: [
+      { name: 'en_NOP'   }, { name: 'en_JMP'   }, { name: 'en_JMPP' },
+      { name: 'en_JMPZ'  }, { name: 'en_ADDI'  }, { name: 'en_MAXI' },
+      { name: 'en_MINI'  }, { name: 'en_LOAD'  }, { name: 'en_STORE' },
+    ],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
+// ============================================================================
 //  SEQUENTIAL KIT — gate-level structural twins of the stateful primitives
 // ============================================================================
 //
@@ -5706,13 +5977,15 @@ const BUILTIN_SUBCIRCUITS = {
   TFLOP:  { kit: 'Sequential Kit', build: buildTflopDef },
   TREG3:  { kit: 'Sequential Kit', build: buildTreg3Def },
   TPC:    { kit: 'Sequential Kit', build: buildTpcDef },
-  TRAM:   { kit: 'Sequential Kit', build: buildTramDef },
+  TRAM:    { kit: 'Sequential Kit', build: buildTramDef },
+  DECODE2: { kit: 'Control Kit',    build: buildDecode2Def },
 };
 // Kit headings, in library-panel order.
 const BUILTIN_SUBCIRCUIT_KITS = [
   { label: 'Neural-Net Kit', names: ['TMUL', 'MAC3', 'ACT'] },
   { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3', 'MUX3'] },
   { label: 'Sequential Kit', names: ['TLATCH', 'TFLOP', 'TREG3', 'TPC', 'TRAM'] },
+  { label: 'Control Kit',    names: ['DECODE2'] },
 ];
 // Seed the built-ins into the library. Called at boot and re-called after a
 // load; the `if absent` guard means a loaded file's own same-named
@@ -5835,6 +6108,181 @@ function assemble(text) {
   for (let i = 0; i < stmts.length; i++) addrToLine[i] = stmts[i].srcLine;
   return { errors, mem, labels, words: stmts.length, addrToLine };
 }
+
+// ---- v2 assembler -- ISA v2 (see tritlogic/ISA_v2.md) -------------------
+//
+// The v2 ISA widens the opcode to 2 trits (9 op codepoints) and the
+// instruction word to 6 trits, packed across two parallel RAM blocks.
+// The assembler accepts ALL 9 mnemonics; in Phase A only 5 of them
+// (NOP/ADDI/MAXI/MINI/JMP) actually do anything on CPU2 — the others
+// assemble but their datapath wiring lands in phases B / C.
+//
+//   mem_lo[i] = [opL, opH, oper0]
+//   mem_hi[i] = [oper1, oper2, oper3]
+//
+const ASM2_OPCODES = {
+  NOP:   { opH: -1, opL: -1, kind: 'none' },
+  JMP:   { opH: -1, opL:  0, kind: 'addr' },
+  JMPP:  { opH: -1, opL:  1, kind: 'addr' },
+  JMPZ:  { opH:  0, opL: -1, kind: 'addr' },
+  ADDI:  { opH:  0, opL:  0, kind: 'imm'  },
+  MAXI:  { opH:  0, opL:  1, kind: 'imm'  },
+  MINI:  { opH:  1, opL: -1, kind: 'imm'  },
+  LOAD:  { opH:  1, opL:  0, kind: 'addr' },
+  STORE: { opH:  1, opL:  1, kind: 'addr' },
+};
+const ASM2_IMM_RANGE  = 40;   // 4-trit balanced range
+const ASM2_ADDR_RANGE = 8;
+
+function assembleV2(text) {
+  const errors = [];
+  const lines = String(text || '').split(/\r?\n/);
+  const stmts = [];   // { srcLine, mnem, operand }
+  const labels = {};
+  let pc = 0;
+  for (let i = 0; i < lines.length; i++) {
+    let s = lines[i].replace(/;.*/, '').trim();
+    if (!s) continue;
+    const labMatch = s.match(/^([A-Za-z_][\w]*)\s*:\s*(.*)$/);
+    if (labMatch) {
+      const name = labMatch[1];
+      if (Object.prototype.hasOwnProperty.call(labels, name)) {
+        errors.push({ line: i + 1, msg: `duplicate label "${name}"` });
+      } else {
+        labels[name] = pc;
+      }
+      s = labMatch[2].trim();
+      if (!s) continue;
+    }
+    if (pc >= ASM_PROGRAM_WORDS) {
+      errors.push({ line: i + 1, msg: `program exceeds ${ASM_PROGRAM_WORDS} words` });
+      continue;
+    }
+    // v2 allows NOP with no operand — match that first.
+    const mNoOp = s.match(/^([A-Za-z]+)\s*$/);
+    if (mNoOp) {
+      stmts.push({ srcLine: i + 1, mnem: mNoOp[1].toUpperCase(), operand: null });
+      pc++;
+      continue;
+    }
+    const m = s.match(/^([A-Za-z]+)\s+(\S.*?)\s*$/);
+    if (!m) {
+      errors.push({ line: i + 1, msg: `expected "MNEM operand", got: ${s}` });
+      continue;
+    }
+    stmts.push({ srcLine: i + 1, mnem: m[1].toUpperCase(), operand: m[2] });
+    pc++;
+  }
+  const mem_lo = Array.from({ length: ASM_PROGRAM_WORDS }, () => [0, 0, 0]);
+  const mem_hi = Array.from({ length: ASM_PROGRAM_WORDS }, () => [0, 0, 0]);
+  for (let idx = 0; idx < stmts.length; idx++) {
+    const st = stmts[idx];
+    const op = ASM2_OPCODES[st.mnem];
+    if (!op) {
+      errors.push({ line: st.srcLine, msg: `unknown mnemonic "${st.mnem}" — v2 ops: ${Object.keys(ASM2_OPCODES).join(' / ')}` });
+      continue;
+    }
+    let oper = [0, 0, 0, 0];
+    if (op.kind === 'none') {
+      if (st.operand != null && st.operand !== '') {
+        errors.push({ line: st.srcLine, msg: `${st.mnem} takes no operand` });
+        continue;
+      }
+    } else if (op.kind === 'imm') {
+      const n = Number(st.operand);
+      if (!Number.isFinite(n) || !Number.isInteger(n)) {
+        errors.push({ line: st.srcLine, msg: `expected integer operand, got: ${st.operand}` });
+        continue;
+      }
+      if (n < -ASM2_IMM_RANGE || n > ASM2_IMM_RANGE) {
+        errors.push({ line: st.srcLine, msg: `${st.mnem} immediate ${n} out of range −${ASM2_IMM_RANGE}..+${ASM2_IMM_RANGE} (4-trit operand)` });
+        continue;
+      }
+      oper = intToTrits(n, 4);
+    } else if (op.kind === 'addr') {
+      let value;
+      if (Object.prototype.hasOwnProperty.call(labels, st.operand)) {
+        value = labels[st.operand];
+      } else {
+        const n = Number(st.operand);
+        if (!Number.isFinite(n) || !Number.isInteger(n)) {
+          errors.push({ line: st.srcLine, msg: `unknown label or non-integer address: ${st.operand}` });
+          continue;
+        }
+        value = n;
+      }
+      if (value < 0 || value > ASM2_ADDR_RANGE) {
+        errors.push({ line: st.srcLine, msg: `${st.mnem} address ${value} out of range 0..${ASM2_ADDR_RANGE}` });
+        continue;
+      }
+      // PC stores p where tritsToInt(p) + 4 = word index. oper2/oper3 zero.
+      const tr = intToTrits(value - 4, 2);
+      oper = [tr[0], tr[1], 0, 0];
+    }
+    mem_lo[idx] = [op.opL, op.opH, oper[0]];
+    mem_hi[idx] = [oper[1], oper[2], oper[3]];
+  }
+  const addrToLine = Array.from({ length: ASM_PROGRAM_WORDS }, () => null);
+  for (let i = 0; i < stmts.length; i++) addrToLine[i] = stmts[i].srcLine;
+  return { errors, mem_lo, mem_hi, labels, words: stmts.length, addrToLine };
+}
+
+// Decode one v2 instruction word (a pair of 3-trit RAM rows) back to its
+// mnemonic string. Inverse of the assembler's per-statement encoder; shared
+// by the debugger panel and the tests so the two can't drift.
+function decodeImemWordV2(word_lo, word_hi) {
+  if (!word_lo || !word_hi) return '?';
+  const opL = word_lo[0], opH = word_lo[1];
+  if (opL == null || opH == null) return '?';
+  const name = Object.keys(ASM2_OPCODES).find(k =>
+    ASM2_OPCODES[k].opH === opH && ASM2_OPCODES[k].opL === opL);
+  if (!name) return '?';
+  const op = ASM2_OPCODES[name];
+  if (op.kind === 'none') return name;
+  const oper = [word_lo[2], word_hi[0], word_hi[1], word_hi[2]];
+  if (op.kind === 'imm') {
+    const v = tritsToInt(oper);
+    return `${name} ${v >= 0 ? '+' : ''}${v}`;
+  }
+  // addr — first two trits encode (addr − 4); ignore oper2/oper3.
+  const addr = tritsToInt([oper[0], oper[1]]) + 4;
+  return `${name} ${addr}`;
+}
+
+// A small library of pre-written v2 programs.
+const ASM2_EXAMPLES = {
+  'counter2': {
+    label: 'Counter v2 — ADDI +1 / JMP LOOP (CPU2 default)',
+    src:
+`; Same semantics as the v1 counter, encoded in v2's wider format.
+LOOP:
+  ADDI +1
+  JMP  LOOP
+`,
+  },
+  'mini-demo': {
+    label: 'MINI demo — bounce ACC between +3 and -3 via MAXI/MINI',
+    src:
+`; MAXI then MINI clamps ACC. ADDI keeps trying to push it up.
+LOOP:
+  ADDI +1
+  MAXI -3
+  MINI +3
+  JMP  LOOP
+`,
+  },
+  'nop-padding': {
+    label: 'NOP padding — three NOPs then increment',
+    src:
+`LOOP:
+  NOP
+  NOP
+  NOP
+  ADDI +1
+  JMP  LOOP
+`,
+  },
+};
 
 // A small library of pre-written programs the modal's example dropdown
 // surfaces. Each is a string of assembly text.
@@ -6264,6 +6712,118 @@ const EXAMPLES = {
         w('acc', 'q0', 'wacc', 'in'),
       ],
     })),
+  },
+  'cpu2': {
+    label: 'CPU2 — wider 9-op ISA (v2 — see ISA_v2.md)',
+    build: () => {
+      // CPU2's decoder is a 2-trit DECODE2 subcircuit; make sure its
+      // definition is registered before the preset references it.
+      if (!subcircuitDefs['DECODE2']) subcircuitDefs['DECODE2'] = buildDecode2Def();
+      if (!subcircuitDefs['TSUM'])    subcircuitDefs['TSUM']    = buildTsumDef();
+      return buildExample((c, w) => ({
+        // Phase A of the v2 ISA (5 ops implemented: NOP/ADDI/MAXI/MINI/JMP).
+        // Conditional jumps and LOAD/STORE come in phases B and C — the
+        // decoder already emits their enable lines, they just aren't wired
+        // into the datapath yet.
+        //
+        // Each logical instruction is 6 trits, spread across two parallel
+        // 3-trit RAM blocks that share the PC address pins:
+        //
+        //   imem_lo word = [opL, opH, oper0]
+        //   imem_hi word = [oper1, oper2, oper3]
+        //
+        // Default program (counter v2 — semantically identical to the v1
+        // CPU's counter):
+        //   word 0: ADDI +1   imem_lo[0]=[0,0,+1]  imem_hi[0]=[0,0,0]
+        //   word 1: JMP  0    imem_lo[1]=[0,T,T]   imem_hi[1]=[T,0,0]
+        //   words 2..8: NOP   imem_lo[i]=[T,T,0]   imem_hi[i]=[0,0,0]
+        //
+        // ALU op selector — the entire arithmetic-mode picker collapses to
+        // one TSUM gate: aluOpSel = TSUM(en_MAXI, NEG(en_MINI)). For ADDI
+        // both enables are 0 → ALU computes ADD; MAXI gives +1 → MAX;
+        // MINI gives -1 → MIN.
+        comps: [
+          c('clk',     'CLOCK',      40,  430, { value: -1, mode: 'bi' }),
+          c('pc',      'PC',         170, 380),
+          // Parallel RAMs share the PC address; total 6 trits/word.
+          c('imem_lo', 'RAM',        340, 200, { mem: [
+            [0, 0,  1], [0, -1, -1],
+            [-1, -1, 0], [-1, -1, 0], [-1, -1, 0],
+            [-1, -1, 0], [-1, -1, 0], [-1, -1, 0], [-1, -1, 0],
+          ] }),
+          c('imem_hi', 'RAM',        340, 460, { mem: [
+            [0, 0, 0], [-1, 0, 0],
+            [0, 0, 0], [0, 0, 0], [0, 0, 0],
+            [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+          ] }),
+          c('zero',    'CONST',      370, 700, { value: 0 }),
+          // Decoder + ALU-op selection.
+          c('decode',  'SUB:DECODE2', 580, 230),
+          c('negMini', 'STI',        800, 360),
+          c('tsumOp',  'SUB:TSUM',   820, 410),
+          c('alu',     'ALU',        980, 520),
+          // ACC write enable: any of en_ADDI / en_MAXI / en_MINI (phase A).
+          c('accW1',   'MAX',        800, 200),
+          c('accW2',   'MAX',        950, 230),
+          c('acc',     'REG3',      1140, 540),
+          c('wclk',    'WAVE',       40,  580, { name: 'clk',  trace: [] }),
+          c('wacc',    'WAVE',      1140, 700, { name: 'ACC0', trace: [] }),
+        ],
+        wires: [
+          // Clock distribution.
+          w('clk', 'out', 'pc',      'clk'),
+          w('clk', 'out', 'imem_lo', 'clk'),
+          w('clk', 'out', 'imem_hi', 'clk'),
+          w('clk', 'out', 'acc',     'clk'),
+          // PC drives both IMEM banks' addresses.
+          w('pc', 'p0', 'imem_lo', 'a0'),
+          w('pc', 'p1', 'imem_lo', 'a1'),
+          w('pc', 'p0', 'imem_hi', 'a0'),
+          w('pc', 'p1', 'imem_hi', 'a1'),
+          // Both IMEMs are read-only — tie write port to 0.
+          w('zero', 'out', 'imem_lo', 'we'),
+          w('zero', 'out', 'imem_lo', 'd0'),
+          w('zero', 'out', 'imem_lo', 'd1'),
+          w('zero', 'out', 'imem_lo', 'd2'),
+          w('zero', 'out', 'imem_hi', 'we'),
+          w('zero', 'out', 'imem_hi', 'd0'),
+          w('zero', 'out', 'imem_hi', 'd1'),
+          w('zero', 'out', 'imem_hi', 'd2'),
+          // Decoder: opL = imem_lo.q0, opH = imem_lo.q1.
+          w('imem_lo', 'q0', 'decode', 'opL'),
+          w('imem_lo', 'q1', 'decode', 'opH'),
+          // ALU operand: oper0..oper2 = imem_lo.q2, imem_hi.q0, imem_hi.q1.
+          w('acc',     'q0', 'alu', 'a0'),
+          w('acc',     'q1', 'alu', 'a1'),
+          w('acc',     'q2', 'alu', 'a2'),
+          w('imem_lo', 'q2', 'alu', 'b0'),
+          w('imem_hi', 'q0', 'alu', 'b1'),
+          w('imem_hi', 'q1', 'alu', 'b2'),
+          // ALU op selector: TSUM(en_MAXI, NEG(en_MINI)).
+          w('decode',  'en_MINI', 'negMini', 'in'),
+          w('decode',  'en_MAXI', 'tsumOp',  'x'),
+          w('negMini', 'out',     'tsumOp',  'y'),
+          w('tsumOp',  'sum',     'alu',     'op'),
+          // ACC write enable: en_ADDI ∨ en_MAXI ∨ en_MINI.
+          w('decode', 'en_ADDI', 'accW1', 'a'),
+          w('decode', 'en_MAXI', 'accW1', 'b'),
+          w('accW1',  'out',     'accW2', 'a'),
+          w('decode', 'en_MINI', 'accW2', 'b'),
+          w('accW2',  'out',     'acc',   'ld'),
+          // ALU → ACC.
+          w('alu', 'r0', 'acc', 'd0'),
+          w('alu', 'r1', 'acc', 'd1'),
+          w('alu', 'r2', 'acc', 'd2'),
+          // PC jump control. Phase A: only unconditional JMP wired in.
+          w('decode',  'en_JMP', 'pc', 'jmp'),
+          w('imem_lo', 'q2',     'pc', 'j0'),
+          w('imem_hi', 'q0',     'pc', 'j1'),
+          // Probes.
+          w('clk', 'out', 'wclk', 'in'),
+          w('acc', 'q0',  'wacc', 'in'),
+        ],
+      }));
+    },
   },
   'ternary-mac': {
     label: 'Ternary-weight MAC — the AI dot-product primitive',
@@ -7368,6 +7928,126 @@ test('Debugger Run halts at a breakpoint on the live CPU', () => {
   } finally {
     setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     debuggerState.breakpoints = savedBps;
+    syncCompMap();
+  }
+});
+
+// ---- ISA v2 — DECODE2 + CPU2 ---------------------------------------------
+//
+// Phase A of the wider ISA (see tritlogic/ISA_v2.md). Five tests cover the
+// assembler's encoding table, the round-trip through decodeImemWordV2, the
+// DECODE2 subcircuit's one-hot output for every opcode, and an end-to-end
+// counter program running on a live CPU2 instance.
+
+test('assembleV2 encodes every v2 opcode to the spec\'s opH/opL table', () => {
+  // One ADDI/MAXI/MINI immediate, one of each address-taking op, one NOP.
+  const cases = [
+    { src: 'NOP',         opH: -1, opL: -1, oper: [0, 0, 0, 0] },
+    { src: 'JMP 0',       opH: -1, opL:  0, oper: [-1, -1, 0, 0] },
+    { src: 'JMPP 8',      opH: -1, opL:  1, oper: [ 1,  1, 0, 0] },
+    { src: 'JMPZ 4',      opH:  0, opL: -1, oper: [ 0,  0, 0, 0] },
+    { src: 'ADDI +1',     opH:  0, opL:  0, oper: [ 1,  0, 0, 0] },
+    { src: 'MAXI -3',     opH:  0, opL:  1, oper: [ 0, -1, 0, 0] },
+    { src: 'MINI +13',    opH:  1, opL: -1, oper: [ 1,  1, 1, 0] },
+    // addr 5 → operand encoded as intToTrits(5-4, 2) = [1, 0]; trailing zeros.
+    { src: 'LOAD 5',      opH:  1, opL:  0, oper: [ 1,  0, 0, 0] },
+    // addr 2 → intToTrits(-2, 2) = [1, -1].
+    { src: 'STORE 2',     opH:  1, opL:  1, oper: [ 1, -1, 0, 0] },
+  ];
+  for (const tc of cases) {
+    const r = assembleV2(tc.src);
+    assertEq(r.errors.length, 0, `${tc.src}: errors:`);
+    assertDeepEq(r.mem_lo[0], [tc.opL, tc.opH, tc.oper[0]], `${tc.src}: mem_lo:`);
+    assertDeepEq(r.mem_hi[0], [tc.oper[1], tc.oper[2], tc.oper[3]], `${tc.src}: mem_hi:`);
+  }
+});
+
+test('decodeImemWordV2 round-trips every assembled v2 instruction', () => {
+  const src = [
+    'NOP', 'JMP 0', 'JMPP 8', 'JMPZ 4', 'ADDI +1', 'MAXI -3', 'MINI +13',
+    'LOAD 5', 'STORE 2',
+  ];
+  // We must keep ≤9 in one program (IMEM depth), so chunk through.
+  for (const line of src) {
+    const r = assembleV2(line);
+    if (r.errors.length) throw new Error(`assemble("${line}"): ${JSON.stringify(r.errors)}`);
+    const decoded = decodeImemWordV2(r.mem_lo[0], r.mem_hi[0]);
+    // Tolerate spacing differences (`JMP 0` vs `JMP  0`).
+    const norm = s => s.replace(/\s+/g, ' ').trim();
+    assertEq(norm(decoded), norm(line), `round-trip "${line}":`);
+  }
+});
+
+test('assembleV2 rejects out-of-range immediates and bad opcodes', () => {
+  let r = assembleV2('ADDI +41');
+  assertEq(r.errors.length, 1, 'imm overflow:');
+  r = assembleV2('JMP 9');
+  assertEq(r.errors.length, 1, 'addr overflow:');
+  r = assembleV2('FOO 1');
+  assertEq(r.errors.length, 1, 'unknown mnemonic:');
+  r = assembleV2('NOP 7');
+  assertEq(r.errors.length, 1, 'NOP with operand:');
+});
+
+test('DECODE2 emits {0,+1} one-hot for every opcode', () => {
+  // Build a fresh DECODE2 instance and drive (opH, opL) across all 9 codes.
+  if (!subcircuitDefs['DECODE2']) subcircuitDefs['DECODE2'] = buildDecode2Def();
+  const def = subcircuitDefs['DECODE2'];
+  const expected = [
+    [-1, -1, 'en_NOP'],   [-1, 0, 'en_JMP'],    [-1, 1, 'en_JMPP'],
+    [ 0, -1, 'en_JMPZ'],  [ 0, 0, 'en_ADDI'],   [ 0, 1, 'en_MAXI'],
+    [ 1, -1, 'en_MINI'],  [ 1, 0, 'en_LOAD'],   [ 1, 1, 'en_STORE'],
+  ];
+  const enableNames = expected.map(e => e[2]);
+  for (const [opH, opL, activeName] of expected) {
+    const instance = { type: 'SUB:DECODE2', state: {}, subScope: cloneSubScope(def) };
+    const out = simulateSubInstance(instance, { opH, opL });
+    // The active enable must be exactly +1; every other enable exactly 0.
+    for (const name of enableNames) {
+      const want = (name === activeName) ? 1 : 0;
+      assertEq(out[name], want, `opH=${opH} opL=${opL}: ${name}:`);
+    }
+  }
+});
+
+test('Assembled v2 counter executes ACC = 1,1,2,2,3,3,... on the live CPU2', () => {
+  // Round-trip: assemble the v2 counter, slap its image into CPU2's two
+  // parallel RAMs, and run 10 stepSequential() ticks. ACC must climb the
+  // same way the v1 counter does — proving the wider ISA's datapath agrees
+  // with the v1 datapath on shared semantics (ADDI / JMP).
+  const res = assembleV2(ASM2_EXAMPLES['counter2'].src);
+  if (res.errors.length) throw new Error('counter2 failed: ' + JSON.stringify(res.errors));
+  const ex = EXAMPLES['cpu2'].build();
+  const rams = ex.comps.filter(c => c.type === 'RAM');
+  // The lo RAM is the one wired to DECODE2.opL.
+  const decode = ex.comps.find(c => c.type === 'SUB:DECODE2');
+  const opLWire = ex.wires.find(w => w.toId === decode.id && w.toPort === 'opL');
+  const ramLo = rams.find(r => r.id === opLWire.fromId);
+  const ramHi = rams.find(r => r.id !== ramLo.id);
+  ramLo.state.mem = res.mem_lo.map(w => w.slice()); ramLo.state.clkPrev = 0;
+  ramHi.state.mem = res.mem_hi.map(w => w.slice()); ramHi.state.clkPrev = 0;
+  const pc  = ex.comps.find(c => c.type === 'PC');
+  const acc = ex.comps.find(c => c.type === 'REG3');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    const seen = [];
+    for (let i = 0; i < 10; i++) {
+      stepSequential();
+      seen.push({ acc: tritsToInt(acc.state.q), pc: tritsToInt(pc.state.p) + 4 });
+    }
+    const expect = [
+      { acc: 1, pc: 1 }, { acc: 1, pc: 1 }, { acc: 1, pc: 0 }, { acc: 1, pc: 0 },
+      { acc: 2, pc: 1 }, { acc: 2, pc: 1 }, { acc: 2, pc: 0 }, { acc: 2, pc: 0 },
+      { acc: 3, pc: 1 }, { acc: 3, pc: 1 },
+    ];
+    for (let i = 0; i < expect.length; i++) {
+      assertEq(seen[i].acc, expect[i].acc, `step ${i+1} ACC:`);
+      assertEq(seen[i].pc,  expect[i].pc,  `step ${i+1} PC:`);
+    }
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     syncCompMap();
   }
 });
