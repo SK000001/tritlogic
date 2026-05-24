@@ -4,103 +4,11 @@ import {
   _pathCache, _wireOccupied, undoStack, redoStack,
   cv, ctx, statusEl, selInfo, waveCv, waveCtx
 } from './state.js';
+import {
+  TRIT_COLOR, tritColor, tritLabel, tritClass, SAVE_FORMAT_VERSION,
+  deepClone, intToTrits, tritsToInt, parseTryteString, formatTryte, escapeHtml
+} from './util.js';
 
-// ============================================================================
-//  TRIT VALUES & UTILITIES
-// ============================================================================
-//
-//  A "trit" is one of -1, 0, +1.  We use the JavaScript number type directly
-//  because it makes arithmetic in component eval() functions natural.
-//  The value `null` represents an undefined / floating wire — propagates
-//  through gates as null.
-
-const TRIT_COLOR = {
-  '-1': '#e35555', '0': '#888c95', '1': '#54c060', undef: '#44485a',
-};
-const tritColor = (v) => v == null ? TRIT_COLOR.undef : (TRIT_COLOR[String(v)] || TRIT_COLOR.undef);
-const tritLabel = (v) => v === -1 ? 'T' : v === 0 ? '0' : v === 1 ? '1' : '?';
-const tritClass = (v) => v === -1 ? 'trit-T' : v === 0 ? 'trit-0' : v === 1 ? 'trit-P' : '';
-
-// File format version for save/load.  Increment when the JSON shape
-// changes incompatibly so the loader can either upgrade or warn.
-const SAVE_FORMAT_VERSION = 1;
-
-// Prefer the platform's structuredClone (faster + preserves more JS types)
-// and fall back to the JSON round-trip when it isn't available.  This
-// shows up in cleanComps() and cloneSubScope() in particular.
-const deepClone = (typeof structuredClone === 'function')
-  ? structuredClone
-  : (x => JSON.parse(JSON.stringify(x)));
-
-// Decimal → balanced-ternary digit array, LSB first, length N.
-//
-// JS `%` returns negative remainders for negative dividends (-7 % 3 === -1),
-// and `Math.trunc(n/3)` truncates toward zero — together those mean a naive
-// loop produces wrong digits for negatives.  The fix: take the raw signed
-// remainder, map 2 → -1 and -2 → +1, and update n via the exact identity
-// (n - r) / 3 which is always an integer.
-function intToTrits(n, width) {
-  const trits = [];
-  n = Math.trunc(n);
-  for (let i = 0; i < width; i++) {
-    let r = n % 3;
-    if (r ===  2) r = -1;
-    if (r === -2) r =  1;
-    trits.push(r);
-    n = (n - r) / 3;
-  }
-  return trits;
-}
-
-// Sanity check on startup: every 6-trit value must round-trip.  Fires once
-// at parse time.  Cheap (~729 iterations) and saves debugging time.
-(function selfTestIntToTrits() {
-  for (let n = -364; n <= 364; n++) {
-    const back = tritsToInt(intToTrits(n, 6));
-    if (back !== n) {
-      console.error(`intToTrits round-trip failed: ${n} → ${back}`);
-      return;
-    }
-  }
-})();
-function tritsToInt(trits) {
-  let s = 0;
-  for (let i = 0; i < trits.length; i++) s += (trits[i] ?? 0) * Math.pow(3, i);
-  return s;
-}
-// Parse a balanced-ternary string like "1T01" (MSB first) or a decimal int.
-//
-// Returns { trits, warning }.  `trits` is always a length-`width` array of
-// {-1,0,+1}.  `warning` is a string when the input had to be clamped,
-// truncated, or rejected — otherwise null.  Callers should surface the
-// warning via setStatus so the user sees it instead of silently getting
-// zeros.
-// Parse a balanced-ternary trit string, MSB first — the digits T (−1), 0
-// and +1.  Strictly ternary: a string of only 0s and 1s is a trit pattern,
-// NOT a decimal number ("000111" → trits, value 13).  Decimal entry has its
-// own dedicated field, so there is no ambiguous decimal fallback here.
-function parseTryteString(s, width = 6) {
-  s = (s || '').trim();
-  if (s === '') return { trits: new Array(width).fill(0), warning: null };
-  if (/^[T01]+$/i.test(s)) {
-    const arr = s.toUpperCase().split('').reverse().map(c => c === 'T' ? -1 : c === '0' ? 0 : 1);
-    if (arr.length > width) {
-      return { trits: arr.slice(0, width),
-               warning: `string longer than ${width} trits; only LSB ${width} kept` };
-    }
-    while (arr.length < width) arr.push(0);
-    return { trits: arr, warning: null };
-  }
-  // Not a trit string.  Return zeros + a warning rather than pretending the
-  // user typed 0 successfully.
-  return { trits: new Array(width).fill(0),
-           warning: `could not parse "${s}"; expected a balanced-ternary string of T, 0 and 1 — use the Decimal value field for numbers` };
-}
-function formatTryte(trits) {
-  // Pretty form: balanced-ternary MSB first + decimal in parens
-  const bt = trits.slice().reverse().map(t => t === -1 ? 'T' : t === 0 ? '0' : '1').join('');
-  return `${bt} (${tritsToInt(trits)})`;
-}
 
 // ============================================================================
 //  COMPONENT TYPE REGISTRY
@@ -119,7 +27,6 @@ TYPES.INPUT = {
   pins: { out: { side: 'right', dx: 56, dy: 20, kind: 'out' } },
   defaults: () => ({ value: 0, name: '' }),
   eval: (c) => ({ out: c.state.value }),
-  draw: drawInput,
   inspector: (c) => [
     { label: 'Pin name (for subcircuits)', kind: 'text', get: () => c.state.name || '',
       set: v => c.state.name = v },
@@ -133,7 +40,6 @@ TYPES.CONST = {
   pins: { out: { side: 'right', dx: 40, dy: 14, kind: 'out' } },
   defaults: () => ({ value: 1 }),
   eval: (c) => ({ out: c.state.value }),
-  draw: drawConst,
   inspector: (c) => [
     { label: 'Value', kind: 'select', options: [['-1','T'],['0','0'],['1','+1']],
       get: () => String(c.state.value), set: v => { c.state.value = parseInt(v,10); } },
@@ -157,7 +63,6 @@ TYPES.TRYTE_IN = {
     for (let i = 0; i < 6; i++) out['t' + i] = trits[i];
     return out;
   },
-  draw: drawTryteIn,
   inspector: (c) => [
     { label: 'Decimal value', kind: 'number', get: () => c.state.value,
       set: v => {
@@ -194,7 +99,6 @@ TYPES.CLOCK = {
   pins: { out: { side: 'right', dx: 56, dy: 20, kind: 'out' } },
   defaults: () => ({ value: -1, mode: 'tri' }),
   eval: (c) => ({ out: c.state.value }),
-  draw: drawClock,
   inspector: (c) => [
     { label: 'Cycle mode', kind: 'select',
       options: [['tri','Three-state (T → 0 → +1)'], ['bi','Two-state (T ↔ +1)']],
@@ -213,7 +117,6 @@ TYPES.OUTPUT = {
   pins: { in: { side: 'left', dx: 0, dy: 20, kind: 'in' } },
   defaults: () => ({ name: '' }),
   eval: () => ({}),
-  draw: drawOutput,
   inspector: (c) => [
     { label: 'Pin name (for subcircuits)', kind: 'text', get: () => c.state.name || '',
       set: v => c.state.name = v },
@@ -231,7 +134,6 @@ TYPES.TRYTE_OUT = {
   })(),
   defaults: () => ({}),
   eval: () => ({}),
-  draw: drawTryteOut,
 };
 
 TYPES.WAVE = {
@@ -243,7 +145,6 @@ TYPES.WAVE = {
   pins: { in: { side: 'left', dx: 0, dy: 20, kind: 'in' } },
   defaults: () => ({ name: '', trace: [] }),
   eval: () => ({}),
-  draw: drawWave,
   inspector: (c) => [
     { label: 'Probe name', kind: 'text', get: () => c.state.name || '',
       set: v => c.state.name = v },
@@ -260,7 +161,6 @@ function makeInverter(label, fn) {
     },
     defaults: () => ({}),
     eval: (_, v) => v.in == null ? { out: null } : { out: fn(v.in) },
-    draw: (c) => drawInverterShape(c, label),
   };
 }
 TYPES.STI = makeInverter('STI', a => -a || 0);   // `|| 0` canonicalises -0 → 0
@@ -278,7 +178,6 @@ function makeBinary(label, fn) {
     },
     defaults: () => ({}),
     eval: (_, v) => (v.a == null || v.b == null) ? { out: null } : { out: fn(v.a, v.b) },
-    draw: (c) => drawBinaryShape(c, label),
   };
 }
 TYPES.MIN = makeBinary('MIN', (a, b) => Math.min(a, b));
@@ -308,7 +207,6 @@ TYPES.ADDER = {
     if (v.a == null || v.b == null || v.cin == null) return { sum: null, cout: null };
     return ADDER_TABLE[String(v.a + v.b + v.cin)];
   },
-  draw: drawAdder,
 };
 
 // ---- Multiplexer ----------------------------------------------------------
@@ -334,7 +232,6 @@ TYPES.MUX = {
     const pick = v.s === -1 ? v.dT : v.s === 0 ? v.d0 : v.dP;
     return { out: pick ?? null };
   },
-  draw: drawMUX,
 };
 
 // ---- D flip-flop ----------------------------------------------------------
@@ -361,7 +258,6 @@ TYPES.DFF = {
     c.state.clkPrev = clk;
   },
   isSequential: true,
-  draw: drawDFF,
 };
 
 // ---- 3-trit register ------------------------------------------------------
@@ -405,7 +301,6 @@ TYPES.REG3 = {
     c.state.clkPrev = clk;
   },
   isSequential: true,
-  draw: drawReg,
 };
 
 // ---- Ternary RAM block ----------------------------------------------------
@@ -480,7 +375,6 @@ TYPES.RAM = {
     c.state.clkPrev = clk;
   },
   isSequential: true,
-  draw: drawRAM,
 };
 
 // ---- ALU ------------------------------------------------------------------
@@ -530,7 +424,6 @@ TYPES.ALU = {
     const f = v.op === -1 ? Math.min : Math.max;
     return { r0: f(a[0], b[0]), r1: f(a[1], b[1]), r2: f(a[2], b[2]), cout: 0 };
   },
-  draw: drawALU,
 };
 
 // ---- Program counter ------------------------------------------------------
@@ -572,7 +465,6 @@ TYPES.PC = {
     c.state.clkPrev = clk;
   },
   isSequential: true,
-  draw: drawPC,
 };
 
 // ============================================================================
@@ -1471,7 +1363,6 @@ function refreshSubLib() {
   }
   if (typeof filterPalette === 'function') filterPalette();
 }
-function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 // ============================================================================
 //  CUSTOM GATES (Gate Builder)
@@ -1861,7 +1752,7 @@ function drawComp(c) {
   ctx.lineWidth = 1.5 / view.scale;
   ctx.fillStyle = '#262a32';
   ctx.strokeStyle = '#525a6b';
-  def.draw(c);
+  (DRAW[c.type] || def.draw)(c);
   ctx.restore();
 
   // Pins.  An input pin with no incoming wire is visually distinct from one
@@ -4742,11 +4633,6 @@ function findDebuggerTargets(scope) {
   return { pc, imem, acc };
 }
 
-function escapeHtmlSafe(s) {
-  return String(s).replace(/[&<>"']/g, ch =>
-    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
-}
-
 function refreshDebugger() {
   const panel = document.getElementById('dbg-panel');
   if (!panel || panel.style.display === 'none') return;
@@ -4798,7 +4684,7 @@ function refreshDebugger() {
         : `<span style="color: transparent;">●</span>`;
       const bg = isPc ? 'background: rgba(110,168,255,0.18);' : '';
       const lnLabel = String(ln).padStart(2, ' ');
-      return `<div style="padding: 1px 6px; ${bg}">${bpDot} <span style="color: var(--muted);">${lnLabel}</span>  ${escapeHtmlSafe(raw) || '&nbsp;'}</div>`;
+      return `<div style="padding: 1px 6px; ${bg}">${bpDot} <span style="color: var(--muted);">${lnLabel}</span>  ${escapeHtml(raw) || '&nbsp;'}</div>`;
     }).join('');
   } else {
     srcEl.innerHTML = `<div style="padding: 8px; color: var(--muted);">No assembled program yet. Open <b>Assemble</b>, write a program, and click <b>Assemble &amp; Load into IMEM</b>.</div>`;
@@ -4812,7 +4698,7 @@ function refreshDebugger() {
     const bg = isPc ? 'background: rgba(110,168,255,0.18);' : '';
     const bpDot = `<span class="dbg-bp-mem" data-addr="${i}" style="cursor: pointer;
        color: ${hasBp ? 'var(--t-neg)' : 'var(--muted)'};">●</span>`;
-    return `<div style="padding: 1px 6px; ${bg}">${bpDot} <span style="color: var(--muted);">w${i}</span>  [${trits}]  ${escapeHtmlSafe(decodeImemWord(w))}</div>`;
+    return `<div style="padding: 1px 6px; ${bg}">${bpDot} <span style="color: var(--muted);">w${i}</span>  [${trits}]  ${escapeHtml(decodeImemWord(w))}</div>`;
   }).join('');
 }
 
@@ -7727,6 +7613,40 @@ function validateCircuit() {
 
   return warnings;
 }
+
+
+// ============================================================================
+//  RENDER REGISTRY  (D2 — draw functions decoupled from TYPES logic)
+// ============================================================================
+//
+//  Each component's drawXxx function used to live as a `draw:` field on
+//  its TYPES entry. They are now looked up here, keeping TYPES focused on
+//  pure logic (pins, eval, defaults, latch). drawComp() falls back to
+//  `def.draw` for dynamically-built defs (SUB:, GATE:, unknown).
+
+const DRAW = {
+  INPUT:    drawInput,
+  CONST:    drawConst,
+  TRYTE_IN: drawTryteIn,
+  CLOCK:    drawClock,
+  OUTPUT:   drawOutput,
+  TRYTE_OUT:drawTryteOut,
+  WAVE:     drawWave,
+  ADDER:    drawAdder,
+  MUX:      drawMUX,
+  DFF:      drawDFF,
+  REG3:     drawReg,
+  RAM:      drawRAM,
+  ALU:      drawALU,
+  PC:       drawPC,
+  // Inverter family — same shape function, different label trit.
+  STI: (c) => drawInverterShape(c, 'STI'),
+  NTI: (c) => drawInverterShape(c, 'NTI'),
+  PTI: (c) => drawInverterShape(c, 'PTI'),
+  // Binary family — same shape, different label.
+  MIN: (c) => drawBinaryShape(c, 'MIN'),
+  MAX: (c) => drawBinaryShape(c, 'MAX'),
+};
 
 // ============================================================================
 //  BOOT
