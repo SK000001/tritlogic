@@ -20,11 +20,15 @@ import {
 import { tritColor, tritLabel, intToTrits, tritsToInt } from './util.js';
 
 export function createRender(deps) {
+  // `inputValueFromWires` comes from engine.js, which depends back on render
+  // (draw / drawWaves). To break the cycle we read it lazily through deps.*
+  // — the caller fills it in after createEngine returns.
   const {
     RAM_WORDS, TYPES,
-    compDef, fanoutPins, getComp, inputValueFromWires,
+    compDef, fanoutPins, getComp,
     invalidatePathCache, pinAbsPos, screenToWorld, segHitsBox, wirePath,
   } = deps;
+  const inputValueFromWires = (...args) => deps.inputValueFromWires(...args);
 
 // ============================================================================
 //  DRAWING
