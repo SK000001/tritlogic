@@ -26,7 +26,8 @@ export function createRender(deps) {
   const {
     RAM_WORDS, TYPES,
     compDef, fanoutPins, getComp,
-    invalidatePathCache, pinAbsPos, screenToWorld, segHitsBox, wirePath,
+    invalidatePathCache, pathCacheRev,
+    pinAbsPos, screenToWorld, segHitsBox, wirePath,
   } = deps;
   const inputValueFromWires = (...args) => deps.inputValueFromWires(...args);
 
@@ -35,7 +36,9 @@ export function createRender(deps) {
 // ============================================================================
 
 function draw() {
-  invalidatePathCache();
+  // Wire paths are cached per wire id; the cache survives across draws and
+  // is invalidated only when geometry actually mutates (comp move, comp /
+  // wire add or remove, undo, load — see invalidatePathCache call sites).
   // Pre-route every wire in id order so that occupancy buildup is
   // deterministic and the same regardless of which caller hits wirePath()
   // first later in the frame.
@@ -497,7 +500,14 @@ function drawSubMissing(c, name) {
 // frame in draw() — O(W^2 * S^2) where S is the small segments-per-wire
 // (5–6) so it's fine for everyday circuit sizes.
 let _wireCrossings = new Map();
+let _crossingsRev = -1;  // path-cache revision the crossings map was built against
 function computeWireCrossings() {
+  // Crossings depend only on routed wire paths. invalidatePathCache() bumps
+  // a revision counter (see state.js / pathCacheRev()) so we can skip the
+  // O(W²) recompute when nothing has changed since last frame.
+  const rev = pathCacheRev();
+  if (rev === _crossingsRev) return;
+  _crossingsRev = rev;
   _wireCrossings = new Map();
   // Cache paths so we don't recompute wirePath() for each pair.
   const paths = wires.map(w => wirePath(w));

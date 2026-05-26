@@ -751,7 +751,9 @@ function _simplifyOrthoPath(p) {
 // DIFFERENT source pin steer around them (rather than overlapping
 // longitudinally).  Same-source wires (fan-out) are free to share cells
 // since their carried signal is identical.
-function invalidatePathCache() { _pathCache.clear(); _wireOccupied.clear(); }
+let _pathCacheRev = 0;
+function invalidatePathCache() { _pathCache.clear(); _wireOccupied.clear(); _pathCacheRev++; }
+function pathCacheRev() { return _pathCacheRev; }
 
 function wirePath(w) {
   if (_pathCache.has(w.id)) return _pathCache.get(w.id);
@@ -881,7 +883,8 @@ const renderDeps = {
   RAM_WORDS, TYPES,
   compDef, fanoutPins, getComp,
   inputValueFromWires,
-  invalidatePathCache, pinAbsPos, screenToWorld, segHitsBox, wirePath,
+  invalidatePathCache, pathCacheRev,
+  pinAbsPos, screenToWorld, segHitsBox, wirePath,
 };
 const {
   draw, drawCustomGate, drawCustomGateMissing,
@@ -1020,6 +1023,7 @@ function packSelection(name, pinRenames) {
   }
 
   selection.clear(); setSelectedWire(null);
+  invalidatePathCache();
   refreshSubLib();
   simulate(); draw();
   setStatus(`Packed ${inSelComps.length} components into subcircuit "${name}"`);
@@ -1075,6 +1079,7 @@ function editSubcircuit(name) {
   setView({ tx: 40, ty: 40, scale: 1 });
   selection.clear(); setSelectedWire(null); setTick(0); setOutVals({});
   setTool('select');
+  invalidatePathCache();
   simulate(); drawWaves(); draw(); updateInspector();
   setStatus(`Editing "${name}" — its INPUT / OUTPUT components are the block's pins`);
 }
@@ -1601,10 +1606,15 @@ cv.addEventListener('mousemove', (e) => {
   } else if (drag && drag.kind === 'comp') {
     const dx = snap(mouse.wx - drag.startWX);
     const dy = snap(mouse.wy - drag.startWY);
+    let moved = false;
     for (const item of drag.items) {
       const c = getComp(item.id);
-      if (c) { c.x = item.x0 + dx; c.y = item.y0 + dy; }
+      if (c) {
+        const nx = item.x0 + dx, ny = item.y0 + dy;
+        if (c.x !== nx || c.y !== ny) { c.x = nx; c.y = ny; moved = true; }
+      }
     }
+    if (moved) invalidatePathCache();
   }
   setHoverPin(hitTestPin(mouse.wx, mouse.wy));
   if (hoverPin) setHoverPin({ compId: hoverPin.comp.id, port: hoverPin.port,
@@ -1649,6 +1659,7 @@ function restoreState(snap) {
   registerBuiltinSubcircuits();
   setCustomGates(deepClone(snap.customGates));
   syncCompMap();
+  invalidatePathCache();
   selection.clear(); setSelectedWire(null); setPendingWire(null);
   setOutVals({});
   if (typeof refreshSubLib === 'function') refreshSubLib();
@@ -1706,6 +1717,7 @@ cv.addEventListener('mousedown', (e) => {
     };
     pushHistory();
     comps.push(c); syncCompMap();
+    invalidatePathCache();
     simulate(); draw();
     return;
   }
@@ -1849,10 +1861,12 @@ function _deleteCompNoHist(id) {
     const w = wires.find(w => w.id === selectedWire);
     if (!w) setSelectedWire(null);
   }
+  invalidatePathCache();
 }
 function _deleteWireNoHist(id) {
   setWires(wires.filter(w => w.id !== id));
   if (selectedWire === id) setSelectedWire(null);
+  invalidatePathCache();
 }
 function deleteComp(id) {
   pushHistory();
@@ -1883,6 +1897,7 @@ function addWire(fromId, fromPort, toId, toPort) {
   // Replace any existing wire driving the same input.
   setWires(wires.filter(w => !(w.toId === toId && w.toPort === toPort)));
   wires.push({ id: setNextWireId(nextWireId + 1), fromId, fromPort, toId, toPort });
+  invalidatePathCache();
   simulate(); draw();
 }
 
@@ -2534,6 +2549,7 @@ document.getElementById('btn-clear').addEventListener('click', () => {
   pushHistory();
   setComps([]); setWires([]); setNextCompId(1); setNextWireId(1); syncCompMap();
   setOutVals({}); selection.clear(); setSelectedWire(null); setTick(0);
+  invalidatePathCache();
   simulate(); draw(); drawWaves(); updateInspector();
 });
 document.getElementById('btn-save').addEventListener('click', () => {
@@ -2581,6 +2597,7 @@ document.getElementById('file-input').addEventListener('change', (e) => {
       setCustomGates(data.customGates    || {});
       selection.clear(); setSelectedWire(null);
       setOutVals({});
+      invalidatePathCache();
       refreshSubLib();
       refreshGateLib();
       simulate(); draw(); updateInspector();
@@ -3589,6 +3606,7 @@ function loadExampleNamed(name) {
   setNextWireId(wires.reduce((m, w) => Math.max(m, w.id), 0) + 1);
   setView({ tx: 40, ty: 40, scale: 1 });
   selection.clear(); setSelectedWire(null); setTick(0); setOutVals({});
+  invalidatePathCache();
   simulate(); drawWaves(); draw(); updateInspector();
 }
 
