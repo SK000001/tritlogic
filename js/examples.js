@@ -14,7 +14,7 @@
 export function createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
-  buildTsumDef, buildDecode2Def,
+  buildTsumDef, buildDecode2Def, buildAccSignDef,
   subcircuitDefs,
 }) {
 const EXAMPLES = {
@@ -414,13 +414,13 @@ const EXAMPLES = {
     build: () => {
       // CPU2's decoder is a 2-trit DECODE2 subcircuit; make sure its
       // definition is registered before the preset references it.
-      if (!subcircuitDefs['DECODE2']) subcircuitDefs['DECODE2'] = buildDecode2Def();
-      if (!subcircuitDefs['TSUM'])    subcircuitDefs['TSUM']    = buildTsumDef();
+      if (!subcircuitDefs['DECODE2'])  subcircuitDefs['DECODE2']  = buildDecode2Def();
+      if (!subcircuitDefs['TSUM'])     subcircuitDefs['TSUM']     = buildTsumDef();
+      if (!subcircuitDefs['ACC_SIGN']) subcircuitDefs['ACC_SIGN'] = buildAccSignDef();
       return buildExample((c, w) => ({
-        // Phase A of the v2 ISA (5 ops implemented: NOP/ADDI/MAXI/MINI/JMP).
-        // Conditional jumps and LOAD/STORE come in phases B and C — the
-        // decoder already emits their enable lines, they just aren't wired
-        // into the datapath yet.
+        // Phase B of the v2 ISA (7 ops implemented: NOP / ADDI / MAXI / MINI /
+        // JMP / JMPP / JMPZ). LOAD / STORE come in phase C — the decoder
+        // already emits their enable lines, they just aren't wired yet.
         //
         // Each logical instruction is 6 trits, spread across two parallel
         // 3-trit RAM blocks that share the PC address pins:
@@ -462,6 +462,15 @@ const EXAMPLES = {
           c('accW1',   'MAX',        800, 200),
           c('accW2',   'MAX',        950, 230),
           c('acc',     'REG3',      1140, 540),
+          // ACC_SIGN + the conditional-jump combiner.
+          //   jmpEn = MAX(en_JMP, MIN(en_JMPP, isPos), MIN(en_JMPZ, isZero))
+          // All enables and the isPos/isZero flags live in the {0,+1} domain,
+          // so MIN acts as AND and MAX as OR.
+          c('accSign', 'SUB:ACC_SIGN', 1340, 540),
+          c('jmpP',    'MIN',          1560, 360),
+          c('jmpZ',    'MIN',          1560, 460),
+          c('jmpOR1',  'MAX',          1720, 320),
+          c('jmpOR2',  'MAX',          1880, 380),
           c('wclk',    'WAVE',       40,  580, { name: 'clk',  trace: [] }),
           c('wacc',    'WAVE',      1140, 700, { name: 'ACC0', trace: [] }),
         ],
@@ -510,10 +519,23 @@ const EXAMPLES = {
           w('alu', 'r0', 'acc', 'd0'),
           w('alu', 'r1', 'acc', 'd1'),
           w('alu', 'r2', 'acc', 'd2'),
-          // PC jump control. Phase A: only unconditional JMP wired in.
-          w('decode',  'en_JMP', 'pc', 'jmp'),
-          w('imem_lo', 'q2',     'pc', 'j0'),
-          w('imem_hi', 'q0',     'pc', 'j1'),
+          // ACC fans into the sign detector for the conditional jumps.
+          w('acc', 'q0', 'accSign', 'q0'),
+          w('acc', 'q1', 'accSign', 'q1'),
+          w('acc', 'q2', 'accSign', 'q2'),
+          // PC jump control:
+          //   jmpEn = en_JMP OR (en_JMPP AND isPos) OR (en_JMPZ AND isZero)
+          w('decode',  'en_JMPP', 'jmpP',   'a'),
+          w('accSign', 'isPos',   'jmpP',   'b'),
+          w('decode',  'en_JMPZ', 'jmpZ',   'a'),
+          w('accSign', 'isZero',  'jmpZ',   'b'),
+          w('decode',  'en_JMP',  'jmpOR1', 'a'),
+          w('jmpP',    'out',     'jmpOR1', 'b'),
+          w('jmpOR1',  'out',     'jmpOR2', 'a'),
+          w('jmpZ',    'out',     'jmpOR2', 'b'),
+          w('jmpOR2',  'out',     'pc',     'jmp'),
+          w('imem_lo', 'q2',      'pc',     'j0'),
+          w('imem_hi', 'q0',      'pc',     'j1'),
           // Probes.
           w('clk', 'out', 'wclk', 'in'),
           w('acc', 'q0',  'wacc', 'in'),

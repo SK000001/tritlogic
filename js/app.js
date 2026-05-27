@@ -3220,6 +3220,98 @@ function buildDecode2Def() {
   };
 }
 
+//  ACC_SIGN — three ACC trits (q0/q1/q2) → two enable-style flags isZero and
+//  isPos, both in the {0, +1} convention (matching DECODE2). Drives CPU2's
+//  conditional jumps: JMPP gates on isPos, JMPZ on isZero.
+//
+//  isZero  = MIN over all three trits of "is this trit 0?". Each per-trit
+//            is0 detector uses the same pattern as DECODE2's is0_:
+//            is0(x) = MAX(MIN(PTI(x), STI(NTI(x))), 0)   — +1 iff x = 0.
+//            MIN acts as AND on the {0,+1} domain, so isZero is +1 iff
+//            every trit is 0.
+//
+//  isPos   = sign of ACC interpreted as balanced ternary. The sign equals
+//            the highest-order non-zero trit's sign (since |3·q_hi| beats
+//            the sum |q_lo + 3·q_mid|). A two-MUX priority encoder picks
+//            it out:
+//              inner  = MUX(is0(q1), q1, q1, q0)   ; q1 nonzero → q1 else q0
+//              signOf = MUX(is0(q2), q2, q2, inner); q2 nonzero → q2 else inner
+//            Then "+1 iff signOf = +1" via STI(PTI(signOf)) clamped to {0,+1}.
+function buildAccSignDef() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [];
+    const wires = [];
+    comps.push(c('q0',   'INPUT', 40,  30, { value: 0, name: 'q0' }));
+    comps.push(c('q1',   'INPUT', 40, 110, { value: 0, name: 'q1' }));
+    comps.push(c('q2',   'INPUT', 40, 190, { value: 0, name: 'q2' }));
+    comps.push(c('zero', 'CONST', 40, 270, { value: 0 }));
+
+    // Per-trit is0 detector — +1 iff the trit is 0, else 0.
+    function isZeroBlock(name, x0, y0) {
+      comps.push(c(`pti_${name}`,    'PTI', x0,         y0));
+      comps.push(c(`nti_${name}`,    'NTI', x0,         y0 + 60));
+      comps.push(c(`notNti_${name}`, 'STI', x0 + 140,   y0 + 60));
+      comps.push(c(`is0t_${name}`,   'MIN', x0 + 290,   y0 + 30));
+      comps.push(c(`is0_${name}`,    'MAX', x0 + 430,   y0 + 30));
+      wires.push(w(name,             'out', `pti_${name}`,    'in'));
+      wires.push(w(name,             'out', `nti_${name}`,    'in'));
+      wires.push(w(`nti_${name}`,    'out', `notNti_${name}`, 'in'));
+      wires.push(w(`pti_${name}`,    'out', `is0t_${name}`,   'a'));
+      wires.push(w(`notNti_${name}`, 'out', `is0t_${name}`,   'b'));
+      wires.push(w(`is0t_${name}`,   'out', `is0_${name}`,    'a'));
+      wires.push(w('zero',           'out', `is0_${name}`,    'b'));
+    }
+    isZeroBlock('q0', 200,  30);
+    isZeroBlock('q1', 200, 200);
+    isZeroBlock('q2', 200, 370);
+
+    // isZero = AND over the three per-trit is0 flags.
+    comps.push(c('isZ01',      'MIN',    790,  120));
+    comps.push(c('isZall',     'MIN',    950,  250));
+    comps.push(c('isZero_out', 'OUTPUT', 1130, 260, { name: 'isZero' }));
+    wires.push(w('is0_q0', 'out', 'isZ01',      'a'));
+    wires.push(w('is0_q1', 'out', 'isZ01',      'b'));
+    wires.push(w('isZ01',  'out', 'isZall',     'a'));
+    wires.push(w('is0_q2', 'out', 'isZall',     'b'));
+    wires.push(w('isZall', 'out', 'isZero_out', 'in'));
+
+    // Priority encoder for signOf. is0_qi ∈ {0,+1} so the MUX selector
+    // never goes to -1; dT is wired to qi only for cosmetic completeness.
+    comps.push(c('muxInner', 'MUX',  790, 470));
+    comps.push(c('muxOuter', 'MUX',  950, 570));
+    wires.push(w('is0_q1',   'out',  'muxInner', 's'));
+    wires.push(w('q1',       'out',  'muxInner', 'dT'));
+    wires.push(w('q1',       'out',  'muxInner', 'd0'));
+    wires.push(w('q0',       'out',  'muxInner', 'dP'));
+    wires.push(w('is0_q2',   'out',  'muxOuter', 's'));
+    wires.push(w('q2',       'out',  'muxOuter', 'dT'));
+    wires.push(w('q2',       'out',  'muxOuter', 'd0'));
+    wires.push(w('muxInner', 'out',  'muxOuter', 'dP'));
+
+    // isPos = +1 iff signOf = +1, via STI(PTI(signOf)) clamped to {0,+1}.
+    //   signOf=+1 → PTI=-1 → STI=+1 → MAX(+1,0)=+1
+    //   signOf=0  → PTI=+1 → STI=-1 → MAX(-1,0)=0
+    //   signOf=-1 → PTI=+1 → STI=-1 → MAX(-1,0)=0
+    comps.push(c('ptiSig',     'PTI',    1110, 570));
+    comps.push(c('stiSig',     'STI',    1250, 570));
+    comps.push(c('isPos_max',  'MAX',    1400, 570));
+    comps.push(c('isPos_out',  'OUTPUT', 1580, 580, { name: 'isPos' }));
+    wires.push(w('muxOuter',   'out', 'ptiSig',    'in'));
+    wires.push(w('ptiSig',     'out', 'stiSig',    'in'));
+    wires.push(w('stiSig',     'out', 'isPos_max', 'a'));
+    wires.push(w('zero',       'out', 'isPos_max', 'b'));
+    wires.push(w('isPos_max',  'out', 'isPos_out', 'in'));
+    return { comps, wires };
+  });
+  return {
+    inputs:  [{ name: 'q0' }, { name: 'q1' }, { name: 'q2' }],
+    outputs: [{ name: 'isZero' }, { name: 'isPos' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
 // ============================================================================
 //  SEQUENTIAL KIT — gate-level structural twins of the stateful primitives
 // ============================================================================
@@ -3568,14 +3660,15 @@ const BUILTIN_SUBCIRCUITS = {
   TREG3:  { kit: 'Sequential Kit', build: buildTreg3Def },
   TPC:    { kit: 'Sequential Kit', build: buildTpcDef },
   TRAM:    { kit: 'Sequential Kit', build: buildTramDef },
-  DECODE2: { kit: 'Control Kit',    build: buildDecode2Def },
+  DECODE2:  { kit: 'Control Kit',    build: buildDecode2Def },
+  ACC_SIGN: { kit: 'Control Kit',    build: buildAccSignDef },
 };
 // Kit headings, in library-panel order.
 const BUILTIN_SUBCIRCUIT_KITS = [
   { label: 'Neural-Net Kit', names: ['TMUL', 'MAC3', 'ACT'] },
   { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3', 'MUX3'] },
   { label: 'Sequential Kit', names: ['TLATCH', 'TFLOP', 'TREG3', 'TPC', 'TRAM'] },
-  { label: 'Control Kit',    names: ['DECODE2'] },
+  { label: 'Control Kit',    names: ['DECODE2', 'ACC_SIGN'] },
 ];
 // Seed the built-ins into the library. Called at boot and re-called after a
 // load; the `if absent` guard means a loaded file's own same-named
@@ -3589,7 +3682,7 @@ function registerBuiltinSubcircuits() {
 const EXAMPLES = createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
-  buildTsumDef, buildDecode2Def,
+  buildTsumDef, buildDecode2Def, buildAccSignDef,
   subcircuitDefs,
 });
 
@@ -3641,7 +3734,7 @@ function loadExample() { loadExampleNamed('t-flop'); }
 
 const { TESTS, runAllTests } = registerTests({
   TYPES, EXAMPLES,
-  buildDecode2Def, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
+  buildAccSignDef, buildDecode2Def, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
   debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,

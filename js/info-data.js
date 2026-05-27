@@ -27,6 +27,7 @@ export const INFO_CATEGORIES = [
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
   ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
+  ['Control kit',    ['SUB:ACC_SIGN']],
   ['ISA',            ['_asm', '_isa2', '_debugger']],
 ];
 
@@ -137,9 +138,9 @@ export const COMPONENT_INFO = {
           <tr><td><code>JMP &lt;addr&gt;</code></td><td class="trit-T">T</td>
               <td class="trit-0">0</td><td>0..8</td><td>Phase A ✓</td></tr>
           <tr><td><code>JMPP &lt;addr&gt;</code></td><td class="trit-T">T</td>
-              <td class="trit-P">+</td><td>if ACC&nbsp;&gt;&nbsp;0</td><td>Phase B (assembler only)</td></tr>
+              <td class="trit-P">+</td><td>if ACC&nbsp;&gt;&nbsp;0</td><td>Phase B ✓</td></tr>
           <tr><td><code>JMPZ &lt;addr&gt;</code></td><td class="trit-0">0</td>
-              <td class="trit-T">T</td><td>if ACC&nbsp;==&nbsp;0</td><td>Phase B (assembler only)</td></tr>
+              <td class="trit-T">T</td><td>if ACC&nbsp;==&nbsp;0</td><td>Phase B ✓</td></tr>
           <tr><td><code>ADDI &lt;n&gt;</code></td><td class="trit-0">0</td>
               <td class="trit-0">0</td><td>signed −40..+40</td><td>Phase A ✓</td></tr>
           <tr><td><code>MAXI &lt;n&gt;</code></td><td class="trit-0">0</td>
@@ -1434,5 +1435,73 @@ LOOP:
       floating address reads <em>word 4</em> (the centre) rather than
       <code>null</code>. A self-test exercises store-then-read across
       several addresses and confirms the contents match.</p>`,
+  },
+
+  'SUB:ACC_SIGN': {
+    name: 'ACC_SIGN — accumulator sign detector',
+    tagline: 'Three ACC trits → isZero and isPos flags for CPU2 conditional jumps',
+    body: `
+      <p><b>ACC_SIGN</b> is the second Control-kit subcircuit, alongside
+      <b>DECODE2</b>. It reads the three ACC trits and emits two
+      <code>{0, +1}</code>-domain flags — <code>isZero</code> (true when
+      ACC = 0) and <code>isPos</code> (true when ACC &gt; 0) — that gate
+      CPU2's conditional jumps: <code>JMPZ</code> branches on
+      <code>isZero</code>, <code>JMPP</code> branches on <code>isPos</code>.</p>
+
+      <h4>isZero</h4>
+      <p>A 3-trit balanced-ternary number is zero only when every trit
+      is 0, so <code>isZero</code> is just an AND over per-trit
+      <code>is0</code> detectors. Each detector reuses the DECODE2
+      pattern:</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+is0(x) = MAX(MIN(PTI(x), STI(NTI(x))), 0)   ; +1 iff x = 0</pre>
+      <p>Then <code>isZero = MIN(MIN(is0(q0), is0(q1)), is0(q2))</code> —
+      MIN acts as AND on the <code>{0, +1}</code> domain.</p>
+
+      <h4>isPos via priority encode</h4>
+      <p>In balanced ternary, the sign of an N-trit value equals the sign
+      of the highest-order non-zero trit — because <code>|q_hi · 3^hi|</code>
+      always exceeds the sum of all lower-order trits. So the sign comes
+      from a two-MUX priority encoder that walks down from <code>q2</code>:</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+inner  = MUX(is0(q1), q1, q1, q0)     ; if q1 ≠ 0 → q1 else q0
+signOf = MUX(is0(q2), q2, q2, inner)  ; if q2 ≠ 0 → q2 else inner</pre>
+      <p>The selector is in <code>{0, +1}</code> so <code>dT</code> is
+      never reached; it is wired to the trit it would otherwise carry so
+      the MUX renders cleanly. Then <code>isPos</code> detects
+      <code>signOf = +1</code> using two inverters and a clamp:</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+isPos = MAX(STI(PTI(signOf)), 0)
+      ;   signOf=+1 → +1
+      ;   signOf=0  → 0
+      ;   signOf=-1 → 0</pre>
+
+      <h4>Internal structure</h4>
+      <ul>
+        <li>3 × <b>INPUT</b> — <code>q0</code>, <code>q1</code>,
+            <code>q2</code></li>
+        <li>1 × <b>CONST 0</b> — the clamp reference, shared by every
+            <code>MAX(_, 0)</code></li>
+        <li>9 × inverter (<b>PTI / NTI / STI</b>) per detector block ×
+            3 blocks + 2 more for the isPos formula</li>
+        <li>3 × <b>MIN</b> + 3 × <b>MAX</b> — per-trit <code>is0</code></li>
+        <li>2 × <b>MIN</b> — the AND tree forming <code>isZero</code></li>
+        <li>2 × <b>MUX</b> — the priority encoder picking
+            <code>signOf</code></li>
+        <li>1 × <b>MAX</b> — the <code>isPos</code> clamp</li>
+        <li>2 × <b>OUTPUT</b> — <code>isZero</code>, <code>isPos</code></li>
+      </ul>
+
+      <h4>Why this matters for the CPU2 datapath</h4>
+      <p>With ACC_SIGN's outputs in the <code>{0, +1}</code> convention,
+      the conditional-jump combiner is one MIN per condition plus an OR
+      tree:</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+jmpEn = MAX(en_JMP,
+            MIN(en_JMPP, isPos),
+            MIN(en_JMPZ, isZero))</pre>
+      <p>A self-test drives every one of the 27 possible ACC values
+      through a fresh ACC_SIGN instance and checks both flags against
+      the balanced-ternary semantics.</p>`,
   },
 };

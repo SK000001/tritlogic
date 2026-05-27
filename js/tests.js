@@ -25,7 +25,8 @@ import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
 export function registerTests(deps) {
   const {
     TYPES, EXAMPLES,
-    buildDecode2Def, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
+    buildAccSignDef, buildDecode2Def,
+    cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
     debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
@@ -1014,6 +1015,102 @@ test('Assembled v2 counter executes ACC = 1,1,2,2,3,3,... on the live CPU2', () 
     for (let i = 0; i < expect.length; i++) {
       assertEq(seen[i].acc, expect[i].acc, `step ${i+1} ACC:`);
       assertEq(seen[i].pc,  expect[i].pc,  `step ${i+1} PC:`);
+    }
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+// ---- ISA v2 — ACC_SIGN + conditional jumps (E2b Phase B) -----------------
+//
+// ACC_SIGN turns the three ACC trits into the {isZero, isPos} flags that
+// JMPZ / JMPP gate on. The exhaustive test drives all 27 possible ACC values
+// through a fresh ACC_SIGN instance and checks both flags against the
+// balanced-ternary semantics (sign = highest-order non-zero trit). The two
+// end-to-end tests then drive the live CPU2 with handcrafted programs to
+// confirm the JMPP / JMPZ datapath wiring matches.
+
+test('ACC_SIGN: isZero / isPos correct for every 3-trit ACC value', () => {
+  if (!subcircuitDefs['ACC_SIGN']) subcircuitDefs['ACC_SIGN'] = buildAccSignDef();
+  const def = subcircuitDefs['ACC_SIGN'];
+  for (let v = -13; v <= 13; v++) {
+    const [q0, q1, q2] = intToTrits(v, 3);
+    const instance = { type: 'SUB:ACC_SIGN', state: {}, subScope: cloneSubScope(def) };
+    const out = simulateSubInstance(instance, { q0, q1, q2 });
+    const expectZero = v === 0 ? 1 : 0;
+    const expectPos  = v >  0 ? 1 : 0;
+    assertEq(out.isZero, expectZero, `v=${v} isZero:`);
+    assertEq(out.isPos,  expectPos,  `v=${v} isPos:`);
+  }
+});
+
+test('CPU2 JMPP branches only when ACC > 0', () => {
+  // Three programs at three starting ACC values exercise the three sign cases.
+  // Each program is just `JMPP 0` at word 0 — if the jump is taken, PC stays
+  // at 0; if not, PC advances to 1.
+  const res = assembleV2('JMPP 0');
+  if (res.errors.length) throw new Error('JMPP assemble: ' + JSON.stringify(res.errors));
+  const cases = [
+    { accInt:  1, taken: true  },
+    { accInt:  0, taken: false },
+    { accInt: -1, taken: false },
+  ];
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    for (const { accInt, taken } of cases) {
+      const ex = EXAMPLES['cpu2'].build();
+      const rams = ex.comps.filter(c => c.type === 'RAM');
+      const decode = ex.comps.find(c => c.type === 'SUB:DECODE2');
+      const opLWire = ex.wires.find(w => w.toId === decode.id && w.toPort === 'opL');
+      const ramLo = rams.find(r => r.id === opLWire.fromId);
+      const ramHi = rams.find(r => r.id !== ramLo.id);
+      ramLo.state.mem = res.mem_lo.map(w => w.slice()); ramLo.state.clkPrev = 0;
+      ramHi.state.mem = res.mem_hi.map(w => w.slice()); ramHi.state.clkPrev = 0;
+      const pc  = ex.comps.find(c => c.type === 'PC');
+      const acc = ex.comps.find(c => c.type === 'REG3');
+      // Seed ACC with the test value (REG3 stores q as [q0,q1,q2]).
+      acc.state = { q: intToTrits(accInt, 3), clkPrev: 0 };
+      setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+      syncCompMap(); simulate();
+      // Two stepSequential calls = one full clock cycle = one PC update.
+      stepSequential(); stepSequential();
+      const pcAddr = tritsToInt(pc.state.p) + 4;
+      assertEq(pcAddr, taken ? 0 : 1, `ACC=${accInt} JMPP PC:`);
+    }
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+test('CPU2 JMPZ branches only when ACC == 0', () => {
+  const res = assembleV2('JMPZ 0');
+  if (res.errors.length) throw new Error('JMPZ assemble: ' + JSON.stringify(res.errors));
+  const cases = [
+    { accInt:  0, taken: true  },
+    { accInt:  1, taken: false },
+    { accInt: -1, taken: false },
+  ];
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    for (const { accInt, taken } of cases) {
+      const ex = EXAMPLES['cpu2'].build();
+      const rams = ex.comps.filter(c => c.type === 'RAM');
+      const decode = ex.comps.find(c => c.type === 'SUB:DECODE2');
+      const opLWire = ex.wires.find(w => w.toId === decode.id && w.toPort === 'opL');
+      const ramLo = rams.find(r => r.id === opLWire.fromId);
+      const ramHi = rams.find(r => r.id !== ramLo.id);
+      ramLo.state.mem = res.mem_lo.map(w => w.slice()); ramLo.state.clkPrev = 0;
+      ramHi.state.mem = res.mem_hi.map(w => w.slice()); ramHi.state.clkPrev = 0;
+      const pc  = ex.comps.find(c => c.type === 'PC');
+      const acc = ex.comps.find(c => c.type === 'REG3');
+      acc.state = { q: intToTrits(accInt, 3), clkPrev: 0 };
+      setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+      syncCompMap(); simulate();
+      stepSequential(); stepSequential();
+      const pcAddr = tritsToInt(pc.state.p) + 4;
+      assertEq(pcAddr, taken ? 0 : 1, `ACC=${accInt} JMPZ PC:`);
     }
   } finally {
     setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
