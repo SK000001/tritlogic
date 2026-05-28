@@ -1118,6 +1118,64 @@ test('CPU2 JMPZ branches only when ACC == 0', () => {
   }
 });
 
+// ---- All-structural CPU --------------------------------------------------
+//
+// The `cpu-structural` preset rebuilds the Phase 7 compute path with
+// `TPC` / `TREG3` / `ALU3` from the Sequential & Arithmetic kits in place of
+// the native PC / REG3 / ALU primitives. IMEM stays native (TRAM's storage
+// can't be pre-loaded — its subscope bootstraps to zero). TPC's TFLOPs wake
+// at q=[0,0] = word index 4, so the default program is offset to word 4 and
+// the loop runs ADDI +1 / JMP 4. This test verifies the structural ACC
+// climbs the same 1,1,2,2,3,3,... pattern the native CPU does.
+
+test('Structural CPU (TPC + TREG3 + ALU3) increments ACC like the native CPU', () => {
+  const ex = EXAMPLES['cpu-structural'].build();
+  const pc  = ex.comps.find(c => c.type === 'SUB:TPC');
+  const acc = ex.comps.find(c => c.type === 'SUB:TREG3');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    // Read SUB instance q via the outer scope's outVals fanout (the keys the
+    // simulator writes when settling a subcircuit instance's outputs).
+    const readAcc = () => {
+      const q0 = outVals[`${acc.id}:q0`];
+      const q1 = outVals[`${acc.id}:q1`];
+      const q2 = outVals[`${acc.id}:q2`];
+      return tritsToInt([q0 ?? 0, q1 ?? 0, q2 ?? 0]);
+    };
+    const readPc = () => {
+      const p0 = outVals[`${pc.id}:p0`];
+      const p1 = outVals[`${pc.id}:p1`];
+      return tritsToInt([p0 ?? 0, p1 ?? 0]) + 4;
+    };
+    // The structural CPU starts at word 4 (TPC's natural reset), runs
+    // ADDI +1 at word 4, then JMP 4 at word 5 — same shape as the native
+    // CPU's word 0 / word 1 loop. Each full instruction is 2 stepSequential
+    // calls (one full clock cycle in bi mode). Sample the (ACC, PC) pair
+    // after each step for ten steps.
+    const seen = [];
+    for (let i = 0; i < 10; i++) {
+      stepSequential();
+      seen.push({ acc: readAcc(), pc: readPc() });
+    }
+    // Pattern mirrors the native CPU's counter test: ACC and PC each hold
+    // their value across the two half-cycles of a clock period.
+    const expect = [
+      { acc: 1, pc: 5 }, { acc: 1, pc: 5 }, { acc: 1, pc: 4 }, { acc: 1, pc: 4 },
+      { acc: 2, pc: 5 }, { acc: 2, pc: 5 }, { acc: 2, pc: 4 }, { acc: 2, pc: 4 },
+      { acc: 3, pc: 5 }, { acc: 3, pc: 5 },
+    ];
+    for (let i = 0; i < expect.length; i++) {
+      assertEq(seen[i].acc, expect[i].acc, `step ${i+1} ACC:`);
+      assertEq(seen[i].pc,  expect[i].pc,  `step ${i+1} PC:`);
+    }
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
 // ---- ISA v2 — LOAD / STORE + DMEM (E2b Phase C) --------------------------
 //
 // Phase C added a second 9×3-trit RAM (`dmem`) to the CPU2 preset plus a

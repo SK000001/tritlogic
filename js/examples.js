@@ -409,6 +409,114 @@ const EXAMPLES = {
       ],
     })),
   },
+  'cpu-structural': {
+    label: 'CPU (structural) — ALU3 / TPC / TREG3, gate-level compute path',
+    build: () => {
+      // Ensure every Sequential / Arithmetic Kit subcircuit this preset
+      // touches is registered before the build runs.
+      if (!subcircuitDefs['ALU3'])  subcircuitDefs['ALU3']  = buildAlu3Def();
+      if (!subcircuitDefs['TPC'])   subcircuitDefs['TPC']   = buildTpcDef();
+      if (!subcircuitDefs['TREG3']) subcircuitDefs['TREG3'] = buildTreg3Def();
+      return buildExample((c, w) => ({
+        // The Phase 7 datapath rebuilt with the Sequential / Arithmetic Kit
+        // structural twins for every block on the *compute path* — `TPC`
+        // for the program counter, `ALU3` for the ALU, `TREG3` for the
+        // accumulator. Drill into any of them (middle-click in the palette
+        // or double-click on the canvas) to see the gate-level reality:
+        // TPC → TFLOP → TLATCH → cross-coupled MIN/MAX feedback; ALU3 →
+        // FADD → TSUM → MUX3 → MIN/MAX/STI/PTI/NTI. The whole CPU bottoms
+        // out at the three native gates.
+        //
+        // **IMEM stays native RAM.** TRAM's storage lives in 9 internal
+        // TREG3 instances which bootstrap to zero on first instantiation;
+        // there is currently no way to pre-load a program into a subcircuit
+        // before the simulator runs. So this preset uses the native `RAM`
+        // primitive (which accepts `{ mem: [...] }`) for the instruction
+        // memory. IMEM is pure storage — no compute happens in it — so the
+        // "structural" claim still holds for everything the CPU *computes*.
+        //
+        // **Caveat — bootstrap address is word 4.** TPC's internal TFLOPs
+        // wake at q=0,0, which is balanced-ternary p=[0,0] = word index 4
+        // (native PC has its own default of p=[-1,-1] = word 0). So the
+        // default program lives at words 4-5; the loop is ADDI +1 / JMP 4
+        // and execution begins immediately on the first clock edge. The
+        // assembler always loads at word 0, so this preset is for *demo*
+        // purposes — it does not interoperate with Assemble & Load. Use
+        // the regular `CPU` preset for assembler-driven work.
+        //
+        // **Second caveat — TREG3's tri-state `ld`.** TREG3 interprets
+        // ld = T as *clear*, ld = 0 as hold, ld = +1 as load. The native
+        // CPU's decoder emits ld = STI(NTI(opcode)) which is +1 for ADDI/
+        // MAXI and T for JMP — the T would erroneously clear ACC on every
+        // JMP. So this preset clamps the load enable with one extra MAX
+        // gate against CONST 0: `ldClamp = MAX(STI(NTI(opcode)), 0)` —
+        // emits +1 for ADDI/MAXI and 0 (hold) for JMP.
+        //
+        //   word 4: ADDI +1   imem[4] = [1, 0, 0]    ACC = ACC + 1
+        //   word 5: JMP  4    imem[5] = [0, 0, T]    jump back to word 4
+        //
+        // ACC climbs by 1 each full clock cycle, same as the native CPU.
+        comps: [
+          c('clk',  'CLOCK',     60,  340, { value: -1, mode: 'bi' }),
+          c('pc',   'SUB:TPC',   220, 290),
+          c('imem', 'RAM',       430, 200, { mem: [
+            [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+            [1, 0, 0], [0, 0, -1],
+            [0, 0, 0], [0, 0, 0], [0, 0, 0],
+          ] }),
+          // Decoder: NTI off the opcode trit drives PC.jmp (and feeds the
+          // load-enable clamp); a MAX with CONST 0 turns STI's T output
+          // into a 0 so TREG3 holds (not clears) on JMP cycles.
+          c('nti',  'NTI',       760, 150),
+          c('sti',  'STI',       880, 150),
+          c('zero', 'CONST',     760, 230, { value: 0 }),
+          c('ldCl', 'MAX',      1000, 170),
+          c('alu',  'SUB:ALU3',  760, 320),
+          c('acc',  'SUB:TREG3', 1080, 320),
+          c('wclk', 'WAVE',      60,  470, { name: 'clk',  trace: [] }),
+          c('wacc', 'WAVE',     1080, 480, { name: 'ACC0', trace: [] }),
+        ],
+        wires: [
+          // Clock distribution.
+          w('clk', 'out', 'pc',   'clk'),
+          w('clk', 'out', 'imem', 'clk'),
+          w('clk', 'out', 'acc',  'clk'),
+          // PC drives the IMEM address pair.
+          w('pc',  'p0', 'imem', 'a0'),
+          w('pc',  'p1', 'imem', 'a1'),
+          // IMEM is read-only — tie the write port to 0.
+          w('zero', 'out', 'imem', 'we'),
+          w('zero', 'out', 'imem', 'd0'),
+          w('zero', 'out', 'imem', 'd1'),
+          w('zero', 'out', 'imem', 'd2'),
+          // Decoder: opcode → NTI (jmp) → STI → MAX-clamp to {0,+1} for ld.
+          w('imem', 'q2', 'nti',  'in'),
+          w('nti',  'out', 'pc',  'jmp'),
+          w('imem', 'q0', 'pc',   'j0'),
+          w('imem', 'q1', 'pc',   'j1'),
+          w('nti',  'out', 'sti', 'in'),
+          w('sti',  'out', 'ldCl', 'a'),
+          w('zero', 'out', 'ldCl', 'b'),
+          w('ldCl', 'out', 'acc', 'ld'),
+          // ALU: a = ACC.q, b = operand (high trit sign-extended 0), op = opcode.
+          w('acc',  'q0', 'alu', 'a0'),
+          w('acc',  'q1', 'alu', 'a1'),
+          w('acc',  'q2', 'alu', 'a2'),
+          w('imem', 'q0', 'alu', 'b0'),
+          w('imem', 'q1', 'alu', 'b1'),
+          w('zero', 'out', 'alu', 'b2'),
+          w('imem', 'q2', 'alu', 'op'),
+          // ACC ← ALU result.
+          w('alu', 'r0', 'acc', 'd0'),
+          w('alu', 'r1', 'acc', 'd1'),
+          w('alu', 'r2', 'acc', 'd2'),
+          // Probes.
+          w('clk', 'out', 'wclk', 'in'),
+          w('acc', 'q0', 'wacc', 'in'),
+        ],
+      }));
+    },
+  },
   'cpu2': {
     label: 'CPU2 — wider 9-op ISA (v2 — see ISA_v2.md)',
     build: () => {
