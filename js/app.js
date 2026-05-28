@@ -2405,9 +2405,13 @@ function refreshDebugger() {
   }
   const pcAddr = tritsToInt(targets.pc.state.p) + 4;
   const accVal = tritsToInt(targets.acc ? targets.acc.state.q : [0,0,0]);
+  // ACC sign — surfaces what CPU2's JMPP / JMPZ would branch on next cycle.
+  const accSign = accVal > 0 ? '+' : accVal < 0 ? 'T' : '0';
+  const signClass = accVal > 0 ? 'trit-P' : accVal < 0 ? 'trit-T' : 'trit-0';
   pcEl.textContent  = `${pcAddr}  [${targets.pc.state.p.map(tritLabel).join(' ')}]`;
-  accEl.textContent = `${accVal >= 0 ? '+' : ''}${accVal}  ` +
-    (targets.acc ? `[${targets.acc.state.q.map(tritLabel).join(' ')}]` : '');
+  accEl.innerHTML = `${accVal >= 0 ? '+' : ''}${accVal}  ` +
+    (targets.acc ? `[${targets.acc.state.q.map(tritLabel).join(' ')}]` : '') +
+    `  <span class="${signClass}" title="ACC sign — JMPP branches on +, JMPZ on 0">sign:${accSign}</span>`;
   const decodeWord = (i) => targets.version === 2
     ? decodeImemWordV2(targets.imem.state.mem[i], targets.imemHi.state.mem[i])
     : decodeImemWord(targets.imem.state.mem[i] || [0,0,0]);
