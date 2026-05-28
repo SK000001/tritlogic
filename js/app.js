@@ -5,7 +5,7 @@ import {
   cv, ctx, statusEl, selInfo, waveCv, waveCtx
 } from './state.js';
 import {
-  TRIT_COLOR, tritColor, tritLabel, tritClass, SAVE_FORMAT_VERSION,
+  TRIT_COLOR, tritColor, tritLabel, tritClass, SAVE_FORMAT_VERSION, upgradeSave,
   deepClone, intToTrits, tritsToInt, parseTryteString, formatTryte, escapeHtml
 } from './util.js';
 import {
@@ -2581,12 +2581,16 @@ document.getElementById('file-input').addEventListener('change', (e) => {
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const data = JSON.parse(reader.result);
-      // Version check.  Missing field = legacy save (treat as version 0 and
-      // accept).  Newer version than we know about = warn but load anyway.
+      let data = JSON.parse(reader.result);
+      // Version check.  Newer-than-us = warn but load (the user may know
+      // the new fields are additive). Older-or-equal = walk the migration
+      // chain in util.js up to SAVE_FORMAT_VERSION.
       const v = data.version;
       if (typeof v === 'number' && v > SAVE_FORMAT_VERSION) {
         if (!confirm(`Save file is format version ${v}; this build only knows up to ${SAVE_FORMAT_VERSION}. Load anyway?`)) return;
+      } else {
+        try { data = upgradeSave(data); }
+        catch (err) { alert('Could not migrate save file: ' + err.message); return; }
       }
       pushHistory();
       setComps(data.comps || []);

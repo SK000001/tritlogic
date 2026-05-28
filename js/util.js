@@ -18,6 +18,43 @@ export const tritClass = (v) => v === -1 ? 'trit-T' : v === 0 ? 'trit-0' : v ===
 // changes incompatibly so the loader can either upgrade or warn.
 export const SAVE_FORMAT_VERSION = 1;
 
+// ---- Save-format migrations ----------------------------------------------
+//
+// `SAVE_MIGRATIONS` is a list of `[fromVersion, upgradeFn(data) → data]`
+// pairs. `upgradeSave(data)` walks the chain from `data.version` up to
+// `SAVE_FORMAT_VERSION`, applying each migrator in turn and bumping the
+// version field. Missing `data.version` is treated as 0 (legacy file
+// from before the field was added).
+//
+// To add a migration for a future format bump:
+//   1. Bump `SAVE_FORMAT_VERSION` to N.
+//   2. Append `[N - 1, data => { ...rewrite...; data.version = N; return data; }]`
+//      to `SAVE_MIGRATIONS`.
+//   3. Add a test case in tests.js mirroring `Save migration chain ...`.
+//
+// The 0→1 migrator is a no-op today: the v0 → v1 bump (the day the
+// `version` field was added) didn't change any field shapes, only the
+// presence of the field itself. It's listed explicitly so the chain
+// machinery is exercised by every legacy load.
+export const SAVE_MIGRATIONS = [
+  [0, (data) => { data.version = 1; return data; }],
+];
+
+export function upgradeSave(data) {
+  if (!data || typeof data !== 'object') return data;
+  let v = (typeof data.version === 'number') ? data.version : 0;
+  if (v > SAVE_FORMAT_VERSION) return data;  // newer than us — caller decides
+  while (v < SAVE_FORMAT_VERSION) {
+    const step = SAVE_MIGRATIONS.find(m => m[0] === v);
+    if (!step) {
+      throw new Error(`save migration: no upgrader registered for version ${v} → ${v + 1}`);
+    }
+    data = step[1](data);
+    v = (typeof data.version === 'number') ? data.version : v + 1;
+  }
+  return data;
+}
+
 // Prefer the platform's structuredClone (faster + preserves more JS types)
 // and fall back to the JSON round-trip when it isn't available.  This
 // shows up in cleanComps() and cloneSubScope() in particular.

@@ -9,7 +9,8 @@
 //  modules (util / state / assembler / info-data) are imported directly to
 //  preserve live-binding semantics for state's mutable globals.
 
-import { intToTrits, tritsToInt, parseTryteString } from './util.js';
+import { intToTrits, tritsToInt, parseTryteString,
+         SAVE_FORMAT_VERSION, upgradeSave } from './util.js';
 import {
   comps, wires, subcircuitDefs, customGates, outVals,
   nextCompId, nextWireId, tick, undoStack, redoStack,
@@ -1116,6 +1117,31 @@ test('CPU2 JMPZ branches only when ACC == 0', () => {
     setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     syncCompMap();
   }
+});
+
+// ---- Save-format migration chain (D4) ------------------------------------
+//
+// upgradeSave(data) walks the SAVE_MIGRATIONS chain in util.js from
+// `data.version` up to SAVE_FORMAT_VERSION. These tests pin the framework's
+// behaviour today (one no-op 0→1 step) and act as a worked example for
+// what a future migration test should look like.
+
+test('upgradeSave: legacy save (no version field) bumps to current version', () => {
+  const legacy = { comps: [], wires: [] };
+  const out = upgradeSave(legacy);
+  assertEq(out.version, SAVE_FORMAT_VERSION, 'version after upgrade:');
+});
+
+test('upgradeSave: current-version save is returned unchanged', () => {
+  const fresh = { version: SAVE_FORMAT_VERSION, comps: [], wires: [] };
+  const out = upgradeSave(fresh);
+  assertEq(out.version, SAVE_FORMAT_VERSION, 'version unchanged:');
+});
+
+test('upgradeSave: newer-than-current save is passed through (caller decides)', () => {
+  const future = { version: SAVE_FORMAT_VERSION + 5, comps: [], wires: [] };
+  const out = upgradeSave(future);
+  assertEq(out.version, SAVE_FORMAT_VERSION + 5, 'version preserved:');
 });
 
 // ---- All-structural CPU --------------------------------------------------
