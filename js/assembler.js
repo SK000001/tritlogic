@@ -277,6 +277,18 @@ LOOP:
   JMP  LOOP
 `,
   },
+  'dmem-counter': {
+    label: 'DMEM counter — increment DMEM[5] in place via LOAD/STORE',
+    src:
+`; Read DMEM[5] into ACC, add 1, write it back. Each iteration
+; bumps the in-memory counter by one and ACC mirrors its value.
+LOOP:
+  LOAD  5
+  ADDI  +1
+  STORE 5
+  JMP   LOOP
+`,
+  },
 };
 
 // A small library of pre-written programs the modal's example dropdown

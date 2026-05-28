@@ -148,14 +148,17 @@ export const COMPONENT_INFO = {
           <tr><td><code>MINI &lt;n&gt;</code></td><td class="trit-P">+</td>
               <td class="trit-T">T</td><td>signed</td><td>Phase A ✓</td></tr>
           <tr><td><code>LOAD &lt;addr&gt;</code></td><td class="trit-P">+</td>
-              <td class="trit-0">0</td><td>DMEM 0..8</td><td>Phase C (assembler only)</td></tr>
+              <td class="trit-0">0</td><td>DMEM 0..8 → ACC</td><td>Phase C ✓</td></tr>
           <tr><td><code>STORE &lt;addr&gt;</code></td><td class="trit-P">+</td>
-              <td class="trit-P">+</td><td>DMEM 0..8</td><td>Phase C (assembler only)</td></tr>
+              <td class="trit-P">+</td><td>ACC → DMEM 0..8</td><td>Phase C ✓</td></tr>
         </tbody>
       </table>
-      <p style="color: var(--muted); font-size: 11px;">"assembler only" means
-      the v2 assembler emits the right bits, but the CPU2 preset's datapath
-      hasn't wired up the side-effect yet — those land in phases B and C.</p>
+      <p style="color: var(--muted); font-size: 11px;">All 9 v2 ops now have
+      full datapath in CPU2: DECODE2 emits the one-hot enables, ACC_SIGN
+      gates the conditional jumps, and a second 9×3-trit RAM (<code>dmem</code>)
+      addressed by the operand's low 2 trits backs LOAD/STORE. An
+      <code>en_LOAD</code>-selected per-trit MUX picks DMEM read vs ALU
+      result for ACC's data input.</p>
       <h4>The DECODE2 subcircuit</h4>
       <p>Inside the new Control Kit. Takes <code>opL</code> + <code>opH</code>
       and emits 9 enable outputs — one for each codepoint — in the

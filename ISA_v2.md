@@ -1,5 +1,11 @@
 # ISA v2 — design doc for E2b (wider opcode, 9-op ISA)
 
+> **Status (2026-05-28):** Phases A, B, and C all shipped — all 9 ops
+> have full datapath in the `CPU2` preset. This document is kept as
+> the historical design spec; the live system matches it.
+>
+> Original status note (preserved for context):
+>
 > **Status:** design only, no code yet. v1 ISA (3-op skeleton:
 > ADDI / MAXI / JMP encoded in 1 opcode trit) ships today. v2 widens
 > the encoding to 2 opcode trits (9 op slots) plus a 4-trit operand,
@@ -68,8 +74,8 @@ this session, 4 more queued); the remaining 3 are reserved.
 | `ADDI`   |  0  0   | signed immediate −40..+40          | v1     |
 | `MAXI`   |  0  +   | signed immediate −40..+40          | v1     |
 | `MINI`   |  +  T   | signed immediate −40..+40          | v1     |
-| `LOAD`   |  +  0   | DMEM address 0..8 → `ACC`          | v2-dmem |
-| `STORE`  |  +  +   | `ACC` → DMEM address 0..8          | v2-dmem |
+| `LOAD`   |  +  0   | DMEM address 0..8 → `ACC`          | Phase C ✓ |
+| `STORE`  |  +  +   | `ACC` → DMEM address 0..8          | Phase C ✓ |
 
 `v1`            = ships in the first E2b session.
 `v2-cond`       = needs ACC sign detection.

@@ -1118,6 +1118,120 @@ test('CPU2 JMPZ branches only when ACC == 0', () => {
   }
 });
 
+// ---- ISA v2 — LOAD / STORE + DMEM (E2b Phase C) --------------------------
+//
+// Phase C added a second 9×3-trit RAM (`dmem`) to the CPU2 preset plus a
+// per-trit MUX picking ALU result vs DMEM read for ACC's data input. These
+// tests drive handcrafted programs through the live CPU2 to confirm both
+// LOAD and STORE move data between ACC and DMEM correctly.
+
+// Locate the DMEM RAM on a CPU2-shaped circuit. The two IMEM RAMs are
+// identified by sharing the PC's address; DMEM is the third RAM.
+function findCpu2Dmem(scope) {
+  const pc = scope.comps.find(c => c.type === 'PC');
+  const rams = scope.comps.filter(c => c.type === 'RAM');
+  const imemPair = rams.filter(r =>
+    scope.wires.some(w => w.toId === r.id && w.toPort === 'a0' && w.fromId === pc.id));
+  return rams.find(r => !imemPair.includes(r));
+}
+
+test('CPU2 STORE writes ACC into DMEM[addr]', () => {
+  // Program: STORE 3 at word 0. Seed ACC = +2; after one cycle DMEM[3]
+  // should hold [+2,0,0] (the trit encoding of +2).
+  const res = assembleV2('STORE 3');
+  if (res.errors.length) throw new Error('STORE assemble: ' + JSON.stringify(res.errors));
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    const ex = EXAMPLES['cpu2'].build();
+    const rams = ex.comps.filter(c => c.type === 'RAM');
+    const decode = ex.comps.find(c => c.type === 'SUB:DECODE2');
+    const opLWire = ex.wires.find(w => w.toId === decode.id && w.toPort === 'opL');
+    const ramLo = rams.find(r => r.id === opLWire.fromId);
+    const ramHi = rams.find(r => r.id !== ramLo.id &&
+      ex.wires.some(w => w.toId === r.id && w.toPort === 'a0' &&
+                          w.fromId === ex.comps.find(c => c.type === 'PC').id));
+    ramLo.state.mem = res.mem_lo.map(w => w.slice()); ramLo.state.clkPrev = 0;
+    ramHi.state.mem = res.mem_hi.map(w => w.slice()); ramHi.state.clkPrev = 0;
+    const acc = ex.comps.find(c => c.type === 'REG3');
+    acc.state = { q: intToTrits(2, 3), clkPrev: 0 };
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    stepSequential(); stepSequential();   // one full clock cycle
+    const dmem = findCpu2Dmem({ comps: ex.comps, wires: ex.wires });
+    assertDeepEq(dmem.state.mem[3], [-1, 1, 0], 'DMEM[3] after STORE 3 (ACC=+2):');
+    // ACC must not have been overwritten by STORE (accWrite is 0 for STORE).
+    assertEq(tritsToInt(acc.state.q), 2, 'ACC unchanged by STORE:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+test('CPU2 LOAD reads DMEM[addr] into ACC', () => {
+  // Program: LOAD 5 at word 0. Pre-seed DMEM[5] = -3; ACC starts at 0.
+  // After one cycle ACC should equal -3.
+  const res = assembleV2('LOAD 5');
+  if (res.errors.length) throw new Error('LOAD assemble: ' + JSON.stringify(res.errors));
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    const ex = EXAMPLES['cpu2'].build();
+    const rams = ex.comps.filter(c => c.type === 'RAM');
+    const decode = ex.comps.find(c => c.type === 'SUB:DECODE2');
+    const opLWire = ex.wires.find(w => w.toId === decode.id && w.toPort === 'opL');
+    const ramLo = rams.find(r => r.id === opLWire.fromId);
+    const pc = ex.comps.find(c => c.type === 'PC');
+    const ramHi = rams.find(r => r.id !== ramLo.id &&
+      ex.wires.some(w => w.toId === r.id && w.toPort === 'a0' && w.fromId === pc.id));
+    ramLo.state.mem = res.mem_lo.map(w => w.slice()); ramLo.state.clkPrev = 0;
+    ramHi.state.mem = res.mem_hi.map(w => w.slice()); ramHi.state.clkPrev = 0;
+    const dmem = findCpu2Dmem({ comps: ex.comps, wires: ex.wires });
+    dmem.state.mem[5] = intToTrits(-3, 3);
+    dmem.state.clkPrev = 0;
+    const acc = ex.comps.find(c => c.type === 'REG3');
+    acc.state = { q: [0, 0, 0], clkPrev: 0 };
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    stepSequential(); stepSequential();
+    assertEq(tritsToInt(acc.state.q), -3, 'ACC after LOAD 5:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+test('CPU2 LOAD / STORE round-trip increments DMEM in place', () => {
+  // The dmem-counter program: LOAD 5 / ADDI +1 / STORE 5 / JMP LOOP.
+  // After N full iterations DMEM[5] should equal N.
+  const res = assembleV2(ASM2_EXAMPLES['dmem-counter'].src);
+  if (res.errors.length) throw new Error('dmem-counter assemble: ' + JSON.stringify(res.errors));
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    const ex = EXAMPLES['cpu2'].build();
+    const rams = ex.comps.filter(c => c.type === 'RAM');
+    const decode = ex.comps.find(c => c.type === 'SUB:DECODE2');
+    const opLWire = ex.wires.find(w => w.toId === decode.id && w.toPort === 'opL');
+    const ramLo = rams.find(r => r.id === opLWire.fromId);
+    const pc = ex.comps.find(c => c.type === 'PC');
+    const ramHi = rams.find(r => r.id !== ramLo.id &&
+      ex.wires.some(w => w.toId === r.id && w.toPort === 'a0' && w.fromId === pc.id));
+    ramLo.state.mem = res.mem_lo.map(w => w.slice()); ramLo.state.clkPrev = 0;
+    ramHi.state.mem = res.mem_hi.map(w => w.slice()); ramHi.state.clkPrev = 0;
+    const dmem = findCpu2Dmem({ comps: ex.comps, wires: ex.wires });
+    dmem.state.mem[5] = [0, 0, 0]; dmem.state.clkPrev = 0;
+    const acc = ex.comps.find(c => c.type === 'REG3');
+    acc.state = { q: [0, 0, 0], clkPrev: 0 };
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    // Two iterations of the 4-instruction loop = 8 PC advances = 16 stepSequential().
+    for (let i = 0; i < 16; i++) stepSequential();
+    assertEq(tritsToInt(dmem.state.mem[5]), 2, 'DMEM[5] after 2 loop iterations:');
+    assertEq(tritsToInt(acc.state.q), 2, 'ACC after 2 loop iterations:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
 // ---- Undo / redo ----------------------------------------------------------
 //
 // Sanity-check the snapshot stack against the canonical mutations a user

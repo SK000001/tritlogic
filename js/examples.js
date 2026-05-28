@@ -418,9 +418,10 @@ const EXAMPLES = {
       if (!subcircuitDefs['TSUM'])     subcircuitDefs['TSUM']     = buildTsumDef();
       if (!subcircuitDefs['ACC_SIGN']) subcircuitDefs['ACC_SIGN'] = buildAccSignDef();
       return buildExample((c, w) => ({
-        // Phase B of the v2 ISA (7 ops implemented: NOP / ADDI / MAXI / MINI /
-        // JMP / JMPP / JMPZ). LOAD / STORE come in phase C — the decoder
-        // already emits their enable lines, they just aren't wired yet.
+        // Phase C of the v2 ISA — all 9 ops wired (NOP / ADDI / MAXI / MINI /
+        // JMP / JMPP / JMPZ / LOAD / STORE). LOAD/STORE add a second 9×3-trit
+        // RAM (`dmem`) addressed by the operand's low 2 trits and a per-trit
+        // 3:1 MUX picking ALU result vs DMEM read for ACC's data input.
         //
         // Each logical instruction is 6 trits, spread across two parallel
         // 3-trit RAM blocks that share the PC address pins:
@@ -458,10 +459,19 @@ const EXAMPLES = {
           c('negMini', 'STI',        800, 360),
           c('tsumOp',  'SUB:TSUM',   820, 410),
           c('alu',     'ALU',        980, 520),
-          // ACC write enable: any of en_ADDI / en_MAXI / en_MINI (phase A).
+          // ACC write enable: any of en_ADDI / en_MAXI / en_MINI / en_LOAD.
           c('accW1',   'MAX',        800, 200),
           c('accW2',   'MAX',        950, 230),
-          c('acc',     'REG3',      1140, 540),
+          c('accW3',   'MAX',       1080, 260),
+          // ACC data source: en_LOAD picks DMEM read; default is ALU result.
+          // MUX selects dT/d0/dP by s ∈ {T,0,+1}; en_LOAD ∈ {0,+1}, so dT is
+          // unreachable but wired to the ALU result for safety.
+          c('accSrc0', 'MUX',       1080, 480),
+          c('accSrc1', 'MUX',       1080, 600),
+          c('accSrc2', 'MUX',       1080, 720),
+          c('acc',     'REG3',      1240, 540),
+          // Data memory — 9 words × 3 trits, addressed by oper0/oper1.
+          c('dmem',    'RAM',        980, 860),
           // ACC_SIGN + the conditional-jump combiner.
           //   jmpEn = MAX(en_JMP, MIN(en_JMPP, isPos), MIN(en_JMPZ, isZero))
           // All enables and the isPos/isZero flags live in the {0,+1} domain,
@@ -509,16 +519,40 @@ const EXAMPLES = {
           w('decode',  'en_MAXI', 'tsumOp',  'x'),
           w('negMini', 'out',     'tsumOp',  'y'),
           w('tsumOp',  'sum',     'alu',     'op'),
-          // ACC write enable: en_ADDI ∨ en_MAXI ∨ en_MINI.
+          // ACC write enable: en_ADDI ∨ en_MAXI ∨ en_MINI ∨ en_LOAD.
           w('decode', 'en_ADDI', 'accW1', 'a'),
           w('decode', 'en_MAXI', 'accW1', 'b'),
           w('accW1',  'out',     'accW2', 'a'),
           w('decode', 'en_MINI', 'accW2', 'b'),
-          w('accW2',  'out',     'acc',   'ld'),
-          // ALU → ACC.
-          w('alu', 'r0', 'acc', 'd0'),
-          w('alu', 'r1', 'acc', 'd1'),
-          w('alu', 'r2', 'acc', 'd2'),
+          w('accW2',  'out',     'accW3', 'a'),
+          w('decode', 'en_LOAD', 'accW3', 'b'),
+          w('accW3',  'out',     'acc',   'ld'),
+          // ACC source MUX: en_LOAD selects between ALU.r* (default) and
+          // dmem.q* (when LOAD is active).
+          w('decode', 'en_LOAD', 'accSrc0', 's'),
+          w('decode', 'en_LOAD', 'accSrc1', 's'),
+          w('decode', 'en_LOAD', 'accSrc2', 's'),
+          w('alu', 'r0', 'accSrc0', 'd0'),
+          w('alu', 'r1', 'accSrc1', 'd0'),
+          w('alu', 'r2', 'accSrc2', 'd0'),
+          w('alu', 'r0', 'accSrc0', 'dT'),
+          w('alu', 'r1', 'accSrc1', 'dT'),
+          w('alu', 'r2', 'accSrc2', 'dT'),
+          w('dmem', 'q0', 'accSrc0', 'dP'),
+          w('dmem', 'q1', 'accSrc1', 'dP'),
+          w('dmem', 'q2', 'accSrc2', 'dP'),
+          w('accSrc0', 'out', 'acc', 'd0'),
+          w('accSrc1', 'out', 'acc', 'd1'),
+          w('accSrc2', 'out', 'acc', 'd2'),
+          // DMEM wiring: clock, address from operand[0..1], data from ACC,
+          // write-enable from en_STORE. Read port q* feeds the accSrc MUX.
+          w('clk',     'out', 'dmem', 'clk'),
+          w('imem_lo', 'q2',  'dmem', 'a0'),
+          w('imem_hi', 'q0',  'dmem', 'a1'),
+          w('acc',     'q0',  'dmem', 'd0'),
+          w('acc',     'q1',  'dmem', 'd1'),
+          w('acc',     'q2',  'dmem', 'd2'),
+          w('decode',  'en_STORE', 'dmem', 'we'),
           // ACC fans into the sign detector for the conditional jumps.
           w('acc', 'q0', 'accSign', 'q0'),
           w('acc', 'q1', 'accSign', 'q1'),
