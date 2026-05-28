@@ -1172,6 +1172,23 @@ test('upgradeSave: newer-than-current save is passed through (caller decides)', 
 // the loop runs ADDI +1 / JMP 4. This test verifies the structural ACC
 // climbs the same 1,1,2,2,3,3,... pattern the native CPU does.
 
+test('Structural CPU preset uses kit subcircuits, not native PC / REG3 / ALU', () => {
+  // The whole point of cpu-structural is that the compute path bottoms out
+  // at MIN/MAX gates via the Sequential/Arithmetic kits. A regression to a
+  // native PC/REG3/ALU would silently make the preset functionally identical
+  // to `cpu` and defeat the demo. Pin the invariant.
+  const ex = EXAMPLES['cpu-structural'].build();
+  const types = new Set(ex.comps.map(c => c.type));
+  for (const banned of ['PC', 'REG3', 'ALU']) {
+    if (types.has(banned))
+      throw new Error(`cpu-structural must not place a native ${banned}; use SUB:T${banned === 'PC' ? 'PC' : (banned === 'REG3' ? 'REG3' : 'ALU3')} instead`);
+  }
+  for (const required of ['SUB:TPC', 'SUB:TREG3', 'SUB:ALU3']) {
+    if (!types.has(required))
+      throw new Error(`cpu-structural must place a ${required}; not found`);
+  }
+});
+
 test('Structural CPU (TPC + TREG3 + ALU3) increments ACC like the native CPU', () => {
   const ex = EXAMPLES['cpu-structural'].build();
   const pc  = ex.comps.find(c => c.type === 'SUB:TPC');
