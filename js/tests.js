@@ -793,6 +793,24 @@ test('Assembler examples library exposes 3 programs that assemble cleanly', () =
   }
 });
 
+test('Assembler v2 examples library — every canned program assembles cleanly', () => {
+  // Parallel smoke test to the v1 library check above. Catches typos or
+  // out-of-range immediates in newly-added v2 examples before they show
+  // up in the modal as an "errors loading" status.
+  const names = Object.keys(ASM2_EXAMPLES);
+  if (names.length < 4) throw new Error(`expected at least 4 v2 examples, got ${names.length}`);
+  for (const k of names) {
+    const ex = ASM2_EXAMPLES[k];
+    if (!ex.label || !ex.src) throw new Error(`v2 example ${k} missing label or src`);
+    const res = assembleV2(ex.src);
+    if (res.errors.length) {
+      throw new Error(`v2 example "${k}" failed: ` + JSON.stringify(res.errors));
+    }
+    if (res.words < 1 || res.words > 9)
+      throw new Error(`v2 example "${k}" has ${res.words} instructions`);
+  }
+});
+
 test('Assembled "counter" program executes ACC=1,2,3,... on the live CPU', () => {
   // Round-trip: assemble the canned counter, slap its word image straight
   // into IMEM of a fresh CPU instance, and step ten clock edges. ACC must

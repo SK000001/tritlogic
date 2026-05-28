@@ -277,6 +277,20 @@ LOOP:
   JMP  LOOP
 `,
   },
+  'jmpz-cycle': {
+    label: 'JMPZ cycle — count up from -3 to 0, restart on JMPZ',
+    src:
+`; Demonstrates conditional jump. Force ACC to -3 via MINI, then
+; ADDI +1 until ACC hits 0; JMPZ takes the branch back to START.
+; ACC cycles through -3, -2, -1, 0 every 4 instructions.
+START:
+  MINI -3
+LOOP:
+  ADDI +1
+  JMPZ START
+  JMP  LOOP
+`,
+  },
   'dmem-counter': {
     label: 'DMEM counter — increment DMEM[5] in place via LOAD/STORE',
     src:
