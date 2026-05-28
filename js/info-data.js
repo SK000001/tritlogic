@@ -27,7 +27,7 @@ export const INFO_CATEGORIES = [
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
   ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
-  ['Control kit',    ['SUB:ACC_SIGN']],
+  ['Control kit',    ['SUB:DECODE2', 'SUB:ACC_SIGN']],
   ['ISA',            ['_asm', '_isa2', '_debugger']],
 ];
 
@@ -1438,6 +1438,57 @@ LOOP:
       floating address reads <em>word 4</em> (the centre) rather than
       <code>null</code>. A self-test exercises store-then-read across
       several addresses and confirms the contents match.</p>`,
+  },
+
+  'SUB:DECODE2': {
+    name: 'DECODE2 — 2-trit opcode decoder',
+    tagline: '9 active-high one-hot enables for the v2 ISA',
+    body: `
+      <p><b>DECODE2</b> is the first Control-kit subcircuit. It takes the
+      two opcode trits (<code>opL</code>, <code>opH</code>) from a v2
+      instruction word and emits nine <code>{0, +1}</code>-domain enable
+      lines — one per opcode — that the CPU2 datapath uses to gate
+      register loads, RAM writes, and the ALU op selector.</p>
+
+      <h4>The {0, +1} convention</h4>
+      <p>Each enable is <code>+1</code> when its opcode is selected,
+      <code>0</code> otherwise (never <code>T</code>). This convention
+      collapses combinational control to ordinary MIN/MAX gates —
+      <code>MIN</code> is logical AND, <code>MAX</code> is OR — and it
+      lets the ALU op selector reduce to a single TSUM:
+      <code>aluOpSel = TSUM(en_MAXI, NEG(en_MINI))</code> gives <code>0</code>
+      for ADDI, <code>+1</code> for MAXI, and <code>−1</code> for MINI
+      with no extra clamp logic.</p>
+
+      <h4>Detector formulas</h4>
+      <p>Per opcode trit, three trit-equality detectors are built from
+      the native inverters PTI and NTI:</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+isP(x) = MAX(STI(MAX(PTI(x), NTI(x))), 0)   ; +1 iff x = +1
+isT(x) = MAX(NTI(x), 0)                     ; +1 iff x = −1
+is0(x) = MAX(MIN(PTI(x), STI(NTI(x))), 0)   ; +1 iff x =  0</pre>
+      <p>Each enable is then <code>MIN(is_H, is_L)</code> for that
+      opcode's target <code>(opH, opL)</code> pair from the v2 codepoint
+      table (see the ISA v2 reference page).</p>
+
+      <h4>Outputs (9 enables)</h4>
+      <p><code>en_NOP, en_JMP, en_JMPP, en_JMPZ, en_ADDI, en_MAXI,
+      en_MINI, en_LOAD, en_STORE</code> — exactly one is <code>+1</code>
+      on any valid <code>(opH, opL)</code>; the rest are <code>0</code>.
+      A self-test drives every one of the nine codepoints through a
+      fresh DECODE2 instance and checks the one-hot pattern.</p>
+
+      <h4>How CPU2 uses the outputs</h4>
+      <ul>
+        <li><code>accWrite = MAX(en_ADDI, en_MAXI, en_MINI, en_LOAD)</code>
+            — drives the ACC register's load enable</li>
+        <li><code>jmpEn = MAX(en_JMP, MIN(en_JMPP, isPos),
+            MIN(en_JMPZ, isZero))</code> — drives the PC's jump enable
+            (the <code>isPos</code>/<code>isZero</code> flags come from
+            <b>ACC_SIGN</b>)</li>
+        <li><code>dmem.we = en_STORE</code></li>
+        <li><code>accSrc</code> MUX select = <code>en_LOAD</code></li>
+      </ul>`,
   },
 
   'SUB:ACC_SIGN': {
