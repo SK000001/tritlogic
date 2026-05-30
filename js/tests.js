@@ -31,7 +31,7 @@ export function registerTests(deps) {
     debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
-    simulateSubInstance, stepSequential, syncCompMap, undo, redo,
+    simulateTimed, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
   } = deps;
 
 const TESTS = [];
@@ -484,6 +484,76 @@ test('Ternary MLP runs both layers through the sign activation, sampled', () => 
       assertEq(scope.outVals[outSrc['h' + j]], h[j], `MLP h${j} sample ${s}:`);
     assertEq(scope.outVals[outSrc.y], y, `MLP y sample ${s}:`);
   }
+});
+
+// ---- A2 timed simulation (propagation delays) ----
+test('A2 timed sim settles to the same values as the instant solver', () => {
+  const { comps, wires } = EXAMPLES['ternary-layer'].build();
+  const inByName = {};
+  for (const c of comps) if (c.type === 'INPUT') inByName[c.state.name] = c;
+  const vectors = [
+    { x0: 1, x1: -1, x2: 0, w00: 1, w01: 1, w02: -1, w10: 0, w11: -1, w12: 1, w20: -1, w21: 0, w22: 1 },
+    { x0: -1, x1: -1, x2: 1, w00: -1, w01: 0, w02: 1, w10: 1, w11: 1, w12: 1, w20: 0, w21: -1, w22: -1 },
+  ];
+  for (const vec of vectors) {
+    for (const name in vec) if (inByName[name]) inByName[name].state.value = vec[name];
+    const inst = { comps, wires, outVals: {} };
+    simulateScope(inst);
+    const timed = simulateTimed({ comps, wires });
+    assertEq(timed.settled, true, 'timed run settled:');
+    for (const k in inst.outVals) {
+      assertEq(timed.finalVals[k], inst.outVals[k], `timed vs instant net ${k}:`);
+    }
+  }
+});
+
+test('A2 propagation delay accumulates down an inverter chain', () => {
+  // INPUT → STI → STI → STI → OUTPUT, all unit delay.
+  const comps = [
+    { id: 1, type: 'INPUT',  x: 0, y: 0, state: { value: 1, name: 'x' } },
+    { id: 2, type: 'STI',    x: 0, y: 0, state: {} },
+    { id: 3, type: 'STI',    x: 0, y: 0, state: {} },
+    { id: 4, type: 'STI',    x: 0, y: 0, state: {} },
+    { id: 5, type: 'OUTPUT', x: 0, y: 0, state: { name: 'y' } },
+  ];
+  const wires = [
+    { id: 1, fromId: 1, fromPort: 'out', toId: 2, toPort: 'in' },
+    { id: 2, fromId: 2, fromPort: 'out', toId: 3, toPort: 'in' },
+    { id: 3, fromId: 3, fromPort: 'out', toId: 4, toPort: 'in' },
+    { id: 4, fromId: 4, fromPort: 'out', toId: 5, toPort: 'in' },
+  ];
+  const r = simulateTimed({ comps, wires });
+  assertEq(r.settleTime, 3, 'chain settle time (3 unit-delay gates):');
+  assertEq(r.finalVals['4:out'], -1, 'three inversions of +1:');   // -(-(-1)) = -1
+  assertEq(r.hazards.length, 0, 'a simple chain has no glitches:');
+});
+
+test('A2 detects a static-1 hazard from skewed reconvergent delays', () => {
+  // out = MAX(x, STI(x)) = |x|, constant 1 for x = ±1. Make the inverter arm
+  // two units slower than the direct arm; flipping x = +1 → −1 makes MAX
+  // briefly see (−1, stale −1) before STI catches up → a 1 → −1 → 1 glitch.
+  const comps = [
+    { id: 1, type: 'INPUT',  x: 0, y: 0, state: { value: 1, name: 'x' } },
+    { id: 2, type: 'STI',    x: 0, y: 0, state: { delay: 2 } },
+    { id: 3, type: 'MAX',    x: 0, y: 0, state: {} },
+    { id: 4, type: 'OUTPUT', x: 0, y: 0, state: { name: 'y' } },
+  ];
+  const wires = [
+    { id: 1, fromId: 1, fromPort: 'out', toId: 2, toPort: 'in' },  // x → STI
+    { id: 2, fromId: 1, fromPort: 'out', toId: 3, toPort: 'a' },   // x → MAX.a
+    { id: 3, fromId: 2, fromPort: 'out', toId: 3, toPort: 'b' },   // STI → MAX.b
+    { id: 4, fromId: 3, fromPort: 'out', toId: 4, toPort: 'in' },  // MAX → OUT
+  ];
+  const base = { comps, wires, outVals: {} };
+  simulateScope(base);
+  assertEq(base.outVals['3:out'], 1, 'steady MAX = |+1|:');
+  const r = simulateTimed({ comps, wires }, {
+    base: base.outVals,
+    stimulus: [{ key: '1:out', value: -1 }],
+  });
+  assertEq(r.finalVals['3:out'], 1, 'final MAX = |−1|:');
+  assertEq(r.hazards.some(h => h.key === '3:out'), true, 'MAX output flagged as hazard:');
+  assertEq(r.changes.filter(ch => ch.key === '3:out').length, 2, 'MAX glitched (two changes):');
 });
 
 test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () => {

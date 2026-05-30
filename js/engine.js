@@ -45,17 +45,25 @@ function inputValueFromWires(scope, compId, portName) {
   return scope.outVals[`${w.fromId}:${w.fromPort}`] ?? null;
 }
 
-function simulateScope(scope) {
-  // Event-driven fixed point (A1). Rather than re-evaluating every component
-  // on every pass until a whole pass makes no change, we keep a work queue of
-  // "dirty" components and only re-evaluate one when an input has actually
-  // changed. Propagation follows a precomputed fanout map, so a deep
-  // combinational chain settles in roughly dependency order instead of
-  // (depth × full-pass) sweeps.
+const DEFAULT_DELAY = 1;
 
-  // Wiring indices, built once per call from the current wires:
-  //   destOf:  "toId:toPort"     -> "fromId:fromPort"  (fast input gather)
-  //   fanout:  "fromId:fromPort" -> [toId, ...]          (who to wake on change)
+// Propagation delay (abstract integer time units) for a component in the timed
+// solver (A2). Per-instance `c.state.delay` overrides a per-type
+// `TYPES[type].delay`, which overrides the default. Always a positive integer
+// so the timed event wheel strictly advances.
+function delayOf(c) {
+  const d = c.state && c.state.delay;
+  if (Number.isInteger(d) && d >= 1) return d;
+  const t = TYPES[c.type] && TYPES[c.type].delay;
+  if (Number.isInteger(t) && t >= 1) return t;
+  return DEFAULT_DELAY;
+}
+
+// Wiring indices shared by both solvers, built once per call:
+//   destOf:  "toId:toPort"     -> "fromId:fromPort"  (fast input gather)
+//   fanout:  "fromId:fromPort" -> [toId, ...]          (consumers to wake)
+//   byId:    compId            -> component
+function buildIndices(scope) {
   const destOf = new Map();
   const fanout = new Map();
   for (const w of scope.wires) {
@@ -67,11 +75,52 @@ function simulateScope(scope) {
   }
   const byId = new Map();
   for (const c of scope.comps) byId.set(c.id, c);
+  return { destOf, fanout, byId };
+}
+
+// Gather a component's input-port values from a net-value map (keyed by
+// "fromId:fromPort") via the destOf index. Undriven inputs read null.
+function gatherInputs(def, id, destOf, vals) {
+  const vIn = {};
+  for (const port in def.pins) {
+    if (def.pins[port].kind === 'in') {
+      const fk = destOf.get(`${id}:${port}`);
+      vIn[port] = fk ? (vals[fk] ?? null) : null;
+    }
+  }
+  return vIn;
+}
+
+// Evaluate one component's outputs from already-gathered inputs, wrapping the
+// SUB-instance recursion and the per-eval error guard shared by both solvers.
+// On a thrown eval, every output goes null and a per-scope counter is bumped.
+function evalComp(scope, c, def, vIn) {
+  try {
+    if (c.type.startsWith('SUB:')) return simulateSubInstance(c, vIn) || {};
+    return def.eval(c, vIn) || {};
+  } catch (err) {
+    scope._evalErrors = (scope._evalErrors || 0) + 1;
+    if (!scope._evalLogged) {
+      scope._evalLogged = true;
+      console.warn(`eval error in ${c.type} #${c.id}:`, err);
+    }
+    const out = {};
+    for (const port in def.pins) if (def.pins[port].kind === 'out') out[port] = null;
+    return out;
+  }
+}
+
+function simulateScope(scope) {
+  // Event-driven fixed point (A1): a dirty work queue that only re-evaluates a
+  // component when one of its inputs changed, propagating along the fanout map
+  // so a deep chain settles in dependency order instead of (depth × full-pass)
+  // sweeps.
+  const { destOf, fanout, byId } = buildIndices(scope);
 
   // Initialize: combinational outputs to null (only if unset — prior values
-  // are kept so re-simulating a settled circuit starts warm), sequential
-  // outputs already hold their stored state. A DFF therefore participates
-  // correctly as a source of its stored q.
+  // are kept so re-simulating a settled circuit starts warm); sequential
+  // outputs already hold their stored state, so a DFF participates correctly
+  // as a source of its stored q.
   for (const c of scope.comps) {
     const def = compDef(c);
     for (const port in def.pins) {
@@ -82,18 +131,14 @@ function simulateScope(scope) {
     }
   }
 
-  // Dirty work queue. Seed every component once so each evaluates at least
-  // once from its current inputs (sources with no inputs included); the
-  // fanout propagation settles the rest.
+  // Dirty work queue, seeded with every component once.
   const queue = [];
   const queued = new Set();
   const enqueue = (id) => { if (!queued.has(id)) { queued.add(id); queue.push(id); } };
   for (const c of scope.comps) enqueue(c.id);
 
-  // Oscillation guard: mirror the old 300-passes budget as 300 evals per
-  // component (with a floor for tiny scopes). A combinational DAG drains in
-  // ~O(edges) evals, far below this; only a real oscillator hits the cap and
-  // is reported unstable.
+  // Oscillation guard: 300 evals per component (floor for tiny scopes). A DAG
+  // drains in ~O(edges) evals; only a real oscillator hits the cap → unstable.
   const maxEvals = Math.max(1000, scope.comps.length * 300);
   let evals = 0;
   let overflow = false;
@@ -106,34 +151,7 @@ function simulateScope(scope) {
     if (!c) continue;
     const def = compDef(c);
     evals++;
-
-    const vIn = {};
-    for (const port in def.pins) {
-      if (def.pins[port].kind === 'in') {
-        const fk = destOf.get(`${id}:${port}`);
-        vIn[port] = fk ? (scope.outVals[fk] ?? null) : null;
-      }
-    }
-
-    let vOut;
-    try {
-      if (c.type.startsWith('SUB:')) vOut = simulateSubInstance(c, vIn);
-      else vOut = def.eval(c, vIn) || {};
-    } catch (err) {
-      // Don't let a single buggy eval take down the settle. Outputs go to
-      // null so downstream gates see a clean "floating" signal, and we bump a
-      // counter the UI can show.
-      scope._evalErrors = (scope._evalErrors || 0) + 1;
-      if (!scope._evalLogged) {
-        scope._evalLogged = true;
-        console.warn(`eval error in ${c.type} #${c.id}:`, err);
-      }
-      vOut = {};
-      for (const port in def.pins) {
-        if (def.pins[port].kind === 'out') vOut[port] = null;
-      }
-    }
-
+    const vOut = evalComp(scope, c, def, gatherInputs(def, id, destOf, scope.outVals));
     for (const port in vOut) {
       const key = `${id}:${port}`;
       if (scope.outVals[key] !== vOut[port]) {
@@ -149,6 +167,113 @@ function simulateScope(scope) {
   scope.lastIters = evals;
   scope.stable = !overflow;
   return { iters: evals, stable: scope.stable };
+}
+
+// ----------------------------------------------------------------------------
+//  TIMED SIMULATION (A2 — propagation delays)
+// ----------------------------------------------------------------------------
+//
+//  An opt-in timed model over the same wiring graph as the instant solver.
+//  Each component has an integer propagation delay (delayOf); when a net
+//  changes at time t, every consuming component is re-evaluated at t + its own
+//  delay. Because a gate is re-evaluated once per arriving input edge, inputs
+//  that reconverge with unequal delay drive the gate to transient intermediate
+//  values — i.e. real dynamic hazards/glitches, which we surface.
+//
+//  Two ways to drive it:
+//    • cold start (default): every source / sequential output establishes at
+//      t=0 (computed from the cold snapshot so chained reads still incur their
+//      own delay), then the combinational wavefront propagates. Good for
+//      "watch the circuit settle".
+//    • { base, stimulus }: start from a known steady state `base` (a vals map,
+//      e.g. captured from simulateScope) and apply source changes `stimulus`
+//      ([{key,value}]) at t=0. Good for "toggle an input and watch the
+//      response" — this is what exposes static hazards on a transition.
+//
+//  Returns { changes:[{t,key,value}], hazards:[{key,count}], settleTime,
+//            finalVals, settled }. `finalVals` matches the instant solver's
+//            steady state for the same inputs; any net that changed more than
+//            once (count>1) is flagged as a hazard.
+function simulateTimed(scope, opts = {}) {
+  const { destOf, fanout, byId } = buildIndices(scope);
+
+  // Starting net values.
+  const vals = {};
+  if (opts.base) {
+    Object.assign(vals, opts.base);
+  } else {
+    for (const c of scope.comps) {
+      const def = compDef(c);
+      for (const port in def.pins) {
+        if (def.pins[port].kind === 'out') vals[`${c.id}:${port}`] = null;
+      }
+    }
+  }
+
+  const changes = [];
+  const changeCount = new Map();   // netKey -> times it changed (>1 ⇒ glitch)
+  const pending = new Map();       // time -> Set(compId)
+  const schedule = (id, t) => {
+    let s = pending.get(t);
+    if (!s) { s = new Set(); pending.set(t, s); }
+    s.add(id);
+  };
+  const applyChange = (key, v, t) => {
+    if (vals[key] === v) return;
+    vals[key] = v;
+    changes.push({ t, key, value: v });
+    changeCount.set(key, (changeCount.get(key) || 0) + 1);
+    const outs = fanout.get(key);
+    if (outs) for (const toId of outs) {
+      const d = byId.get(toId);
+      if (d) schedule(toId, t + delayOf(d));
+    }
+  };
+
+  // Seed at t=0.
+  if (opts.stimulus) {
+    for (const s of opts.stimulus) applyChange(s.key, s.value, 0);
+  } else {
+    // Establish source / sequential outputs from the cold snapshot, then apply
+    // them together — so a sequential→sequential combinational read still
+    // incurs its own delay (via scheduling) rather than collapsing to t=0.
+    const seeds = [];
+    for (const c of scope.comps) {
+      const def = compDef(c);
+      const hasIn = Object.values(def.pins).some(p => p.kind === 'in');
+      if (!hasIn || def.isSequential) {
+        seeds.push([c, evalComp(scope, c, def, gatherInputs(def, c.id, destOf, vals))]);
+      }
+    }
+    for (const [c, vOut] of seeds) {
+      for (const port in vOut) applyChange(`${c.id}:${port}`, vOut[port], 0);
+    }
+  }
+
+  // Process the event wheel in ascending time order.
+  const maxEvals = Math.max(1000, scope.comps.length * 300);
+  let evals = 0, overflow = false;
+  while (pending.size && !overflow) {
+    let T = Infinity;
+    for (const t of pending.keys()) if (t < T) T = t;
+    const ids = pending.get(T);
+    pending.delete(T);
+    for (const id of ids) {
+      if (evals >= maxEvals) { overflow = true; break; }
+      const c = byId.get(id);
+      if (!c) continue;
+      const def = compDef(c);
+      evals++;
+      const vOut = evalComp(scope, c, def, gatherInputs(def, id, destOf, vals));
+      for (const port in vOut) applyChange(`${c.id}:${port}`, vOut[port], T);
+    }
+  }
+
+  let settleTime = 0;
+  for (const ch of changes) if (ch.t > settleTime) settleTime = ch.t;
+  const hazards = [];
+  for (const [key, n] of changeCount) if (n > 1) hazards.push({ key, count: n });
+  return { changes, hazards, settleTime, finalVals: vals, settled: !overflow };
 }
 
 function simulate() {
@@ -360,5 +485,5 @@ function cloneSubScope(def) {
   return scope;
 }
 
-  return { simulate, simulateScope, stepSequential, subInstanceDef, simulateSubInstance, cloneSubScope, inputValueFromWires };
+  return { simulate, simulateScope, simulateTimed, stepSequential, subInstanceDef, simulateSubInstance, cloneSubScope, inputValueFromWires };
 }

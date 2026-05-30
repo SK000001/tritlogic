@@ -874,7 +874,7 @@ function fanoutPins() {
 
 const engineDeps = { TYPES, compDef };
 const {
-  simulate, simulateScope, stepSequential,
+  simulate, simulateScope, simulateTimed, stepSequential,
   subInstanceDef, simulateSubInstance, cloneSubScope,
   inputValueFromWires,
 } = createEngine(engineDeps);
@@ -3746,7 +3746,7 @@ const { TESTS, runAllTests } = registerTests({
   debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
-  simulateSubInstance, stepSequential, syncCompMap, undo, redo,
+  simulateTimed, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
 });
 
 
