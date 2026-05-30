@@ -660,8 +660,10 @@ function drawWire(w) {
   ctx.lineWidth = (selectedWire === w.id ? 3 : 2) / view.scale;
   // Live wires get a dashed pattern whose offset advances each animation
   // tick, producing a slow "marching ants" toward the destination.
-  // Floating wires stay solid — visually flagging the dead segment.
-  const animated = (v != null);
+  // Floating wires stay solid — visually flagging the dead segment. A
+  // high-impedance ('Z') or contention ('X') wire isn't carrying a flowing
+  // signal either, so it stays solid too (just coloured cyan / magenta).
+  const animated = (v != null && v !== 'Z' && v !== 'X');
   if (animated) {
     ctx.setLineDash([6, 4]);
     ctx.lineDashOffset = -animTime % 10;

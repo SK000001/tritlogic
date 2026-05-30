@@ -48,6 +48,31 @@ const EXAMPLES = {
       ],
     })),
   },
+  'tristate-bus': {
+    label: 'Tri-state bus (two drivers share one wire)',
+    build: () => buildExample((c, w) => ({
+      comps: [
+        c('da', 'INPUT',  100, 110, { value: 1,  name: 'da' }),
+        c('ea', 'INPUT',  100, 168, { value: 1,  name: 'enA' }),
+        c('db', 'INPUT',  100, 250, { value: -1, name: 'db' }),
+        c('eb', 'INPUT',  100, 308, { value: 0,  name: 'enB' }),
+        c('ta', 'TRIBUF', 290, 120),
+        c('tb', 'TRIBUF', 290, 268),
+        c('y',  'OUTPUT', 480, 196, { name: 'bus' }),
+      ],
+      // Both buffer outputs drive the one probe input — the shared bus. enA=1,
+      // enB=0 ⇒ bus shows da (=1). Toggle enA off ⇒ bus floats (Z); turn both
+      // on with da≠db ⇒ contention (X).
+      wires: [
+        w('da', 'out', 'ta', 'in'),
+        w('ea', 'out', 'ta', 'en'),
+        w('db', 'out', 'tb', 'in'),
+        w('eb', 'out', 'tb', 'en'),
+        w('ta', 'out', 'y', 'in'),
+        w('tb', 'out', 'y', 'in'),
+      ],
+    })),
+  },
   'min-max': {
     label: 'MIN / MAX (ternary AND / OR)',
     build: () => buildExample((c, w) => ({

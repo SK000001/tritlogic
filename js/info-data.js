@@ -20,7 +20,7 @@ export const INFO_CATEGORIES = [
   ['Sources',    ['INPUT', 'CONST', 'TRYTE_IN', 'CLOCK']],
   ['Sinks',      ['OUTPUT', 'TRYTE_OUT', 'WAVE']],
   ['Inverters',  ['STI', 'PTI', 'NTI']],
-  ['Gates',      ['MIN', 'MAX', 'ADDER', 'MUX']],
+  ['Gates',      ['MIN', 'MAX', 'ADDER', 'MUX', 'TRIBUF']],
   ['Sequential', ['DFF', 'REG3', 'RAM']],
   ['CPU',        ['ALU', 'PC']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
@@ -528,6 +528,35 @@ LOOP:
       Phase 7 CPU it selects the next program-counter value — increment or
       jump target — and helps the decoder steer control signals. For a
       plain 2-way choice just leave one of the three inputs unused.</p>`,
+  },
+
+  TRIBUF: {
+    name: 'TRIBUF', tagline: 'Tri-state buffer (high-impedance output)',
+    body: `
+      <p>A tri-state buffer drives its data input <code>in</code> onto the
+      output <code>out</code> only when its enable <code>en</code> is
+      <code>+1</code>. Otherwise the output is <b>high-impedance</b>
+      (<code>Z</code>, drawn cyan) — the buffer is electrically
+      <em>disconnected</em>, driving nothing.</p>
+      <h4>Behaviour</h4>
+      <table class="info-tt" style="text-align:center">
+        <thead><tr><th>en</th><th>out</th></tr></thead>
+        <tbody>
+          <tr><td class="trit-P">+1</td><td><code>in</code></td></tr>
+          <tr><td class="trit-0">0</td><td><code>Z</code></td></tr>
+          <tr><td class="trit-T">T</td><td><code>Z</code></td></tr>
+        </tbody>
+      </table>
+      <p>An undefined enable also gives <code>Z</code>. When enabled but
+      <code>in</code> itself is floating, the output is <code>null</code>.</p>
+      <h4>Shared buses</h4>
+      <p>Wire several buffer outputs onto one input pin to make a
+      <b>tri-state bus</b>. The simulator resolves the drivers: if exactly one
+      is enabled, the bus carries its value; if none are, the bus floats
+      (<code>Z</code>); if two enabled buffers disagree, the bus is in
+      <b>contention</b> (<code>X</code>, drawn magenta). Ordinary gates treat
+      <code>Z</code> and <code>X</code> as undefined. See the
+      <em>Tri-state bus</em> example.</p>`,
   },
 
   DFF: {

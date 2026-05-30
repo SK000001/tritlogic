@@ -226,6 +226,9 @@ const ADDER_TABLE = {
 };
 TYPES.ADDER = {
   w: 96, h: 88,
+  // Two delay units in Timing mode (A2): a full adder is more logic than a
+  // single gate, so a ripple-carry chain shows a clearly staged wavefront.
+  delay: 2,
   pins: {
     a:    { side: 'left',  dx: 0,  dy: 18, kind: 'in' },
     b:    { side: 'left',  dx: 0,  dy: 44, kind: 'in' },
@@ -3937,7 +3940,9 @@ function animLoop(t) {
     setAnimTime(animTime + 1);
     let live = false;
     for (const w of wires) {
-      if (outVals[`${w.fromId}:${w.fromPort}`] != null) { live = true; break; }
+      const v = outVals[`${w.fromId}:${w.fromPort}`];
+      // Only trit-carrying wires animate; null/Z/X render static (see drawWire).
+      if (v != null && v !== 'Z' && v !== 'X') { live = true; break; }
     }
     if (live) draw();
   }
