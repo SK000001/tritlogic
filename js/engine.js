@@ -32,8 +32,10 @@ export function createEngine(deps) {
 //  SIMULATION
 // ============================================================================
 //
-//  Two phases.  Phase A is purely combinational: iterate components,
-//  recomputing each output from its inputs, until nothing changes.  Phase B
+//  Two phases.  Phase A is purely combinational: settle every output from its
+//  inputs via the event-driven solver in `simulateScope` (A1 — a dirty work
+//  queue that only re-evaluates a component when one of its inputs actually
+//  changed, rather than re-scanning every component each pass).  Phase B
 //  ("step") is the sequential edge-triggered update, executed only when the
 //  user clicks Step or auto-play fires.  After Phase B we re-run Phase A.
 
@@ -44,9 +46,32 @@ function inputValueFromWires(scope, compId, portName) {
 }
 
 function simulateScope(scope) {
-  // Initialize: combinational outputs to null, sequential outputs to current
-  // state.  This means a DFF participates correctly as a source of its
-  // stored q.
+  // Event-driven fixed point (A1). Rather than re-evaluating every component
+  // on every pass until a whole pass makes no change, we keep a work queue of
+  // "dirty" components and only re-evaluate one when an input has actually
+  // changed. Propagation follows a precomputed fanout map, so a deep
+  // combinational chain settles in roughly dependency order instead of
+  // (depth × full-pass) sweeps.
+
+  // Wiring indices, built once per call from the current wires:
+  //   destOf:  "toId:toPort"     -> "fromId:fromPort"  (fast input gather)
+  //   fanout:  "fromId:fromPort" -> [toId, ...]          (who to wake on change)
+  const destOf = new Map();
+  const fanout = new Map();
+  for (const w of scope.wires) {
+    destOf.set(`${w.toId}:${w.toPort}`, `${w.fromId}:${w.fromPort}`);
+    const fk = `${w.fromId}:${w.fromPort}`;
+    const arr = fanout.get(fk);
+    if (arr) arr.push(w.toId);
+    else fanout.set(fk, [w.toId]);
+  }
+  const byId = new Map();
+  for (const c of scope.comps) byId.set(c.id, c);
+
+  // Initialize: combinational outputs to null (only if unset — prior values
+  // are kept so re-simulating a settled circuit starts warm), sequential
+  // outputs already hold their stored state. A DFF therefore participates
+  // correctly as a source of its stored q.
   for (const c of scope.comps) {
     const def = compDef(c);
     for (const port in def.pins) {
@@ -56,46 +81,74 @@ function simulateScope(scope) {
       }
     }
   }
-  let stable = false, iters = 0;
-  const maxIters = 300;
-  while (!stable && iters < maxIters) {
-    stable = true; iters++;
-    for (const c of scope.comps) {
-      const def = compDef(c);
-      const vIn = {};
+
+  // Dirty work queue. Seed every component once so each evaluates at least
+  // once from its current inputs (sources with no inputs included); the
+  // fanout propagation settles the rest.
+  const queue = [];
+  const queued = new Set();
+  const enqueue = (id) => { if (!queued.has(id)) { queued.add(id); queue.push(id); } };
+  for (const c of scope.comps) enqueue(c.id);
+
+  // Oscillation guard: mirror the old 300-passes budget as 300 evals per
+  // component (with a floor for tiny scopes). A combinational DAG drains in
+  // ~O(edges) evals, far below this; only a real oscillator hits the cap and
+  // is reported unstable.
+  const maxEvals = Math.max(1000, scope.comps.length * 300);
+  let evals = 0;
+  let overflow = false;
+
+  while (queue.length) {
+    if (evals >= maxEvals) { overflow = true; break; }
+    const id = queue.shift();
+    queued.delete(id);
+    const c = byId.get(id);
+    if (!c) continue;
+    const def = compDef(c);
+    evals++;
+
+    const vIn = {};
+    for (const port in def.pins) {
+      if (def.pins[port].kind === 'in') {
+        const fk = destOf.get(`${id}:${port}`);
+        vIn[port] = fk ? (scope.outVals[fk] ?? null) : null;
+      }
+    }
+
+    let vOut;
+    try {
+      if (c.type.startsWith('SUB:')) vOut = simulateSubInstance(c, vIn);
+      else vOut = def.eval(c, vIn) || {};
+    } catch (err) {
+      // Don't let a single buggy eval take down the settle. Outputs go to
+      // null so downstream gates see a clean "floating" signal, and we bump a
+      // counter the UI can show.
+      scope._evalErrors = (scope._evalErrors || 0) + 1;
+      if (!scope._evalLogged) {
+        scope._evalLogged = true;
+        console.warn(`eval error in ${c.type} #${c.id}:`, err);
+      }
+      vOut = {};
       for (const port in def.pins) {
-        if (def.pins[port].kind === 'in') vIn[port] = inputValueFromWires(scope, c.id, port);
+        if (def.pins[port].kind === 'out') vOut[port] = null;
       }
-      let vOut;
-      try {
-        if (c.type.startsWith('SUB:')) vOut = simulateSubInstance(c, vIn);
-        else vOut = def.eval(c, vIn) || {};
-      } catch (err) {
-        // Don't let a single buggy eval take down the whole fixed-point
-        // iteration.  Outputs go to null so downstream gates see a clean
-        // "floating" signal, and we increment a counter the UI can show.
-        scope._evalErrors = (scope._evalErrors || 0) + 1;
-        if (!scope._evalLogged) {
-          scope._evalLogged = true;
-          console.warn(`eval error in ${c.type} #${c.id}:`, err);
-        }
-        vOut = {};
-        for (const port in def.pins) {
-          if (def.pins[port].kind === 'out') vOut[port] = null;
-        }
-      }
-      for (const port in vOut) {
-        const key = `${c.id}:${port}`;
-        if (scope.outVals[key] !== vOut[port]) {
-          scope.outVals[key] = vOut[port];
-          stable = false;
-        }
+    }
+
+    for (const port in vOut) {
+      const key = `${id}:${port}`;
+      if (scope.outVals[key] !== vOut[port]) {
+        scope.outVals[key] = vOut[port];
+        const outs = fanout.get(key);
+        if (outs) for (const toId of outs) enqueue(toId);
       }
     }
   }
-  scope.lastIters = iters;
-  scope.stable = stable;
-  return { iters, stable };
+
+  // `iters` now counts component evaluations (the event-driven work metric),
+  // not full passes; the stat panel surfaces it as "Evals".
+  scope.lastIters = evals;
+  scope.stable = !overflow;
+  return { iters: evals, stable: scope.stable };
 }
 
 function simulate() {
