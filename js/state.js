@@ -88,3 +88,5 @@ export const statusEl = document.getElementById('status');
 export const selInfo  = document.getElementById('sel-info');
 export const waveCv   = document.getElementById('wave-cv');
 export const waveCtx  = waveCv ? waveCv.getContext('2d') : null;
+export const minimapCv  = document.getElementById('minimap');
+export const minimapCtx = minimapCv ? minimapCv.getContext('2d') : null;

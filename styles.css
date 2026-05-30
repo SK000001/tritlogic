@@ -148,6 +148,16 @@
     pointer-events: none; max-width: 60%;
   }
 
+  /* Mini-map overview (B5). Fixed-size overlay in the bottom-right corner of
+     the canvas; toggled to display:none by drawMinimap() when the whole
+     circuit already fits in the viewport. */
+  #minimap {
+    position: absolute; right: 8px; bottom: 8px;
+    background: rgba(20, 23, 28, .85); border: 1px solid var(--border);
+    border-radius: 4px; cursor: pointer; display: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
+  }
+
   /* Waveform panel */
   .wave-panel {
     grid-column: 1 / -1;

@@ -13,7 +13,7 @@
 //  bindings remain visible.
 
 import {
-  cv, ctx, waveCv, waveCtx,
+  cv, ctx, waveCv, waveCtx, minimapCv, minimapCtx,
   view, comps, wires, mouse, drag, hoverPin, selection, selectedWire,
   pendingWire, animTime, outVals, tick,
 } from './state.js';
@@ -109,7 +109,99 @@ function draw() {
     ctx.stroke();
   }
   ctx.restore();
+
+  drawMinimap();
 }
+
+// ---- Mini-map navigation (B5) --------------------------------------------
+// A small overview in the bottom-right corner showing every component plus a
+// rectangle for the current viewport. Click or drag on it to recentre the
+// main view (click-to-jump). It only appears once the circuit overflows the
+// visible canvas, so small circuits that already fit on screen stay
+// uncluttered.
+//
+// `_miniXform` caches the world→minimap-pixel transform the last frame drew,
+// so the pointer handlers below can invert it without recomputing the fit.
+let _miniXform = null;
+
+function drawMinimap() {
+  if (!minimapCv || !minimapCtx) return;
+  if (comps.length === 0) { minimapCv.style.display = 'none'; _miniXform = null; return; }
+
+  // Content bounds (world space).
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of comps) {
+    const def = compDef(c);
+    if (c.x < minX) minX = c.x;
+    if (c.y < minY) minY = c.y;
+    if (c.x + def.w > maxX) maxX = c.x + def.w;
+    if (c.y + def.h > maxY) maxY = c.y + def.h;
+  }
+
+  // Current viewport (world space).
+  const v0 = screenToWorld(0, 0);
+  const v1 = screenToWorld(cv.width, cv.height);
+
+  // Only show the mini-map when the whole circuit doesn't already fit in the
+  // viewport — i.e. once it has "outgrown the visible canvas".
+  if (minX >= v0.x && minY >= v0.y && maxX <= v1.x && maxY <= v1.y) {
+    minimapCv.style.display = 'none'; _miniXform = null; return;
+  }
+  minimapCv.style.display = 'block';
+
+  // Fit region = union of content and viewport, so both stay visible.
+  const rx0 = Math.min(minX, v0.x), ry0 = Math.min(minY, v0.y);
+  const rx1 = Math.max(maxX, v1.x), ry1 = Math.max(maxY, v1.y);
+  const rw = Math.max(1, rx1 - rx0), rh = Math.max(1, ry1 - ry0);
+  const MW = minimapCv.width, MH = minimapCv.height, PAD = 6;
+  const s = Math.min((MW - 2 * PAD) / rw, (MH - 2 * PAD) / rh);
+  const offX = (MW - rw * s) / 2 - rx0 * s;
+  const offY = (MH - rh * s) / 2 - ry0 * s;
+  const w2m = (wx, wy) => ({ x: offX + wx * s, y: offY + wy * s });
+  _miniXform = { s, offX, offY };
+
+  const m = minimapCtx;
+  m.clearRect(0, 0, MW, MH);
+  // Components — selected ones in accent blue, the rest a muted grey.
+  for (const c of comps) {
+    const def = compDef(c);
+    const p = w2m(c.x, c.y);
+    m.fillStyle = selection.has(c.id) ? '#6ea8ff' : '#7b8696';
+    m.fillRect(p.x, p.y, Math.max(1, def.w * s), Math.max(1, def.h * s));
+  }
+  // Viewport rectangle (amber, matching the floating-input accent).
+  const a = w2m(v0.x, v0.y), b = w2m(v1.x, v1.y);
+  m.strokeStyle = '#e3a55a';
+  m.lineWidth = 1.5;
+  m.strokeRect(a.x + 0.5, a.y + 0.5, b.x - a.x, b.y - a.y);
+}
+
+// Recentre the main view on the world point under the mini-map cursor.
+function miniJump(e) {
+  if (!_miniXform) return;
+  const r = minimapCv.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  // Map client px → buffer px (handles any CSS scaling), then invert the
+  // cached world→minimap transform.
+  const px = (e.clientX - r.left) * (minimapCv.width / r.width);
+  const py = (e.clientY - r.top) * (minimapCv.height / r.height);
+  const wx = (px - _miniXform.offX) / _miniXform.s;
+  const wy = (py - _miniXform.offY) / _miniXform.s;
+  view.tx = cv.width / 2 - wx * view.scale;
+  view.ty = cv.height / 2 - wy * view.scale;
+  draw();
+}
+
+let _miniDragging = false;
+minimapCv.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  _miniDragging = true;
+  e.preventDefault();
+  e.stopPropagation();
+  miniJump(e);
+});
+window.addEventListener('mousemove', (e) => { if (_miniDragging) miniJump(e); });
+window.addEventListener('mouseup', () => { _miniDragging = false; });
 
 function drawGrid() {
   const g = 10;
@@ -834,5 +926,5 @@ const DRAW = {
   MAX: (c) => drawBinaryShape(c, 'MAX'),
 };
 
-  return { draw, drawCustomGate, drawCustomGateMissing, drawSubInstance, drawSubMissing, drawWaves, DRAW };
+  return { draw, drawMinimap, drawCustomGate, drawCustomGateMissing, drawSubInstance, drawSubMissing, drawWaves, DRAW };
 }
