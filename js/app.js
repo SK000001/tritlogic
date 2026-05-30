@@ -1435,15 +1435,19 @@ function updateInspector() {
     html += `<div class="kv"><span>${port} (${isOut ? 'out' : 'in'})</span>
              <b style="color:${tritColor(v)}">${tritLabel(v)}</b></div>`;
   }
-  // Editable state fields, if the type defines an inspector
+  // Editable fields: any type-specific ones (from the type's inspector) plus a
+  // universal propagation-delay field used by the timing-mode simulator (A2),
+  // shown only for components that actually propagate (have an in and an out).
   const tdef = TYPES[c.type];
-  if (tdef && tdef.inspector) {
+  const fields = (tdef && tdef.inspector) ? tdef.inspector(c) : [];
+  const pinKinds = Object.values(def.pins).map(p => p.kind);
+  const propagates = pinKinds.includes('in') && pinKinds.includes('out');
+  if (fields.length || propagates) {
     html += `<div class="inspector-form" id="insp-form"></div>`;
   }
   selInfo.innerHTML = html;
-  if (tdef && tdef.inspector) {
-    const form = document.getElementById('insp-form');
-    const fields = tdef.inspector(c);
+  const form = document.getElementById('insp-form');
+  if (form) {
     for (const f of fields) {
       const labelEl = document.createElement('label');
       labelEl.textContent = f.label;
@@ -1464,6 +1468,22 @@ function updateInspector() {
         inputEl.value = f.get();
         inputEl.addEventListener('change', () => { pushHistory(); f.set(inputEl.value); simulate(); draw(); updateInspector(); });
       }
+      form.appendChild(inputEl);
+    }
+    if (propagates) {
+      const labelEl = document.createElement('label');
+      labelEl.textContent = 'Delay (timing)';
+      labelEl.title = 'Propagation delay in abstract time units for Timing mode (≥1).';
+      form.appendChild(labelEl);
+      const inputEl = document.createElement('input');
+      inputEl.type = 'number'; inputEl.min = '1'; inputEl.step = '1';
+      inputEl.value = String(Number.isInteger(c.state.delay) ? c.state.delay : 1);
+      inputEl.addEventListener('change', () => {
+        const n = Math.max(1, Math.round(parseInt(inputEl.value, 10) || 1));
+        pushHistory();           // also drops out of any active timing playback
+        c.state.delay = n;
+        updateInspector();
+      });
       form.appendChild(inputEl);
     }
   }
@@ -1668,6 +1688,9 @@ function restoreState(snap) {
 }
 
 function pushHistory() {
+  // Any structural edit leaves the timed-propagation playback stale, so drop
+  // out of timing mode first (no-op when it isn't active).
+  exitTimingMode();
   undoStack.push(snapshotState());
   if (undoStack.length > UNDO_LIMIT) undoStack.shift();
   redoStack.length = 0;
@@ -1950,11 +1973,12 @@ window.addEventListener('keyup', (e) => {
 //  TOOLBAR ACTIONS
 // ============================================================================
 
-document.getElementById('btn-step').addEventListener('click', stepSequential);
+document.getElementById('btn-step').addEventListener('click', () => { exitTimingMode(); stepSequential(); });
 
 // Start or stop the 4 Hz auto-step.  Idempotent: a no-op if already in
 // the requested state.  Used by the Play button and by example loading.
 function setAutoPlay(on) {
+  if (on) exitTimingMode();   // stepping the clock leaves a timed trace stale
   const btn = document.getElementById('btn-play');
   if (on && !autoPlay) {
     assignAutoPlay(setInterval(stepSequential, 250));
@@ -1967,6 +1991,7 @@ function setAutoPlay(on) {
 document.getElementById('btn-play').addEventListener('click', () => setAutoPlay(!autoPlay));
 
 document.getElementById('btn-reset').addEventListener('click', () => {
+  exitTimingMode();
   // Reset every flip-flop's stored state and every clock's value; clear waves.
   function resetScope(scope) {
     for (const c of scope.comps) {
@@ -2003,6 +2028,102 @@ document.getElementById('btn-wave-clear').addEventListener('click', () => {
     }
   }
   clr({comps, wires}); drawWaves();
+});
+
+// ============================================================================
+//  TIMING MODE (A2 — watch propagation delays)
+// ============================================================================
+//
+//  A playback view over simulateTimed(). Entering runs a cold-start timed
+//  settle of the current circuit; a slider scrubs a simulation-time cursor and
+//  the canvas recolours each net by its value AT that time, so a wavefront
+//  visibly sweeps through the circuit (e.g. a ripple-carry adder's carry, one
+//  gate-delay per step) and glitching nets flip and flip back as you scrub.
+//  Non-invasive: it temporarily drives `outVals` to the timed snapshot and
+//  restores the live steady state on exit. Give a gate a larger delay via the
+//  inspector's Delay field to create skew (and hazards).
+const timing = { active: false, run: null, t: 0, playTimer: null };
+
+function timingValsAt(t) {
+  // Reconstruct net values at time t from the ascending change log. Cold start
+  // ⇒ a net absent from the log was never driven (null).
+  const v = {};
+  for (const ch of timing.run.changes) {
+    if (ch.t > t) break;
+    v[ch.key] = ch.value;
+  }
+  return v;
+}
+
+function timingFrame() {
+  if (!timing.active) return;
+  setOutVals(timingValsAt(timing.t));
+  const slider = document.getElementById('timing-slider');
+  if (slider) slider.value = String(timing.t);
+  const ro = document.getElementById('timing-readout');
+  if (ro) {
+    const h = timing.run.hazards.length;
+    ro.textContent = `t = ${timing.t} / ${timing.run.settleTime}` +
+      `  ·  ${h} glitch${h === 1 ? '' : 'es'}` +
+      (timing.run.settled ? '' : '  ·  unsettled');
+  }
+  draw();
+}
+
+function timingPlay(on) {
+  const btn = document.getElementById('timing-play');
+  if (on && !timing.playTimer) {
+    if (timing.t >= timing.run.settleTime) timing.t = 0;   // restart from 0 if at the end
+    timing.playTimer = setInterval(() => {
+      if (timing.t >= timing.run.settleTime) { timingPlay(false); return; }
+      timing.t++; timingFrame();
+    }, 140);
+    if (btn) { btn.textContent = '⏸'; btn.classList.add('active'); }
+  } else if (!on && timing.playTimer) {
+    clearInterval(timing.playTimer); timing.playTimer = null;
+    if (btn) { btn.textContent = '▶'; btn.classList.remove('active'); }
+  }
+}
+
+function enterTimingMode() {
+  setAutoPlay(false);
+  simulate();                                    // clean steady-state baseline
+  timing.run = simulateTimed({ comps, wires });
+  timing.active = true;
+  timing.t = timing.run.settleTime;              // start on the fully-settled frame
+  const slider = document.getElementById('timing-slider');
+  if (slider) {
+    slider.min = '0';
+    slider.max = String(Math.max(0, timing.run.settleTime));
+    slider.value = String(timing.t);
+  }
+  document.body.classList.add('timing-open');
+  document.getElementById('btn-timing').classList.add('active');
+  timingFrame();
+  setStatus(`timing mode — settles in ${timing.run.settleTime} delay units, ` +
+            `${timing.run.hazards.length} glitch net(s)`);
+}
+
+function exitTimingMode() {
+  if (!timing.active) return;
+  timingPlay(false);
+  timing.active = false;
+  timing.run = null;
+  document.body.classList.remove('timing-open');
+  document.getElementById('btn-timing').classList.remove('active');
+  simulate(); draw();                            // restore live values
+}
+
+document.getElementById('btn-timing').addEventListener('click', () => {
+  if (timing.active) exitTimingMode(); else enterTimingMode();
+});
+document.getElementById('timing-close').addEventListener('click', exitTimingMode);
+document.getElementById('timing-play').addEventListener('click', () => timingPlay(!timing.playTimer));
+document.getElementById('timing-slider').addEventListener('input', (e) => {
+  if (!timing.active) return;
+  timingPlay(false);
+  timing.t = parseInt(e.target.value, 10) || 0;
+  timingFrame();
 });
 
 document.getElementById('btn-tt').addEventListener('click', openTruthTable);

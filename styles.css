@@ -158,6 +158,22 @@
     box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
   }
 
+  /* Timing-mode control bar (A2). Hidden until body.timing-open; a scrubber +
+     play/pause over the timed-propagation trace. Bottom-centre of the canvas. */
+  #timing-bar {
+    position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+    display: none; align-items: center; gap: 8px; z-index: 20;
+    background: rgba(35, 39, 47, .96); border: 1px solid var(--border-strong);
+    border-radius: 6px; padding: 6px 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .5);
+  }
+  body.timing-open #timing-bar { display: flex; }
+  #timing-bar input[type=range] { width: 260px; accent-color: var(--accent); }
+  #timing-readout {
+    font-size: 11px; color: var(--muted); font-family: monospace;
+    min-width: 168px; white-space: nowrap;
+  }
+
   /* Waveform panel */
   .wave-panel {
     grid-column: 1 / -1;

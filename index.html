@@ -21,6 +21,7 @@
   <button id="btn-asm" title="Assemble a ternary-assembly program into the CPU's IMEM">Assemble</button>
   <button id="btn-debug" title="Open the CPU debugger — step the program, set breakpoints, watch ACC/PC">Debug</button>
   <button id="btn-wave" title="Toggle waveform panel">Wave</button>
+  <button id="btn-timing" title="Timing mode — watch signals propagate with per-gate delays, and spot glitches">Timing</button>
   <button id="btn-tests" title="Run the built-in self-test suite">Tests</button>
   <button id="btn-info" title="Component reference — select a component first to jump to its page">Info</button>
   <button id="btn-crt" title="Toggle retro CRT theme">CRT</button>
@@ -139,6 +140,13 @@
   <div class="status" id="status">ready</div>
   <canvas id="minimap" width="200" height="150"
           title="Mini-map — click or drag to jump to a location"></canvas>
+  <div id="timing-bar">
+    <button class="btn" id="timing-play" title="Play / pause propagation">▶</button>
+    <input type="range" id="timing-slider" min="0" max="0" value="0"
+           title="Scrub simulation time" />
+    <span id="timing-readout">t = 0</span>
+    <button class="btn" id="timing-close" title="Exit timing mode">✕</button>
+  </div>
 </main>
 
 <aside class="inspector">
