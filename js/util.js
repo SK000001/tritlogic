@@ -6,13 +6,51 @@
 //  because it makes arithmetic in component eval() functions natural.
 //  The value `null` represents an undefined / floating wire — propagates
 //  through gates as null.
+//
+//  Two extra signal levels (A3) ride alongside the trits as STRINGS so they
+//  never collide with the numeric -1/0/+1:
+//    'Z' — high-impedance: a tri-state driver that isn't driving the net.
+//    'X' — contention: two or more strong drivers disagree on one net.
+//  Ordinary gates can't compute on 'Z'/'X', so the engine coerces them to
+//  null (undefined) before a non-tri-state component's eval (coerceForLogic).
 
 export const TRIT_COLOR = {
   '-1': '#e35555', '0': '#888c95', '1': '#54c060', undef: '#44485a',
+  Z: '#3fb6c8', X: '#d957c8',
 };
 export const tritColor = (v) => v == null ? TRIT_COLOR.undef : (TRIT_COLOR[String(v)] || TRIT_COLOR.undef);
-export const tritLabel = (v) => v === -1 ? 'T' : v === 0 ? '0' : v === 1 ? '1' : '?';
+export const tritLabel = (v) => v === -1 ? 'T' : v === 0 ? '0' : v === 1 ? '1'
+                              : v === 'Z' ? 'Z' : v === 'X' ? 'X' : '?';
 export const tritClass = (v) => v === -1 ? 'trit-T' : v === 0 ? 'trit-0' : v === 1 ? 'trit-P' : '';
+
+// A "strong" value is an actually-driven trit (−1/0/+1), as opposed to 'Z'
+// (not driving), 'X' (contention), or null (undefined).
+export const isStrong = (v) => v === -1 || v === 0 || v === 1;
+
+// Coerce a resolved net value for a component that doesn't understand
+// tri-state: 'Z' and 'X' become null (undefined) so ordinary gate eval()s,
+// which already treat null as "floating", behave sensibly.
+export const coerceForLogic = (v) => (v === 'Z' || v === 'X') ? null : v;
+
+// Resolve the values several drivers put on one shared net (A3 buses):
+//   • any driver at 'X', or two strong drivers that disagree → 'X' (contention)
+//   • exactly the strong drivers agree (≥1, all equal)        → that trit
+//   • no strong driver, but at least one 'Z'                  → 'Z' (floating bus)
+//   • nothing driving at all (only nulls / empty)             → null
+// null/undefined drivers contribute nothing (a not-yet-settled source).
+export function resolveDrivers(vals) {
+  let strong = null, conflict = false, sawZ = false;
+  for (const v of vals) {
+    if (v === 'X') return 'X';
+    if (v === 'Z') { sawZ = true; continue; }
+    if (v == null) continue;
+    if (strong === null) strong = v;
+    else if (strong !== v) conflict = true;
+  }
+  if (conflict) return 'X';
+  if (strong !== null) return strong;
+  return sawZ ? 'Z' : null;
+}
 
 // File format version for save/load.  Increment when the JSON shape
 // changes incompatibly so the loader can either upgrade or warn.

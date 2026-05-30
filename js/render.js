@@ -539,6 +539,23 @@ function drawMUX(c) {
   ctx.textAlign = 'right';
   ctx.fillText('OUT', t.w-4, 50);
 }
+function drawTriBuf(c) {
+  const t = TYPES.TRIBUF;
+  // Buffer triangle pointing toward the output.
+  ctx.beginPath();
+  ctx.moveTo(10, 5);
+  ctx.lineTo(t.w - 12, t.h / 2);
+  ctx.lineTo(10, t.h - 5);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#8a92a1'; ctx.font = '8px monospace';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText('in', 3, 14);
+  ctx.fillText('en', 3, 32);
+  ctx.textAlign = 'right';
+  ctx.fillText('out', t.w - 2, 22);
+}
 function drawPC(c) {
   const t = TYPES.PC;
   ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
@@ -912,6 +929,7 @@ const DRAW = {
   WAVE:     drawWave,
   ADDER:    drawAdder,
   MUX:      drawMUX,
+  TRIBUF:   drawTriBuf,
   DFF:      drawDFF,
   REG3:     drawReg,
   RAM:      drawRAM,

@@ -10,7 +10,8 @@
 //  preserve live-binding semantics for state's mutable globals.
 
 import { intToTrits, tritsToInt, parseTryteString,
-         SAVE_FORMAT_VERSION, upgradeSave } from './util.js';
+         SAVE_FORMAT_VERSION, upgradeSave,
+         resolveDrivers, coerceForLogic } from './util.js';
 import {
   comps, wires, subcircuitDefs, customGates, outVals,
   nextCompId, nextWireId, tick, undoStack, redoStack,
@@ -554,6 +555,99 @@ test('A2 detects a static-1 hazard from skewed reconvergent delays', () => {
   assertEq(r.finalVals['3:out'], 1, 'final MAX = |−1|:');
   assertEq(r.hazards.some(h => h.key === '3:out'), true, 'MAX output flagged as hazard:');
   assertEq(r.changes.filter(ch => ch.key === '3:out').length, 2, 'MAX glitched (two changes):');
+});
+
+// ---- A3 high-impedance (Z) + tri-state buses ----
+test('A3 resolveDrivers: tri-state bus resolution table', () => {
+  assertEq(resolveDrivers([]), null, 'no drivers:');
+  assertEq(resolveDrivers([null, null]), null, 'all undefined:');
+  assertEq(resolveDrivers(['Z']), 'Z', 'single Z:');
+  assertEq(resolveDrivers(['Z', 'Z']), 'Z', 'all Z floats:');
+  assertEq(resolveDrivers(['Z', 1]), 1, 'one strong over Z:');
+  assertEq(resolveDrivers([1]), 1, 'single strong:');
+  assertEq(resolveDrivers([0, 'Z', null]), 0, 'strong 0 wins over Z/null:');
+  assertEq(resolveDrivers([1, 1]), 1, 'agreeing strong:');
+  assertEq(resolveDrivers([1, 'Z', 1]), 1, 'agree with a Z present:');
+  assertEq(resolveDrivers([1, -1]), 'X', 'disagreeing strong = X:');
+  assertEq(resolveDrivers([-1, 0]), 'X', 'disagreeing strong (−1 vs 0) = X:');
+  assertEq(resolveDrivers(['X', 1]), 'X', 'X propagates:');
+});
+
+test('A3 coerceForLogic maps Z/X to null, passes trits through', () => {
+  assertEq(coerceForLogic('Z'), null, 'Z→null:');
+  assertEq(coerceForLogic('X'), null, 'X→null:');
+  assertEq(coerceForLogic(1), 1, '1→1:');
+  assertEq(coerceForLogic(0), 0, '0→0:');
+  assertEq(coerceForLogic(-1), -1, '−1→−1:');
+  assertEq(coerceForLogic(null), null, 'null→null:');
+});
+
+test('A3 TRIBUF drives when enabled, high-Z when disabled', () => {
+  const def = TYPES.TRIBUF;
+  assertEq(def.eval(null, { in: 1, en: 1 }).out, 1, 'enabled drives in:');
+  assertEq(def.eval(null, { in: -1, en: 1 }).out, -1, 'enabled drives −1:');
+  assertEq(def.eval(null, { in: 1, en: 0 }).out, 'Z', 'en=0 → Z:');
+  assertEq(def.eval(null, { in: 1, en: -1 }).out, 'Z', 'en=−1 → Z:');
+  assertEq(def.eval(null, { in: 1, en: null }).out, 'Z', 'en undefined → Z:');
+  assertEq(def.eval(null, { in: null, en: 1 }).out, null, 'enabled but in floating → null:');
+});
+
+test('A3 tri-state bus: two TRIBUFs onto one net resolve through the engine', () => {
+  // da/db → TRIBUF a/b (enabled by ena/enb); both outputs feed one inverter
+  // input (the shared bus). The inverter is non-tri-state, so it sees the
+  // resolved bus coerced to a trit/null.
+  const comps = [
+    { id: 1, type: 'INPUT',  x: 0, y: 0, state: { value: 1,  name: 'da' } },
+    { id: 2, type: 'INPUT',  x: 0, y: 0, state: { value: -1, name: 'db' } },
+    { id: 3, type: 'INPUT',  x: 0, y: 0, state: { value: 0,  name: 'ena' } },
+    { id: 4, type: 'INPUT',  x: 0, y: 0, state: { value: 0,  name: 'enb' } },
+    { id: 5, type: 'TRIBUF', x: 0, y: 0, state: {} },
+    { id: 6, type: 'TRIBUF', x: 0, y: 0, state: {} },
+    { id: 7, type: 'STI',    x: 0, y: 0, state: {} },
+  ];
+  const wires = [
+    { id: 1, fromId: 1, fromPort: 'out', toId: 5, toPort: 'in' },
+    { id: 2, fromId: 3, fromPort: 'out', toId: 5, toPort: 'en' },
+    { id: 3, fromId: 2, fromPort: 'out', toId: 6, toPort: 'in' },
+    { id: 4, fromId: 4, fromPort: 'out', toId: 6, toPort: 'en' },
+    { id: 5, fromId: 5, fromPort: 'out', toId: 7, toPort: 'in' },   // bus driver A
+    { id: 6, fromId: 6, fromPort: 'out', toId: 7, toPort: 'in' },   // bus driver B
+  ];
+  const da = comps[0], db = comps[1], ena = comps[2], enb = comps[3];
+  const run = () => { const s = { comps, wires, outVals: {} }; simulateScope(s); return s; };
+  const bus = (s) => resolveDrivers([s.outVals['5:out'], s.outVals['6:out']]);
+
+  // Neither enabled → both Z → bus floats → inverter sees undefined.
+  ena.state.value = 0; enb.state.value = 0;
+  let s = run();
+  assertEq(s.outVals['5:out'], 'Z', 'disabled buffer A drives Z:');
+  assertEq(bus(s), 'Z', 'floating bus = Z:');
+  assertEq(s.outVals['7:out'], null, 'inverter sees Z as undefined:');
+
+  // Only A enabled (da=1) → bus 1 → inverter −1.
+  ena.state.value = 1; enb.state.value = 0; da.state.value = 1;
+  s = run();
+  assertEq(s.outVals['5:out'], 1, 'enabled buffer A drives its input:');
+  assertEq(bus(s), 1, 'bus selects A:');
+  assertEq(s.outVals['7:out'], -1, 'inverter of bus=1 is −1:');
+
+  // Only B enabled (db=−1) → bus −1 → inverter 1.
+  ena.state.value = 0; enb.state.value = 1; db.state.value = -1;
+  s = run();
+  assertEq(bus(s), -1, 'bus selects B:');
+  assertEq(s.outVals['7:out'], 1, 'inverter of bus=−1 is 1:');
+
+  // Both enabled, disagreeing (1 vs −1) → contention X → inverter undefined.
+  ena.state.value = 1; enb.state.value = 1; da.state.value = 1; db.state.value = -1;
+  s = run();
+  assertEq(bus(s), 'X', 'two disagreeing drivers = X:');
+  assertEq(s.outVals['7:out'], null, 'inverter sees X as undefined:');
+
+  // Both enabled, agreeing (1 and 1) → bus 1.
+  da.state.value = 1; db.state.value = 1;
+  s = run();
+  assertEq(bus(s), 1, 'two agreeing drivers = that value:');
+  assertEq(s.outVals['7:out'], -1, 'inverter of agreed bus=1 is −1:');
 });
 
 test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () => {

@@ -19,7 +19,7 @@ import {
   comps, wires, outVals, subcircuitDefs, tick, _subDepth,
   setOutVals, setTick, setSubDepth,
 } from './state.js';
-import { deepClone } from './util.js';
+import { deepClone, resolveDrivers, coerceForLogic } from './util.js';
 
 export function createEngine(deps) {
   // TYPES + compDef are read once; draw / drawWaves / refreshDebugger are
@@ -39,10 +39,21 @@ export function createEngine(deps) {
 //  ("step") is the sequential edge-triggered update, executed only when the
 //  user clicks Step or auto-play fires.  After Phase B we re-run Phase A.
 
+// The resolved value on a component's input net: gather every driver wired to
+// (compId, portName) and resolve them with tri-state rules (A3). Returns the
+// raw resolved value, which may be 'Z' (floating) or 'X' (contention) — display
+// and probes want that; logic consumers coerce it via coerceForLogic.
 function inputValueFromWires(scope, compId, portName) {
-  const w = scope.wires.find(w => w.toId === compId && w.toPort === portName);
-  if (!w) return null;
-  return scope.outVals[`${w.fromId}:${w.fromPort}`] ?? null;
+  let srcs = null;
+  for (const w of scope.wires) {
+    if (w.toId === compId && w.toPort === portName) {
+      const v = scope.outVals[`${w.fromId}:${w.fromPort}`] ?? null;
+      if (!srcs) srcs = [v];
+      else srcs.push(v);
+    }
+  }
+  if (!srcs) return null;
+  return srcs.length === 1 ? srcs[0] : resolveDrivers(srcs);
 }
 
 const DEFAULT_DELAY = 1;
@@ -60,18 +71,20 @@ function delayOf(c) {
 }
 
 // Wiring indices shared by both solvers, built once per call:
-//   destOf:  "toId:toPort"     -> "fromId:fromPort"  (fast input gather)
-//   fanout:  "fromId:fromPort" -> [toId, ...]          (consumers to wake)
+//   destOf:  "toId:toPort"     -> [ "fromId:fromPort", ... ]  (all drivers of
+//            an input net; usually one, but a tri-state bus has several — A3)
+//   fanout:  "fromId:fromPort" -> [toId, ...]                  (consumers to wake)
 //   byId:    compId            -> component
 function buildIndices(scope) {
   const destOf = new Map();
   const fanout = new Map();
   for (const w of scope.wires) {
-    destOf.set(`${w.toId}:${w.toPort}`, `${w.fromId}:${w.fromPort}`);
+    const dk = `${w.toId}:${w.toPort}`;
     const fk = `${w.fromId}:${w.fromPort}`;
-    const arr = fanout.get(fk);
-    if (arr) arr.push(w.toId);
-    else fanout.set(fk, [w.toId]);
+    const da = destOf.get(dk);
+    if (da) da.push(fk); else destOf.set(dk, [fk]);
+    const fa = fanout.get(fk);
+    if (fa) fa.push(w.toId); else fanout.set(fk, [w.toId]);
   }
   const byId = new Map();
   for (const c of scope.comps) byId.set(c.id, c);
@@ -79,13 +92,19 @@ function buildIndices(scope) {
 }
 
 // Gather a component's input-port values from a net-value map (keyed by
-// "fromId:fromPort") via the destOf index. Undriven inputs read null.
+// "fromId:fromPort") via the destOf index. Each input net resolves its
+// driver(s) with tri-state rules (A3); the result is then coerced to a plain
+// trit/null for ordinary components — only tri-state-aware ones (def.tristate,
+// e.g. TRIBUF) receive raw 'Z'/'X'.
 function gatherInputs(def, id, destOf, vals) {
   const vIn = {};
   for (const port in def.pins) {
     if (def.pins[port].kind === 'in') {
-      const fk = destOf.get(`${id}:${port}`);
-      vIn[port] = fk ? (vals[fk] ?? null) : null;
+      const srcs = destOf.get(`${id}:${port}`);
+      let v = null;
+      if (srcs) v = srcs.length === 1 ? (vals[srcs[0]] ?? null)
+                                      : resolveDrivers(srcs.map(k => vals[k] ?? null));
+      vIn[port] = def.tristate ? v : coerceForLogic(v);
     }
   }
   return vIn;
@@ -350,7 +369,9 @@ function stepSequential() {
           const vIn = {};
           for (const port in def.pins) {
             if (def.pins[port].kind === 'in') {
-              vIn[port] = inputValueFromWires(scope, c.id, port);
+              // Flip-flops aren't tri-state-aware: a Z/X data line samples as
+              // undefined (null), not a literal 'Z'/'X'.
+              vIn[port] = coerceForLogic(inputValueFromWires(scope, c.id, port));
             }
           }
           def.latch(c, vIn);

@@ -195,6 +195,25 @@ function makeBinary(label, fn) {
 TYPES.MIN = makeBinary('MIN', (a, b) => Math.min(a, b));
 TYPES.MAX = makeBinary('MAX', (a, b) => Math.max(a, b));
 
+// ---- Tri-state buffer (A3) ------------------------------------------------
+// Drives `in` onto its output when enabled (en === +1); otherwise the output
+// is high-impedance 'Z'. `tristate: true` makes the engine hand it the raw
+// resolved input (so it can see and pass a 'Z' through), instead of coercing
+// Z/X to null the way ordinary gates get. Wire several TRIBUF outputs onto one
+// input pin to build a tri-state bus: enable exactly one to select its value;
+// enable none ⇒ the net floats (Z); enable two that disagree ⇒ contention (X).
+TYPES.TRIBUF = {
+  w: 64, h: 44,
+  pins: {
+    in:  { side: 'left',  dx: 0,  dy: 14, kind: 'in' },
+    en:  { side: 'left',  dx: 0,  dy: 32, kind: 'in' },
+    out: { side: 'right', dx: 64, dy: 22, kind: 'out' },
+  },
+  defaults: () => ({}),
+  tristate: true,
+  eval: (_, v) => ({ out: v.en === 1 ? (v.in == null ? null : v.in) : 'Z' }),
+};
+
 // ---- Full-trit adder ------------------------------------------------------
 const ADDER_TABLE = {
   '-3': { sum:  0, cout: -1 },
@@ -1916,9 +1935,14 @@ function addWire(fromId, fromPort, toId, toPort) {
   const fdef = compDef(fc), tdef = compDef(tc);
   if (!fdef.pins[fromPort] || fdef.pins[fromPort].kind !== 'out') return;
   if (!tdef.pins[toPort] || tdef.pins[toPort].kind !== 'in') return;
+  // Multiple drivers per input net are allowed now (tri-state buses — A3); the
+  // engine resolves them. Only reject an exact-duplicate wire (same source and
+  // dest), which would be redundant.
+  if (wires.some(w => w.fromId === fromId && w.fromPort === fromPort &&
+                      w.toId === toId && w.toPort === toPort)) {
+    setStatus('wire already exists'); return;
+  }
   pushHistory();
-  // Replace any existing wire driving the same input.
-  setWires(wires.filter(w => !(w.toId === toId && w.toPort === toPort)));
   wires.push({ id: setNextWireId(nextWireId + 1), fromId, fromPort, toId, toPort });
   invalidatePathCache();
   simulate(); draw();
