@@ -213,6 +213,17 @@
   .modal .sweep-list label { display: block; font-size: 12px; padding: 2px 0; cursor: pointer; }
 
   /* Component reference / encyclopedia */
+  .info-tabs {
+    display: flex; gap: 2px; margin: 4px 0 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .info-tab {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--muted); padding: 6px 14px; cursor: pointer;
+    font-size: 13px; font-family: inherit; margin-bottom: -1px;
+  }
+  .info-tab:hover { color: var(--text); }
+  .info-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
   .info-layout { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }
   .info-list {
     background: var(--panel-2); border: 1px solid var(--border);
@@ -246,6 +257,13 @@
     background: var(--panel-2); border: 1px solid var(--border);
     border-radius: 3px; padding: 0 4px; font-size: 12px;
   }
+  .info-diagram {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 5px; padding: 10px 12px; margin: 10px 0;
+    font-family: monospace; font-size: 12px; line-height: 1.35;
+    color: var(--text); overflow-x: auto; white-space: pre;
+  }
+  .info-load-btn { margin: 4px 0 10px; }
   .info-tt { border-collapse: collapse; margin: 4px 0; font-family: monospace; }
   .info-tt th, .info-tt td {
     border: 1px solid var(--border); padding: 2px 10px; font-size: 12px; text-align: center;

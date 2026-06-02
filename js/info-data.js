@@ -42,6 +42,9 @@ export const COMPONENT_INFO = {
       Pick an entry on the left to read how it works. If you select a
       component on the canvas <em>before</em> pressing <b>Info</b>, this
       window opens straight to that component's page.</p>
+      <p>Looking for the preset circuits instead? The
+      <b>Example walkthroughs</b> tab above explains each Load-Example preset
+      step by step, with diagrams, and can load any of them in one click.</p>
       <h4>Balanced ternary in 30 seconds</h4>
       <p>Every wire carries one <em>trit</em> instead of a bit. A trit has
       three values:</p>

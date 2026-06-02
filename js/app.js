@@ -13,6 +13,9 @@ import {
   INFO_GATE_TYPES, INFO_CATEGORIES, COMPONENT_INFO
 } from './info-data.js';
 import {
+  EXAMPLE_INFO_CATEGORIES, EXAMPLE_INFO
+} from './example-info.js';
+import {
   ASM_OPCODES, ASM_PROGRAM_WORDS, assemble, decodeImemWord,
   ASM2_OPCODES, ASM2_IMM_RANGE, ASM2_ADDR_RANGE, assembleV2, decodeImemWordV2,
   ASM_EXAMPLES, ASM2_EXAMPLES
@@ -2347,6 +2350,10 @@ function infoSubTruthTable(typeName) {
   return html + '</tbody></table>';
 }
 
+// The Info modal has two tabs: 'components' (the per-block reference, driven by
+// COMPONENT_INFO) and 'examples' (preset walkthroughs, driven by EXAMPLE_INFO).
+let infoTab = 'components';
+
 function renderInfoList(activeKey) {
   let html = '';
   for (const [cat, keys] of INFO_CATEGORIES) {
@@ -2363,6 +2370,55 @@ function renderInfoList(activeKey) {
   list.querySelectorAll('.info-entry').forEach(el => {
     el.addEventListener('click', () => showInfoEntry(el.dataset.key));
   });
+}
+
+function renderExampleList(activeKey) {
+  let html = '';
+  for (const [cat, keys] of EXAMPLE_INFO_CATEGORIES) {
+    html += `<div class="cat">${cat}</div>`;
+    for (const k of keys) {
+      const e = EXAMPLE_INFO[k];
+      if (!e) continue;
+      html += `<div class="info-entry${k === activeKey ? ' active' : ''}" ` +
+              `data-key="${k}">${escapeHtml(e.name)}</div>`;
+    }
+  }
+  const list = document.getElementById('info-list');
+  list.innerHTML = html;
+  list.querySelectorAll('.info-entry').forEach(el => {
+    el.addEventListener('click', () => showExampleEntry(el.dataset.key));
+  });
+}
+
+function showExampleEntry(key) {
+  const e = EXAMPLE_INFO[key];
+  if (!e) return;
+  renderExampleList(key);
+  let html = `<h3>${escapeHtml(e.name)}</h3>` +
+             `<p class="tagline">${escapeHtml(e.tagline)}</p>`;
+  // Real presets get a one-click loader; the synthetic intro page does not.
+  if (EXAMPLES[key]) {
+    html += `<button class="btn info-load-btn" data-ex="${key}">▶ Load this example</button>`;
+  }
+  html += e.body;
+  const detail = document.getElementById('info-detail');
+  detail.innerHTML = html;
+  const loadBtn = detail.querySelector('.info-load-btn');
+  if (loadBtn) {
+    loadBtn.addEventListener('click', () => {
+      closeModal('info-modal');
+      loadExampleNamed(loadBtn.dataset.ex);
+    });
+  }
+  detail.scrollTop = 0;
+}
+
+function setInfoTab(tab) {
+  infoTab = tab;
+  document.getElementById('info-tab-components').classList.toggle('active', tab === 'components');
+  document.getElementById('info-tab-examples').classList.toggle('active', tab === 'examples');
+  if (tab === 'examples') showExampleEntry('_exintro');
+  else showInfoEntry('_intro');
 }
 
 function showInfoEntry(key) {
@@ -2393,7 +2449,11 @@ function showInfoEntry(key) {
 }
 
 function openInfoModal() {
-  // If a component is selected, open straight to its reference page.
+  // The Info button always opens on the Components tab. If a component is
+  // selected, jump straight to its reference page.
+  infoTab = 'components';
+  document.getElementById('info-tab-components').classList.add('active');
+  document.getElementById('info-tab-examples').classList.remove('active');
   let key = '_intro';
   const firstId = selection.values().next().value;
   if (firstId != null) {
@@ -2409,6 +2469,8 @@ function openInfoModal() {
 }
 document.getElementById('btn-info').addEventListener('click', openInfoModal);
 document.getElementById('info-close').addEventListener('click', () => closeModal('info-modal'));
+document.getElementById('info-tab-components').addEventListener('click', () => setInfoTab('components'));
+document.getElementById('info-tab-examples').addEventListener('click', () => setInfoTab('examples'));
 
 // ---- assembler modal ------------------------------------------------------
 function openAsmModal() {
