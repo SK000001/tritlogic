@@ -3918,6 +3918,97 @@ function buildMpcseqDef() {
   };
 }
 
+//  CMPCSEQ — conditional macro-PC sequencer (Microcode Kit, "full CPU3" — see
+//  MICROCODE.md). MPCSEQ's richer sibling: it adds branch CONDITIONS so a
+//  microcoded CPU can do JMPP/JMPZ. The 1-trit `pcCtl` field still selects
+//  ADV / HOLD / conditional-jump:
+//    pcCtl = 0  (ADV)   → jmp=0             : macro-PC increments
+//    pcCtl = +1 (HOLD)  → jmp=+1, j=(p0,p1) : macro-PC reloads itself (holds)
+//    pcCtl = T  (CJUMP) → jump to (t0,t1) IFF the condition holds, else inc
+//  The condition comes from three {0,+1} flags supplied per-opcode by the
+//  dispatch table (cAlways / cPos / cZero) AND the ACC sign flags isPos/isZero:
+//    condMet = MAX(cAlways, MIN(cPos, isPos), MIN(cZero, isZero))
+//  So one shared jump microroutine handles JMP (cAlways), JMPP (cPos), and
+//  JMPZ (cZero) — which routine constant fires is set by the dispatch ROM.
+//  Built from MIN/MAX + one NTI + two MUXes (no detector gates — the flags are
+//  already in the {0,+1} domain).
+function buildCmpcseqDef() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [];
+    const wires = [];
+    comps.push(c('pcCtl',   'INPUT', 40,  40,  { value: 0, name: 'pcCtl' }));
+    comps.push(c('p0',      'INPUT', 40,  90,  { value: 0, name: 'p0' }));
+    comps.push(c('p1',      'INPUT', 40,  140, { value: 0, name: 'p1' }));
+    comps.push(c('t0',      'INPUT', 40,  190, { value: 0, name: 't0' }));
+    comps.push(c('t1',      'INPUT', 40,  240, { value: 0, name: 't1' }));
+    comps.push(c('isPos',   'INPUT', 40,  290, { value: 0, name: 'isPos' }));
+    comps.push(c('isZero',  'INPUT', 40,  340, { value: 0, name: 'isZero' }));
+    comps.push(c('cAlways', 'INPUT', 40,  390, { value: 0, name: 'cAlways' }));
+    comps.push(c('cPos',    'INPUT', 40,  440, { value: 0, name: 'cPos' }));
+    comps.push(c('cZero',   'INPUT', 40,  490, { value: 0, name: 'cZero' }));
+    comps.push(c('z', 'CONST', 40, 540, { value: 0 }));
+
+    // isHold = MAX(pcCtl, 0)  — +1 only when pcCtl = HOLD(+1).
+    comps.push(c('isHold', 'MAX', 220, 60));
+    wires.push(w('pcCtl', 'out', 'isHold', 'a'));
+    wires.push(w('z', 'out', 'isHold', 'b'));
+    // isCjump = MAX(NTI(pcCtl), 0)  — +1 only when pcCtl = CJUMP(T).
+    comps.push(c('ntiPc', 'NTI', 220, 140));
+    wires.push(w('pcCtl', 'out', 'ntiPc', 'in'));
+    comps.push(c('isCjump', 'MAX', 360, 140));
+    wires.push(w('ntiPc', 'out', 'isCjump', 'a'));
+    wires.push(w('z', 'out', 'isCjump', 'b'));
+    // condMet = MAX(cAlways, MIN(cPos,isPos), MIN(cZero,isZero)).
+    comps.push(c('posTerm', 'MIN', 220, 300));
+    wires.push(w('cPos', 'out', 'posTerm', 'a'));
+    wires.push(w('isPos', 'out', 'posTerm', 'b'));
+    comps.push(c('zeroTerm', 'MIN', 220, 360));
+    wires.push(w('cZero', 'out', 'zeroTerm', 'a'));
+    wires.push(w('isZero', 'out', 'zeroTerm', 'b'));
+    comps.push(c('cm1', 'MAX', 380, 330));
+    wires.push(w('cAlways', 'out', 'cm1', 'a'));
+    wires.push(w('posTerm', 'out', 'cm1', 'b'));
+    comps.push(c('condMet', 'MAX', 520, 350));
+    wires.push(w('cm1', 'out', 'condMet', 'a'));
+    wires.push(w('zeroTerm', 'out', 'condMet', 'b'));
+    // doJump = MIN(isCjump, condMet);  jmp = MAX(isHold, doJump).
+    comps.push(c('doJump', 'MIN', 520, 220));
+    wires.push(w('isCjump', 'out', 'doJump', 'a'));
+    wires.push(w('condMet', 'out', 'doJump', 'b'));
+    comps.push(c('jmpG', 'MAX', 680, 120));
+    wires.push(w('isHold', 'out', 'jmpG', 'a'));
+    wires.push(w('doJump', 'out', 'jmpG', 'b'));
+    // j = HOLD ? self(p) : target(t).  MUX select = isHold ∈ {0,+1}.
+    comps.push(c('mxJ0', 'MUX', 680, 220));
+    wires.push(w('isHold', 'out', 'mxJ0', 's'));
+    wires.push(w('t0', 'out', 'mxJ0', 'dT'));
+    wires.push(w('t0', 'out', 'mxJ0', 'd0'));
+    wires.push(w('p0', 'out', 'mxJ0', 'dP'));
+    comps.push(c('mxJ1', 'MUX', 680, 320));
+    wires.push(w('isHold', 'out', 'mxJ1', 's'));
+    wires.push(w('t1', 'out', 'mxJ1', 'dT'));
+    wires.push(w('t1', 'out', 'mxJ1', 'd0'));
+    wires.push(w('p1', 'out', 'mxJ1', 'dP'));
+
+    comps.push(c('out_jmp', 'OUTPUT', 860, 130, { name: 'jmp' }));
+    comps.push(c('out_j0',  'OUTPUT', 860, 230, { name: 'j0' }));
+    comps.push(c('out_j1',  'OUTPUT', 860, 330, { name: 'j1' }));
+    wires.push(w('jmpG', 'out', 'out_jmp', 'in'));
+    wires.push(w('mxJ0', 'out', 'out_j0', 'in'));
+    wires.push(w('mxJ1', 'out', 'out_j1', 'in'));
+    return { comps, wires };
+  });
+  return {
+    inputs:  [{ name: 'pcCtl' }, { name: 'p0' }, { name: 'p1' },
+              { name: 't0' }, { name: 't1' }, { name: 'isPos' }, { name: 'isZero' },
+              { name: 'cAlways' }, { name: 'cPos' }, { name: 'cZero' }],
+    outputs: [{ name: 'jmp' }, { name: 'j0' }, { name: 'j1' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
 // ============================================================================
 //  SEQUENTIAL KIT — gate-level structural twins of the stateful primitives
 // ============================================================================
@@ -4271,6 +4362,7 @@ const BUILTIN_SUBCIRCUITS = {
   MSEQ:     { kit: 'Microcode Kit',  build: buildMseqDef },
   UFIELDS:  { kit: 'Microcode Kit',  build: buildUfieldsDef },
   MPCSEQ:   { kit: 'Microcode Kit',  build: buildMpcseqDef },
+  CMPCSEQ:  { kit: 'Microcode Kit',  build: buildCmpcseqDef },
 };
 // Kit headings, in library-panel order.
 const BUILTIN_SUBCIRCUIT_KITS = [
@@ -4278,7 +4370,7 @@ const BUILTIN_SUBCIRCUIT_KITS = [
   { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3', 'MUX3'] },
   { label: 'Sequential Kit', names: ['TLATCH', 'TFLOP', 'TREG3', 'TPC', 'TRAM'] },
   { label: 'Control Kit',    names: ['DECODE2', 'ACC_SIGN'] },
-  { label: 'Microcode Kit',  names: ['MSEQ', 'UFIELDS', 'MPCSEQ'] },
+  { label: 'Microcode Kit',  names: ['MSEQ', 'UFIELDS', 'MPCSEQ', 'CMPCSEQ'] },
 ];
 // Seed the built-ins into the library. Called at boot and re-called after a
 // load; the `if absent` guard means a loaded file's own same-named
@@ -4293,7 +4385,7 @@ const EXAMPLES = createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
   buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef, buildUfieldsDef,
-  buildMpcseqDef,
+  buildMpcseqDef, buildCmpcseqDef,
   subcircuitDefs,
 });
 
@@ -4345,7 +4437,7 @@ function loadExample() { loadExampleNamed('t-flop'); }
 
 const { TESTS, runAllTests } = registerTests({
   TYPES, EXAMPLES,
-  buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
+  buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef, buildCmpcseqDef, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
   debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
   findMicrocodeTargets,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,

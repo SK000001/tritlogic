@@ -1,6 +1,9 @@
 # MICROCODE.md — design doc for E3 (microcoded CPU3)
 
-> **Status (2026-06-03):** design + **all 5 phases shipped** — Phase 1 the
+> **Status (2026-06-03):** design + **all 5 phases shipped + FULL CPU3** —
+> the complete 9-op microcoded CPU3 (`cpu3-full`) now runs, including the
+> conditional jumps JMPP/JMPZ, with both control tables in E5 ROMs. See the
+> *Full CPU3* section below. Older status: Phase 1 the
 > `MSEQ` microsequencer + `microcode-seq` demo; Phase 2 the `UFIELDS`
 > field decoder + a two-bank control store (`microcode-fields` demo);
 > Phase 3 the dispatch map + the fetch/dispatch/return loop
@@ -220,6 +223,48 @@ budget is already full. They're the natural Phase 5 / deeper-ROM work.
 The default program is CPU2's counter (`ADDI +1` / `JMP 0`); ACC climbs
 0,1,2,3,… identically, just at 2 clocks/instruction (dispatch + execute).
 Tests: the counter ACC progression + a STORE/LOAD round-trip through DMEM.
+
+### Full CPU3 — all 9 ops incl. conditional jumps (`cpu3-full`) — **DONE**
+
+Phase 4's `cpu3` left two ops out (JMPP/JMPZ) because the µword budget was
+full and a conditional branch seemed to need a conditional sequencer + a
+wider/deeper store. The full version (`cpu3-full`) lands all 9 — and, pleasingly,
+**without** a 3-trit µPC or a deeper store. Two ideas do it:
+
+**1. The dispatch ROM becomes a wide table.** It is an **E5 `ROM`** (9 words ×
+6 trits) addressed by the opcode; each entry carries not just the routine entry
+µaddr (q0,q1) but also that op's **ALU mode** (q2) and three **branch-condition
+flags** (q3 = cAlways, q4 = cPos, q5 = cZero). So the three arithmetic ops
+**share one microroutine** (the ALU op comes from the table, not the µword) and
+the three jumps **share one routine** (the condition comes from the table). The
+microprogram collapses to **6 µwords** — µ0 dispatch · µ1 arith · µ2 jump · µ3
+load · µ4 store · µ5 nop — comfortably inside a 2-trit µPC's 9 words. Both the
+dispatch table and the control store are single 6-trit ROMs (no parallel-RAM
+banks, no constant-0 write tie-offs) — the E5 ROM finally earning its keep.
+
+**2. `CMPCSEQ` resolves the conditional jump.** MPCSEQ's richer sibling
+(Microcode Kit): on `pcCtl = CJUMP` it jumps to the operand iff
+`condMet = MAX(cAlways, cPos∧isPos, cZero∧isZero)`, where isPos/isZero come from
+`ACC_SIGN`. So the *one* shared jump routine becomes JMP / JMPP / JMPZ purely by
+which condition flag the dispatch table set. `pcCtl` stays a single trit
+(ADV / HOLD / CJUMP); the condition lives in the table, not in extra µword bits.
+
+`UFIELDS` is reused unchanged for the control-store decode (its `aluOp` output
+is simply ignored, since the ALU op now comes from the dispatch table). The
+control word maps to UFIELDS's input order
+`[m_seq, –, m_accW, m_accSrc, m_mem, m_pc]`.
+
+Verified by running real assembled programs on **both** `cpu3-full` and `cpu2`
+and comparing the final ACC: a JMPZ-taken program (ACC returns to 0) and a
+JMPP-not-taken program (the guarded `ADDI` runs) agree exactly — CPU2's
+known-good conditional jumps are the oracle. Plus a JMPP-counter default that
+climbs 0,1,2,3 via a (always-taken) conditional branch.
+
+**Why this matters:** CPU3 is now a *complete* soft-control processor — every
+v2 instruction is a microroutine, and adding/altering an op is editing two ROM
+tables, not rewiring gates. The earlier worry (3-trit µPC + deeper ROM) was
+sidestepped by making the dispatch map a richer table; that path is still the
+move if a future ISA needs genuinely longer routines (a microcoded multiply).
 
 ---
 

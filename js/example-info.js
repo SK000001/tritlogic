@@ -21,7 +21,7 @@ export const EXAMPLE_INFO_CATEGORIES = [
   ['Routing & memory',   ['mux-demo', 'd-storage', 't-flop', 'ram-store', 'rom-lookup', 'pc-demo', 'tryte-io']],
   ['Buses',              ['tristate-bus', 'regfile-bus', 'word-bus', 'regfile-wordbus', 'tryte-bus', 'bus-datapath']],
   ['CPU',                ['cpu', 'cpu-structural', 'cpu2']],
-  ['Microcode',          ['microcode-seq', 'microcode-fields', 'microcode-dispatch', 'cpu3']],
+  ['Microcode',          ['microcode-seq', 'microcode-fields', 'microcode-dispatch', 'cpu3', 'cpu3-full']],
   ['Neural net',         ['ternary-mac', 'ternary-layer', 'ternary-mlp']],
 ];
 
@@ -835,6 +835,52 @@ export const EXAMPLE_INFO = {
       clocks</b> (dispatch, then execute), so it counts at half the wall-clock
       rate. That slowdown <em>is</em> microcode — the control unit is a little
       program now, not a slab of gates.</p>`,
+  },
+
+  'cpu3-full': {
+    name: 'CPU3-full — the complete microcoded CPU',
+    tagline: 'All 9 ops including conditional jumps, both control tables in ROM',
+    body: `
+      <p>The finished microcoded processor: <b>all nine</b> v2 operations,
+      including the conditional jumps <b>JMPP</b> (jump if ACC &gt; 0) and
+      <b>JMPZ</b> (jump if ACC = 0) that the first <em>CPU3</em> left out. Same
+      datapath as CPU2/CPU3, but the control unit is entirely <em>soft</em> — two
+      ROM tables.</p>
+      <pre class="info-diagram">
+   opcode ─▶┌──────────────┐ entry µaddr ─▶ MSEQ ─▶ µPC ─▶┌─────────┐
+            │ dispatch ROM │ aluOp ──────────────────────▶│ control │
+            │  (a TABLE)   │ cAlways/cPos/cZero ─┐         │  store  │
+            └──────────────┘                     │         │  (ROM)  │
+                                                 ▼         └────┬────┘
+   ACC ─▶ ACC_SIGN ─ isPos/isZero ─▶┌─────────┐                │ UFIELDS
+                                     │ CMPCSEQ │◀── pcCtl ──────┘
+                            macro-PC ◀─────────┘ jmp/j0/j1
+      </pre>
+      <h4>The two ideas that make it fit</h4>
+      <ol>
+        <li><b>The dispatch ROM is a wide table.</b> Indexed by the opcode, each
+        row gives the routine's entry µaddr <em>plus</em> that op's ALU mode and
+        three branch-condition flags. So the three arithmetic ops
+        <b>share one microroutine</b> (ALU mode comes from the table) and the
+        three jumps <b>share one routine</b> (condition comes from the table).
+        The whole microprogram is just 6 µwords.</li>
+        <li><b>CMPCSEQ resolves the branch.</b> On a conditional-jump µword it
+        jumps to the operand only if <code>cAlways</code>, or
+        <code>cPos ∧ isPos</code>, or <code>cZero ∧ isZero</code> — the ACC sign
+        coming from <b>ACC_SIGN</b>. One shared routine becomes JMP / JMPP / JMPZ
+        depending purely on which flag the table set.</li>
+      </ol>
+      <p>Because routines are shared, everything fits a 2-trit µPC (9 µwords) and
+      both tables are single 6-trit <b>E5 ROMs</b> — no parallel-RAM banks, no
+      write tie-offs. Adding or changing an instruction is now <em>editing a ROM
+      table</em>, not rewiring gates.</p>
+      <h4>What to watch</h4>
+      <p>The default program is a JMPP counter (<code>ADDI +1</code> /
+      <code>JMPP 0</code>): ACC climbs 1, 2, 3, … looping through a
+      <em>conditional</em> branch that's taken every lap because ACC stays
+      positive. Press <b>Play</b>; open <b>Debug</b> to watch the µcode line walk
+      dispatch → arith/jump → fetch. (Verified against CPU2: a JMPZ-taken and a
+      JMPP-not-taken program both end with the same ACC on CPU3-full as on CPU2.)</p>`,
   },
 
   // ---- Neural net ----------------------------------------------------------

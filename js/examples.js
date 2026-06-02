@@ -15,7 +15,7 @@ export function createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
   buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef, buildUfieldsDef,
-  buildMpcseqDef,
+  buildMpcseqDef, buildCmpcseqDef,
   subcircuitDefs,
 }) {
 const EXAMPLES = {
@@ -652,6 +652,149 @@ const EXAMPLES = {
           // ACC write enable = accWrite field.
           w('uf', 'accWrite', 'acc', 'ld'),
           // DMEM: address = operand[0..1], data = ACC, we = memWrite field.
+          w('imem_lo', 'q2', 'dmem', 'a0'), w('imem_hi', 'q0', 'dmem', 'a1'),
+          w('acc', 'q0', 'dmem', 'd0'), w('acc', 'q1', 'dmem', 'd1'), w('acc', 'q2', 'dmem', 'd2'),
+          w('uf', 'memWrite', 'dmem', 'we'),
+          // Readouts.
+          w('acc', 'q0', 'oA0', 'in'), w('acc', 'q1', 'oA1', 'in'), w('acc', 'q2', 'oA2', 'in'),
+          w('clk', 'out', 'wclk', 'in'), w('acc', 'q0', 'wacc', 'in'),
+        ],
+      }));
+    },
+  },
+  'cpu3-full': {
+    label: 'CPU3-full — all 9 ops, conditional jumps, control store in ROM',
+    build: () => {
+      if (!subcircuitDefs['MSEQ'])     subcircuitDefs['MSEQ']     = buildMseqDef();
+      if (!subcircuitDefs['UFIELDS'])  subcircuitDefs['UFIELDS']  = buildUfieldsDef();
+      if (!subcircuitDefs['CMPCSEQ'])  subcircuitDefs['CMPCSEQ']  = buildCmpcseqDef();
+      if (!subcircuitDefs['ACC_SIGN']) subcircuitDefs['ACC_SIGN'] = buildAccSignDef();
+      return buildExample((c, w) => ({
+        // The complete microcoded CPU3 — all 9 v2 ops incl. the conditional
+        // jumps JMPP / JMPZ (deferred from Phase 4). Two ideas make it fit a
+        // 2-trit µPC (9 µwords) and a single-bank control store:
+        //
+        //  1. The DISPATCH ROM is a wide TABLE. Addressed by the opcode, each
+        //     entry carries not just the routine entry µaddr (q0,q1) but also
+        //     that op's ALU mode (q2) and three branch-condition flags
+        //     (q3=cAlways, q4=cPos, q5=cZero). So arithmetic ops SHARE one
+        //     microroutine (ALU op comes from the table) and the three jumps
+        //     SHARE one routine (the condition comes from the table).
+        //  2. CMPCSEQ resolves the conditional jump: on pcCtl=CJUMP it jumps to
+        //     the operand iff MAX(cAlways, cPos∧isPos, cZero∧isZero) — the ACC
+        //     sign flags coming from ACC_SIGN.
+        //
+        // Result: just 6 µwords (µ0 dispatch · µ1 arith · µ2 jump · µ3 load ·
+        // µ4 store · µ5 nop), both the dispatch table and the control store
+        // held in single 6-trit E5 ROMs (no parallel-RAM banks, no write
+        // tie-offs). Default program is a JMPP counter: ADDI +1 / JMPP 0, so
+        // ACC climbs 1,2,3,… by way of a *conditional* branch (always taken
+        // here because ACC stays positive). Press Play; open Debug to watch the
+        // µPC + microinstruction.
+        comps: [
+          c('clk',    'CLOCK',        40, 820, { value: -1, mode: 'bi' }),
+          // ---- macro side ----
+          c('mpc',    'PC',          170, 120, { p: [-1, -1] }),
+          c('imem_lo', 'RAM',        340,  60, { mem: [
+            [0, 0, 1],     // 0: ADDI +1
+            [1, -1, -1],   // 1: JMPP 0   (opL=+1,opH=T; oper0=T → target word 0)
+            [-1, -1, 0], [-1, -1, 0], [-1, -1, 0],
+            [-1, -1, 0], [-1, -1, 0], [-1, -1, 0], [-1, -1, 0],
+          ] }),
+          c('imem_hi', 'RAM',        340, 250, { mem: [
+            [0, 0, 0],     // 0
+            [-1, 0, 0],    // 1: oper1=T → target = (oper0,oper1) = (T,T) = word 0
+            [0, 0, 0], [0, 0, 0], [0, 0, 0],
+            [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+          ] }),
+          // Dispatch TABLE (ROM): opcode → [disp0, disp1, aluOp, cAlways, cPos, cZero].
+          c('dmap',   'ROM',         560, 110, { mem: [
+            [1, 0, 0, 0, 0, 0],     // 0 NOP   → µ5
+            [1, -1, 0, 1, 0, 0],    // 1 JMP   → µ2, unconditional
+            [1, -1, 0, 0, 1, 0],    // 2 JMPP  → µ2, if ACC>0
+            [1, -1, 0, 0, 0, 1],    // 3 JMPZ  → µ2, if ACC=0
+            [0, -1, 0, 0, 0, 0],    // 4 ADDI  → µ1, ALU=ADD
+            [0, -1, 1, 0, 0, 0],    // 5 MAXI  → µ1, ALU=MAX
+            [0, -1, -1, 0, 0, 0],   // 6 MINI  → µ1, ALU=MIN
+            [-1, 0, 0, 0, 0, 0],    // 7 LOAD  → µ3
+            [0, 0, 0, 0, 0, 0],     // 8 STORE → µ4
+          ] }),
+          // ---- micro side ----
+          c('upc',    'PC',          170, 470, { p: [-1, -1] }),
+          // Control store (ROM): µword = UFIELDS input order
+          //   [m_seq, m_alu(unused), m_accW, m_accSrc, m_mem, m_pc].
+          c('ustore', 'ROM',         340, 470, { mem: [
+            [1, 0, 0, 0, -1, 1],    // µ0 dispatch: DISP, HOLD
+            [-1, 0, 1, 0, -1, 0],   // µ1 arith:    FETCH, accW, src=ALU, ADV
+            [-1, 0, 0, 0, -1, -1],  // µ2 jump:     FETCH, CJUMP
+            [-1, 0, 1, 1, 0, 0],    // µ3 load:     FETCH, accW, src=DMEM, mem=read, ADV
+            [-1, 0, 0, 0, 1, 0],    // µ4 store:    FETCH, mem=write, ADV
+            [-1, 0, 0, 0, -1, 0],   // µ5 nop:      FETCH, ADV
+            [-1, 0, 0, 0, -1, 0], [-1, 0, 0, 0, -1, 0], [-1, 0, 0, 0, -1, 0],
+          ] }),
+          c('zero',   'CONST',       340, 760, { value: 0 }),
+          c('uf',     'SUB:UFIELDS', 560, 470),
+          c('mseq',   'SUB:MSEQ',    560, 700),
+          c('cmpcseq', 'SUB:CMPCSEQ', 820, 560),
+          c('accSign', 'SUB:ACC_SIGN', 1200, 360),
+          // ---- datapath ----
+          c('alu',    'ALU',         1020, 120),
+          c('accSrc0', 'MUX',        1200, 90),
+          c('accSrc1', 'MUX',        1200, 180),
+          c('accSrc2', 'MUX',        1200, 270),
+          c('acc',    'REG3',        1380, 150),
+          c('dmem',   'RAM',         1020, 440),
+          // ---- readouts ----
+          c('oA0', 'OUTPUT', 1560, 150, { name: 'ACC0' }),
+          c('oA1', 'OUTPUT', 1560, 190, { name: 'ACC1' }),
+          c('oA2', 'OUTPUT', 1560, 230, { name: 'ACC2' }),
+          c('wclk', 'WAVE',  40,  900, { name: 'clk',  trace: [] }),
+          c('wacc', 'WAVE',  1560, 320, { name: 'ACC0', trace: [] }),
+        ],
+        wires: [
+          // Clock distribution (ROMs are clockless).
+          w('clk', 'out', 'mpc', 'clk'),
+          w('clk', 'out', 'imem_lo', 'clk'), w('clk', 'out', 'imem_hi', 'clk'),
+          w('clk', 'out', 'upc', 'clk'),
+          w('clk', 'out', 'acc', 'clk'), w('clk', 'out', 'dmem', 'clk'),
+          // Macro-PC addresses IMEM; opcode addresses the dispatch table.
+          w('mpc', 'p0', 'imem_lo', 'a0'), w('mpc', 'p1', 'imem_lo', 'a1'),
+          w('mpc', 'p0', 'imem_hi', 'a0'), w('mpc', 'p1', 'imem_hi', 'a1'),
+          w('zero', 'out', 'imem_lo', 'we'), w('zero', 'out', 'imem_lo', 'd0'), w('zero', 'out', 'imem_lo', 'd1'), w('zero', 'out', 'imem_lo', 'd2'),
+          w('zero', 'out', 'imem_hi', 'we'), w('zero', 'out', 'imem_hi', 'd0'), w('zero', 'out', 'imem_hi', 'd1'), w('zero', 'out', 'imem_hi', 'd2'),
+          w('imem_lo', 'q0', 'dmap', 'a0'), w('imem_lo', 'q1', 'dmap', 'a1'),
+          // µPC addresses the control store ROM.
+          w('upc', 'p0', 'ustore', 'a0'), w('upc', 'p1', 'ustore', 'a1'),
+          // Control-store word → UFIELDS (m_alu output is ignored; ALU op comes
+          // from the dispatch table instead).
+          w('ustore', 'q0', 'uf', 'm_seq'), w('ustore', 'q1', 'uf', 'm_alu'), w('ustore', 'q2', 'uf', 'm_accW'),
+          w('ustore', 'q3', 'uf', 'm_accSrc'), w('ustore', 'q4', 'uf', 'm_mem'), w('ustore', 'q5', 'uf', 'm_pc'),
+          // Microsequencer: seqMode + dispatch addr → µPC.
+          w('uf', 'seqMode', 'mseq', 'seqMode'),
+          w('dmap', 'q0', 'mseq', 'disp0'), w('dmap', 'q1', 'mseq', 'disp1'),
+          w('mseq', 'jmp', 'upc', 'jmp'), w('mseq', 'j0', 'upc', 'j0'), w('mseq', 'j1', 'upc', 'j1'),
+          // ACC sign → conditional macro-PC sequencer.
+          w('acc', 'q0', 'accSign', 'q0'), w('acc', 'q1', 'accSign', 'q1'), w('acc', 'q2', 'accSign', 'q2'),
+          // CMPCSEQ: pcCtl + self + operand-target + ACC sign + the table's
+          // condition flags → macro-PC jmp/j0/j1.
+          w('uf', 'pcCtl', 'cmpcseq', 'pcCtl'),
+          w('mpc', 'p0', 'cmpcseq', 'p0'), w('mpc', 'p1', 'cmpcseq', 'p1'),
+          w('imem_lo', 'q2', 'cmpcseq', 't0'), w('imem_hi', 'q0', 'cmpcseq', 't1'),
+          w('accSign', 'isPos', 'cmpcseq', 'isPos'), w('accSign', 'isZero', 'cmpcseq', 'isZero'),
+          w('dmap', 'q3', 'cmpcseq', 'cAlways'), w('dmap', 'q4', 'cmpcseq', 'cPos'), w('dmap', 'q5', 'cmpcseq', 'cZero'),
+          w('cmpcseq', 'jmp', 'mpc', 'jmp'), w('cmpcseq', 'j0', 'mpc', 'j0'), w('cmpcseq', 'j1', 'mpc', 'j1'),
+          // ALU: a = ACC, b = operand[0..2], op = aluOp from the dispatch table.
+          w('acc', 'q0', 'alu', 'a0'), w('acc', 'q1', 'alu', 'a1'), w('acc', 'q2', 'alu', 'a2'),
+          w('imem_lo', 'q2', 'alu', 'b0'), w('imem_hi', 'q0', 'alu', 'b1'), w('imem_hi', 'q1', 'alu', 'b2'),
+          w('dmap', 'q2', 'alu', 'op'),
+          // ACC source MUX: accSrc=0 → ALU result, +1 → DMEM read.
+          w('uf', 'accSrc', 'accSrc0', 's'), w('uf', 'accSrc', 'accSrc1', 's'), w('uf', 'accSrc', 'accSrc2', 's'),
+          w('alu', 'r0', 'accSrc0', 'd0'), w('alu', 'r1', 'accSrc1', 'd0'), w('alu', 'r2', 'accSrc2', 'd0'),
+          w('alu', 'r0', 'accSrc0', 'dT'), w('alu', 'r1', 'accSrc1', 'dT'), w('alu', 'r2', 'accSrc2', 'dT'),
+          w('dmem', 'q0', 'accSrc0', 'dP'), w('dmem', 'q1', 'accSrc1', 'dP'), w('dmem', 'q2', 'accSrc2', 'dP'),
+          w('accSrc0', 'out', 'acc', 'd0'), w('accSrc1', 'out', 'acc', 'd1'), w('accSrc2', 'out', 'acc', 'd2'),
+          w('uf', 'accWrite', 'acc', 'ld'),
+          // DMEM: addr = operand[0..1], data = ACC, we = memWrite.
           w('imem_lo', 'q2', 'dmem', 'a0'), w('imem_hi', 'q0', 'dmem', 'a1'),
           w('acc', 'q0', 'dmem', 'd0'), w('acc', 'q1', 'dmem', 'd1'), w('acc', 'q2', 'dmem', 'd2'),
           w('uf', 'memWrite', 'dmem', 'we'),

@@ -28,7 +28,7 @@ import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
 export function registerTests(deps) {
   const {
     TYPES, EXAMPLES,
-    buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef,
+    buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef, buildCmpcseqDef,
     cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
     debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
     findMicrocodeTargets,
@@ -1573,6 +1573,33 @@ test('MPCSEQ macro-PC sequencer: advance / hold / jump', () => {
   assertEq(`${o.jmp},${o.j0},${o.j1}`, '1,-1,1', 'JMP: load the target (t0,t1):');
 });
 
+test('CMPCSEQ conditional macro-PC sequencer: ADV / HOLD / conditional jump', () => {
+  if (!subcircuitDefs['CMPCSEQ']) subcircuitDefs['CMPCSEQ'] = buildCmpcseqDef();
+  const def = subcircuitDefs['CMPCSEQ'];
+  // pcCtl, p0,p1, t0,t1, isPos,isZero, cAlways,cPos,cZero
+  const run = (pcCtl, isPos, isZero, cA, cP, cZ) => {
+    const instance = { type: 'SUB:CMPCSEQ', state: {}, subScope: cloneSubScope(def) };
+    return simulateSubInstance(instance, {
+      pcCtl, p0: 1, p1: -1, t0: -1, t1: 0, isPos, isZero, cAlways: cA, cPos: cP, cZero: cZ });
+  };
+  // ADV: increment regardless of any condition.
+  assertEq(run(0, 1, 0, 0, 1, 0).jmp, 0, 'ADV: jmp=0:');
+  // HOLD: reload self (p0,p1); conditions ignored.
+  let o = run(1, 1, 1, 1, 1, 1);
+  assertEq(`${o.jmp},${o.j0},${o.j1}`, '1,1,-1', 'HOLD: reload self:');
+  // CJUMP, unconditional (cAlways): always jumps to the target.
+  o = run(-1, 0, 0, 1, 0, 0);
+  assertEq(`${o.jmp},${o.j0},${o.j1}`, '1,-1,0', 'CJUMP cAlways: take the target:');
+  // CJUMP if-positive: taken iff ACC is positive.
+  assertEq(run(-1, 1, 0, 0, 1, 0).jmp, 1, 'CJUMP cPos + ACC>0: taken:');
+  assertEq(run(-1, 0, 0, 0, 1, 0).jmp, 0, 'CJUMP cPos + ACC≤0: not taken:');
+  // CJUMP if-zero: taken iff ACC is zero.
+  assertEq(run(-1, 0, 1, 0, 0, 1).jmp, 1, 'CJUMP cZero + ACC=0: taken:');
+  assertEq(run(-1, 0, 0, 0, 0, 1).jmp, 0, 'CJUMP cZero + ACC≠0: not taken:');
+  // A conditional flag must NOT fire while holding (µ0 dispatch is HOLD).
+  assertEq(run(1, 1, 0, 0, 1, 0).j0, 1, 'HOLD ignores cPos (stays on self):');
+});
+
 test('CPU3 (microcoded) runs the counter — ACC climbs 0,1,2,3 like CPU2', () => {
   // The microengine drives the real ACC/ALU datapath. The default program is
   // the same counter CPU2 runs (ADDI +1 / JMP 0). CPU3 is multi-cycle (two
@@ -1637,6 +1664,66 @@ test('CPU3 STORE / LOAD round-trip through DMEM', () => {
   } finally {
     setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     syncCompMap();
+  }
+});
+
+// ---- full CPU3: all 9 ops incl. conditional jumps ----
+test('CPU3-full runs the JMPP counter — ACC climbs 0,1,2,3 via a conditional jump', () => {
+  const ex = EXAMPLES['cpu3-full'].build();
+  const acc = ex.comps.find(c => c.type === 'REG3');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    assertEq(tritsToInt(acc.state.q), 0, 'ACC starts at 0:');
+    const seen = [];
+    for (let i = 0; i < 24; i++) { stepSequential(); seen.push(tritsToInt(acc.state.q)); }
+    const progression = seen.filter((v, i) => i === 0 || v !== seen[i - 1]);
+    assertEq(JSON.stringify(progression), JSON.stringify([0, 1, 2, 3]),
+             'ACC climbs by 1 each loop — the JMPP branch is taken every lap:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+test('CPU3-full conditional jumps (JMPP / JMPZ) agree with CPU2', () => {
+  // Run the same v2 program on the microcoded CPU3-full and on the
+  // single-cycle CPU2 (whose JMPP/JMPZ are independently tested) and compare
+  // the final ACC. Loading an image into either machine's two IMEM banks is
+  // identical: imem_lo feeds ALU.b0, imem_hi feeds ALU.b1.
+  const runV2 = (exName, res, steps) => {
+    const ex = EXAMPLES[exName].build();
+    const alu = ex.comps.find(c => c.type === 'ALU');
+    const loId = ex.wires.find(z => z.toId === alu.id && z.toPort === 'b0').fromId;
+    const hiId = ex.wires.find(z => z.toId === alu.id && z.toPort === 'b1').fromId;
+    const lo = ex.comps.find(c => c.id === loId);
+    const hi = ex.comps.find(c => c.id === hiId);
+    lo.state.mem = res.mem_lo.map(x => x.slice()); lo.state.clkPrev = 0;
+    hi.state.mem = res.mem_hi.map(x => x.slice()); hi.state.clkPrev = 0;
+    const acc = ex.comps.find(c => c.type === 'REG3');
+    const sC = comps, sW = wires, sO = outVals, sT = tick;
+    try {
+      setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+      syncCompMap(); simulate();
+      for (let i = 0; i < steps; i++) stepSequential();
+      return tritsToInt(acc.state.q);
+    } finally {
+      setComps(sC); setWires(sW); setOutVals(sO); setTick(sT); syncCompMap();
+    }
+  };
+  const programs = [
+    // JMPZ taken: ACC 0→1→0, JMPZ fires (ACC=0) → skip the ADDI, halt at 0.
+    'ADDI 1\nADDI -1\nJMPZ done\nADDI 1\ndone: JMP done\n',
+    // JMPP not taken: ACC 0→-1, JMPP not taken (ACC≤0) → ADDI 5 runs → 4, halt.
+    'ADDI -1\nJMPP skip\nADDI 5\nskip: JMP skip\n',
+  ];
+  for (const src of programs) {
+    const res = assembleV2(src);
+    if (res.errors.length) throw new Error('assemble failed: ' + JSON.stringify(res.errors));
+    const full = runV2('cpu3-full', res, 80);
+    const cpu2 = runV2('cpu2', res, 80);
+    assertEq(full, cpu2, `CPU3-full == CPU2 on "${src.split('\n')[0]}…":`);
   }
 });
 

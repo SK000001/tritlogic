@@ -29,7 +29,7 @@ export const INFO_CATEGORIES = [
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
   ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
   ['Control kit',    ['SUB:DECODE2', 'SUB:ACC_SIGN']],
-  ['Microcode kit',  ['SUB:MSEQ', 'SUB:UFIELDS', 'SUB:MPCSEQ']],
+  ['Microcode kit',  ['SUB:MSEQ', 'SUB:UFIELDS', 'SUB:MPCSEQ', 'SUB:CMPCSEQ']],
   ['ISA',            ['_asm', '_isa2', '_debugger']],
 ];
 
@@ -1829,5 +1829,40 @@ j1  = MUX(pcCtl; dT=t1,  d0=p1, dP=p1)</pre>
       <code>t0/t1</code> from the operand. See the <b>CPU3</b> example, where the
       <code>pcCtl</code> field of each microinstruction drives MPCSEQ — µ0 HOLDs
       during dispatch, and each routine's final µword ADVances or JMPs.</p>`,
+  },
+
+  'SUB:CMPCSEQ': {
+    name: 'CMPCSEQ — conditional macro-PC sequencer',
+    tagline: 'MPCSEQ + branch conditions, for JMPP / JMPZ (full CPU3)',
+    body: `
+      <p><b>CMPCSEQ</b> is MPCSEQ's richer sibling: it adds <b>branch
+      conditions</b> so a microcoded CPU can do the conditional jumps
+      <b>JMPP</b> (jump if ACC &gt; 0) and <b>JMPZ</b> (jump if ACC = 0). It is
+      what lets the full 9-op <b>CPU3-full</b> exist.</p>
+
+      <h4>Control modes</h4>
+      <table class="info-tt" style="text-align:center">
+        <thead><tr><th>pcCtl</th><th>mode</th><th>macro-PC next</th></tr></thead>
+        <tbody>
+          <tr><td class="trit-0">0</td><td>ADV</td><td>PC + 1</td></tr>
+          <tr><td class="trit-P">+1</td><td>HOLD</td><td>same address (reload self)</td></tr>
+          <tr><td class="trit-T">T</td><td>CJUMP</td><td>jump to operand <em>iff condition holds</em>, else PC + 1</td></tr>
+        </tbody>
+      </table>
+
+      <h4>The condition</h4>
+      <p>Three <code>{0,+1}</code> flags select the test, supplied per-opcode by
+      the dispatch table — <code>cAlways</code> (plain JMP), <code>cPos</code>
+      (JMPP), <code>cZero</code> (JMPZ) — combined with the ACC sign flags
+      <code>isPos</code> / <code>isZero</code> from <b>ACC_SIGN</b>:</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+condMet = MAX(cAlways, MIN(cPos, isPos), MIN(cZero, isZero))
+jump    = (pcCtl == CJUMP) AND condMet</pre>
+      <p>So a single shared "jump" microroutine becomes JMP, JMPP, or JMPZ purely
+      from which flag the dispatch table set for that opcode — no extra
+      microinstruction bits, no per-op routines. Built from MIN / MAX + one NTI
+      + two MUXes (the flags are already in the <code>{0,+1}</code> domain, so no
+      detector gates are needed). Drives a <code>PC</code>'s <code>jmp/j0/j1</code>
+      exactly like MPCSEQ. See the <b>CPU3-full</b> example.</p>`,
   },
 };
