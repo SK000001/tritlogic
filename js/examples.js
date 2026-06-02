@@ -14,7 +14,7 @@
 export function createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
-  buildTsumDef, buildDecode2Def, buildAccSignDef,
+  buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef,
   subcircuitDefs,
 }) {
 const EXAMPLES = {
@@ -244,6 +244,59 @@ const EXAMPLES = {
         w('acc', 'q0', 'o0', 'in'), w('acc', 'q1', 'o1', 'in'), w('acc', 'q2', 'o2', 'in'),
       ],
     })),
+  },
+  'microcode-seq': {
+    label: 'Microcode sequencer (µPC walks a control store)',
+    build: () => {
+      if (!subcircuitDefs['MSEQ']) subcircuitDefs['MSEQ'] = buildMseqDef();
+      return buildExample((c, w) => ({
+        // E3 Phase 1 (see MICROCODE.md). A horizontal-microcode control unit
+        // running "dry": a PC acts as the µPC, a RAM is the control store
+        // (µROM), and the MSEQ subcircuit picks the next µPC from each
+        // microinstruction's 1-trit seqMode field (q0). The microprogram is
+        // CONT,CONT,CONT,FETCH, so the µPC walks 0,1,2,3 then resets to 0 and
+        // loops — a control sequence cycling on its own. q1/q2 are demo control
+        // bits (ctrlA/ctrlB) that pulse through a fixed pattern each cycle.
+        //   µword = [seqMode, ctrlA, ctrlB]   (seqMode: 0=CONT, +1=DISP, T=FETCH)
+        comps: [
+          c('clk',  'CLOCK',    40, 380, { value: -1, mode: 'bi' }),
+          // Seed the µPC at µword 0 — PC encodes word index as tritsToInt(p)+4,
+          // so p=(T,T) is word 0 (its default p=(0,0) would start at word 4).
+          c('upc',  'PC',       190, 320, { p: [-1, -1] }),
+          c('urom', 'RAM',      370, 170, { mem: [
+            [0,  1,  0],   // µ0: CONT, ctrlA=+1
+            [0,  0,  1],   // µ1: CONT, ctrlB=+1
+            [0, -1, -1],   // µ2: CONT, ctrlA=ctrlB=T
+            [-1, 0,  0],   // µ3: FETCH → µPC back to 0
+            [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+          ] }),
+          c('zero', 'CONST',    370, 470, { value: 0 }),
+          c('mseq', 'SUB:MSEQ', 620, 300),
+          c('oA',   'OUTPUT',   860, 180, { name: 'ctrlA' }),
+          c('oB',   'OUTPUT',   860, 240, { name: 'ctrlB' }),
+          c('op0',  'OUTPUT',   860, 320, { name: 'uPC0' }),
+          c('op1',  'OUTPUT',   860, 380, { name: 'uPC1' }),
+          c('wA',   'WAVE',     860, 460, { name: 'ctrlA', trace: [] }),
+        ],
+        wires: [
+          w('clk', 'out', 'upc', 'clk'), w('clk', 'out', 'urom', 'clk'),
+          // µPC addresses the control store.
+          w('upc', 'p0', 'urom', 'a0'), w('upc', 'p1', 'urom', 'a1'),
+          // Control store is read-only.
+          w('zero', 'out', 'urom', 'we'),
+          w('zero', 'out', 'urom', 'd0'), w('zero', 'out', 'urom', 'd1'), w('zero', 'out', 'urom', 'd2'),
+          // seqMode field → microsequencer; no dispatch in this demo (disp = 0).
+          w('urom', 'q0', 'mseq', 'seqMode'),
+          w('zero', 'out', 'mseq', 'disp0'), w('zero', 'out', 'mseq', 'disp1'),
+          // Microsequencer drives the µPC.
+          w('mseq', 'jmp', 'upc', 'jmp'), w('mseq', 'j0', 'upc', 'j0'), w('mseq', 'j1', 'upc', 'j1'),
+          // Readouts: the two control bits + the µPC address.
+          w('urom', 'q1', 'oA', 'in'), w('urom', 'q2', 'oB', 'in'),
+          w('upc', 'p0', 'op0', 'in'), w('upc', 'p1', 'op1', 'in'),
+          w('urom', 'q1', 'wA', 'in'),
+        ],
+      }));
+    },
   },
   'min-max': {
     label: 'MIN / MAX (ternary AND / OR)',

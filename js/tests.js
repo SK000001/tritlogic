@@ -28,7 +28,7 @@ import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
 export function registerTests(deps) {
   const {
     TYPES, EXAMPLES,
-    buildAccSignDef, buildDecode2Def,
+    buildAccSignDef, buildDecode2Def, buildMseqDef,
     cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
     debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
@@ -1413,6 +1413,54 @@ test('DECODE2 emits {0,+1} one-hot for every opcode', () => {
       const want = (name === activeName) ? 1 : 0;
       assertEq(out[name], want, `opH=${opH} opL=${opL}: ${name}:`);
     }
+  }
+});
+
+// ---- E3 Phase 1: microsequencer ----
+test('MSEQ microsequencer picks the next µPC for CONT / DISP / FETCH', () => {
+  if (!subcircuitDefs['MSEQ']) subcircuitDefs['MSEQ'] = buildMseqDef();
+  const def = subcircuitDefs['MSEQ'];
+  const run = (seqMode, disp0, disp1) => {
+    const instance = { type: 'SUB:MSEQ', state: {}, subScope: cloneSubScope(def) };
+    return simulateSubInstance(instance, { seqMode, disp0, disp1 });
+  };
+  // CONT (seqMode 0): jmp=0 so the µPC increments; the targets are don't-care.
+  assertEq(run(0, 1, -1).jmp, 0, 'CONT: jmp=0 (µPC increments):');
+  // DISP (seqMode +1): jmp=+1 and the dispatch address passes through.
+  let o = run(1, 1, -1);
+  assertEq(`${o.jmp},${o.j0},${o.j1}`, '1,1,-1', 'DISP: load the dispatch address:');
+  o = run(1, -1, 0);
+  assertEq(`${o.jmp},${o.j0},${o.j1}`, '1,-1,0', 'DISP routes a different dispatch address:');
+  // FETCH (seqMode T): jmp=+1, target = µword 0 = (T,T) regardless of disp.
+  o = run(-1, 1, 1);
+  assertEq(`${o.jmp},${o.j0},${o.j1}`, '1,-1,-1', 'FETCH: jump to µword 0 (T,T):');
+});
+
+test('Microcode-seq demo: the µPC walks the control store CONT,CONT,CONT,FETCH', () => {
+  const ex = EXAMPLES['microcode-seq'].build();
+  const upc  = ex.comps.find(c => c.type === 'PC');
+  const urom = ex.comps.find(c => c.type === 'RAM');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    const word = () => tritsToInt(upc.state.p) + 4;   // PC encoding
+    assertEq(word(), 0, 'µPC starts at µword 0 (seeded p=(T,T)):');
+    const seenPc = [], seenA = [];
+    for (let i = 0; i < 8; i++) {
+      stepSequential();
+      seenPc.push(word());
+      seenA.push(outVals[`${urom.id}:q1`] ?? null);   // ctrlA = µROM[µPC].q1
+    }
+    // bi clock latches every 2 ticks: µPC increments 0→1→2→3 then FETCH→0.
+    assertEq(JSON.stringify(seenPc), JSON.stringify([1, 1, 2, 2, 3, 3, 0, 0]),
+             'µPC walks 1,2,3 then fetch-resets to 0:');
+    // ctrlA tracks the µROM word the µPC lands on: µ1=0, µ2=T, µ3=0, µ0=+1.
+    assertEq(JSON.stringify(seenA), JSON.stringify([0, 0, -1, -1, 0, 0, 1, 1]),
+             'control bit A follows the microprogram:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
   }
 });
 

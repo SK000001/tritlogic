@@ -3580,6 +3580,64 @@ function buildAccSignDef() {
   };
 }
 
+//  MSEQ — microsequencer (Microcode Kit, E3 Phase 1 — see MICROCODE.md).
+//  Picks the next micro-PC from a microinstruction's 1-trit sequencing field
+//  `seqMode`, driving a PC (the µPC) via its jmp / j0 / j1 pins:
+//    seqMode = 0  (CONT)  → jmp=0           : µPC increments
+//    seqMode = +1 (DISP)  → jmp=+1, j*=disp : µPC ← dispatch address
+//    seqMode = T  (FETCH) → jmp=+1, j*=(T,T): µPC ← µword 0 (fetch routine)
+//  The PC encodes word index as tritsToInt(p)+4, so µword 0 is p=(T,T).
+//  Built from three native MUXes keyed on seqMode (s∈{T,0,+1}→dT/d0/dP), so
+//  there isn't a single detector gate — the routing IS the decode.
+function buildMseqDef() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [];
+    const wires = [];
+    comps.push(c('seqMode', 'INPUT', 40,  40, { value: 0, name: 'seqMode' }));
+    comps.push(c('disp0',   'INPUT', 40, 110, { value: 0, name: 'disp0' }));
+    comps.push(c('disp1',   'INPUT', 40, 180, { value: 0, name: 'disp1' }));
+    comps.push(c('cP', 'CONST', 40, 250, { value:  1 }));   // +1 (load / increment-off)
+    comps.push(c('cZ', 'CONST', 40, 310, { value:  0 }));   //  0
+    comps.push(c('cT', 'CONST', 40, 370, { value: -1 }));   //  T (fetch target trit)
+
+    // jmp = MUX(seqMode; dT=+1, d0=0, dP=+1) — load the µPC on DISP/FETCH,
+    // let it increment on CONT.
+    comps.push(c('mxJmp', 'MUX', 280, 60));
+    wires.push(w('seqMode', 'out', 'mxJmp', 's'));
+    wires.push(w('cP', 'out', 'mxJmp', 'dT'));
+    wires.push(w('cZ', 'out', 'mxJmp', 'd0'));
+    wires.push(w('cP', 'out', 'mxJmp', 'dP'));
+    // j0 = MUX(seqMode; dT=T, d0=disp0, dP=disp0) — FETCH→T, DISP→disp,
+    // CONT→don't-care (jmp=0 ignores it).
+    comps.push(c('mxJ0', 'MUX', 280, 200));
+    wires.push(w('seqMode', 'out', 'mxJ0', 's'));
+    wires.push(w('cT', 'out', 'mxJ0', 'dT'));
+    wires.push(w('disp0', 'out', 'mxJ0', 'd0'));
+    wires.push(w('disp0', 'out', 'mxJ0', 'dP'));
+    // j1 = MUX(seqMode; dT=T, d0=disp1, dP=disp1).
+    comps.push(c('mxJ1', 'MUX', 280, 340));
+    wires.push(w('seqMode', 'out', 'mxJ1', 's'));
+    wires.push(w('cT', 'out', 'mxJ1', 'dT'));
+    wires.push(w('disp1', 'out', 'mxJ1', 'd0'));
+    wires.push(w('disp1', 'out', 'mxJ1', 'dP'));
+
+    comps.push(c('out_jmp', 'OUTPUT', 500,  70, { name: 'jmp' }));
+    comps.push(c('out_j0',  'OUTPUT', 500, 210, { name: 'j0' }));
+    comps.push(c('out_j1',  'OUTPUT', 500, 350, { name: 'j1' }));
+    wires.push(w('mxJmp', 'out', 'out_jmp', 'in'));
+    wires.push(w('mxJ0',  'out', 'out_j0',  'in'));
+    wires.push(w('mxJ1',  'out', 'out_j1',  'in'));
+    return { comps, wires };
+  });
+  return {
+    inputs:  [{ name: 'seqMode' }, { name: 'disp0' }, { name: 'disp1' }],
+    outputs: [{ name: 'jmp' }, { name: 'j0' }, { name: 'j1' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
 // ============================================================================
 //  SEQUENTIAL KIT — gate-level structural twins of the stateful primitives
 // ============================================================================
@@ -3930,6 +3988,7 @@ const BUILTIN_SUBCIRCUITS = {
   TRAM:    { kit: 'Sequential Kit', build: buildTramDef },
   DECODE2:  { kit: 'Control Kit',    build: buildDecode2Def },
   ACC_SIGN: { kit: 'Control Kit',    build: buildAccSignDef },
+  MSEQ:     { kit: 'Microcode Kit',  build: buildMseqDef },
 };
 // Kit headings, in library-panel order.
 const BUILTIN_SUBCIRCUIT_KITS = [
@@ -3937,6 +3996,7 @@ const BUILTIN_SUBCIRCUIT_KITS = [
   { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3', 'MUX3'] },
   { label: 'Sequential Kit', names: ['TLATCH', 'TFLOP', 'TREG3', 'TPC', 'TRAM'] },
   { label: 'Control Kit',    names: ['DECODE2', 'ACC_SIGN'] },
+  { label: 'Microcode Kit',  names: ['MSEQ'] },
 ];
 // Seed the built-ins into the library. Called at boot and re-called after a
 // load; the `if absent` guard means a loaded file's own same-named
@@ -3950,7 +4010,7 @@ function registerBuiltinSubcircuits() {
 const EXAMPLES = createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
-  buildTsumDef, buildDecode2Def, buildAccSignDef,
+  buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef,
   subcircuitDefs,
 });
 
@@ -4002,7 +4062,7 @@ function loadExample() { loadExampleNamed('t-flop'); }
 
 const { TESTS, runAllTests } = registerTests({
   TYPES, EXAMPLES,
-  buildAccSignDef, buildDecode2Def, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
+  buildAccSignDef, buildDecode2Def, buildMseqDef, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
   debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,

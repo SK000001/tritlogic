@@ -29,6 +29,7 @@ export const INFO_CATEGORIES = [
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
   ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
   ['Control kit',    ['SUB:DECODE2', 'SUB:ACC_SIGN']],
+  ['Microcode kit',  ['SUB:MSEQ']],
   ['ISA',            ['_asm', '_isa2', '_debugger']],
 ];
 
@@ -1669,5 +1670,46 @@ jmpEn = MAX(en_JMP,
       <p>A self-test drives every one of the 27 possible ACC values
       through a fresh ACC_SIGN instance and checks both flags against
       the balanced-ternary semantics.</p>`,
+  },
+
+  'SUB:MSEQ': {
+    name: 'MSEQ — microsequencer',
+    tagline: 'Picks the next micro-PC for a microcoded control unit (E3 Phase 1)',
+    body: `
+      <p><b>MSEQ</b> is the heart of <b>microcode</b> (see the project's
+      <code>MICROCODE.md</code>). Where CPU2 decodes each opcode
+      combinationally in one cycle, a microcoded machine walks a small
+      program — a <b>control store</b> of horizontal control words —
+      using a micro-PC (a <code>PC</code> acting as the µPC). MSEQ decides
+      where the µPC goes next from a microinstruction's 1-trit
+      <code>seqMode</code> field.</p>
+
+      <h4>Sequencing modes</h4>
+      <table class="info-tt" style="text-align:center">
+        <thead><tr><th>seqMode</th><th>mode</th><th>µPC next</th></tr></thead>
+        <tbody>
+          <tr><td class="trit-0">0</td><td>CONT</td><td>µPC + 1</td></tr>
+          <tr><td class="trit-P">+1</td><td>DISP</td><td>dispatch address</td></tr>
+          <tr><td class="trit-T">T</td><td>FETCH</td><td>µword 0 (fetch routine)</td></tr>
+        </tbody>
+      </table>
+      <p>It drives a <code>PC</code> through its <code>jmp</code> /
+      <code>j0</code> / <code>j1</code> pins. Since the PC encodes its word
+      index as <code>tritsToInt(p) + 4</code>, µword 0 is <code>p = (T, T)</code>
+      — that's the FETCH target.</p>
+
+      <h4>Internal structure</h4>
+      <p>The whole sequencer is <b>three native MUXes</b> keyed on
+      <code>seqMode</code> (the MUX's <code>s ∈ {T,0,+1}</code> routing
+      <em>is</em> the decode — there isn't a single detector gate):</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+jmp = MUX(seqMode; dT=+1, d0=0,     dP=+1)
+j0  = MUX(seqMode; dT=−1, d0=disp0, dP=disp0)
+j1  = MUX(seqMode; dT=−1, d0=disp1, dP=disp1)</pre>
+      <p>So CONT lets the µPC increment (<code>jmp = 0</code>), DISP loads
+      the dispatch address, and FETCH loads <code>(T, T)</code>. See the
+      <em>Microcode sequencer</em> example, where MSEQ + a PC + a RAM
+      control store walk a CONT,CONT,CONT,FETCH microprogram that loops on
+      its own.</p>`,
   },
 };
