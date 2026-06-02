@@ -32,7 +32,7 @@ export function registerTests(deps) {
     debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
-    simulateTimed, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
+    simulateTimed, switchingKeysAt, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
   } = deps;
 
 const TESTS = [];
@@ -555,6 +555,53 @@ test('A2 detects a static-1 hazard from skewed reconvergent delays', () => {
   assertEq(r.finalVals['3:out'], 1, 'final MAX = |−1|:');
   assertEq(r.hazards.some(h => h.key === '3:out'), true, 'MAX output flagged as hazard:');
   assertEq(r.changes.filter(ch => ch.key === '3:out').length, 2, 'MAX glitched (two changes):');
+});
+
+test('A2 per-type default delay applies without a per-instance override', () => {
+  // INPUT → ADDER → OUTPUT. The ADDER has no c.state.delay, so the timed solver
+  // must fall back to its per-type default (TYPES.ADDER.delay = 2): inputs seed
+  // at t=0, the ADDER re-evaluates and changes at t=2.
+  const comps = [
+    { id: 1, type: 'INPUT', x: 0, y: 0, state: { value: 1, name: 'a' } },
+    { id: 2, type: 'INPUT', x: 0, y: 0, state: { value: 1, name: 'b' } },
+    { id: 3, type: 'INPUT', x: 0, y: 0, state: { value: 0, name: 'c' } },
+    { id: 4, type: 'ADDER', x: 0, y: 0, state: {} },
+    { id: 5, type: 'OUTPUT', x: 0, y: 0, state: { name: 's' } },
+  ];
+  const wires = [
+    { id: 1, fromId: 1, fromPort: 'out', toId: 4, toPort: 'a' },
+    { id: 2, fromId: 2, fromPort: 'out', toId: 4, toPort: 'b' },
+    { id: 3, fromId: 3, fromPort: 'out', toId: 4, toPort: 'cin' },
+    { id: 4, fromId: 4, fromPort: 'sum', toId: 5, toPort: 'in' },
+  ];
+  const r = simulateTimed({ comps, wires });
+  assertEq(r.settleTime, 2, 'ADDER settles at its per-type default delay (2):');
+  const sumChange = r.changes.find(ch => ch.key === '4:sum');
+  assertEq(sumChange && sumChange.t, 2, 'ADDER sum transitions at t=2:');
+  // A per-instance override still wins over the per-type default.
+  comps[3].state.delay = 5;
+  const r2 = simulateTimed({ comps, wires });
+  assertEq(r2.settleTime, 5, 'per-instance delay overrides the per-type default:');
+});
+
+test('A2 switchingKeysAt isolates the nets transitioning at exactly time t', () => {
+  // A change log with two distinct edge times plus a glitch net that flips at
+  // t=1 and flips back at t=3.
+  const changes = [
+    { t: 0, key: 'src:out', value: 1 },
+    { t: 1, key: 'g:out',   value: 1 },
+    { t: 1, key: 'h:out',   value: -1 },
+    { t: 3, key: 'g:out',   value: -1 },   // glitch: g flips back
+  ];
+  const at0 = switchingKeysAt(changes, 0);
+  assertEq(at0.size === 1 && at0.has('src:out'), true, 't=0 ⇒ just the source:');
+  const at1 = switchingKeysAt(changes, 1);
+  assertEq(at1.size === 2 && at1.has('g:out') && at1.has('h:out'), true,
+           't=1 ⇒ both gates switching:');
+  const at2 = switchingKeysAt(changes, 2);
+  assertEq(at2.size, 0, 't=2 ⇒ nothing switching (quiet step):');
+  const at3 = switchingKeysAt(changes, 3);
+  assertEq(at3.size === 1 && at3.has('g:out'), true, 't=3 ⇒ the glitch net flips back:');
 });
 
 // ---- A3 high-impedance (Z) + tri-state buses ----

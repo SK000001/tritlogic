@@ -1,6 +1,6 @@
 import {
   comps, wires, nextCompId, nextWireId, outVals, subcircuitDefs, customGates, view, tick, autoPlay, tool, placeType, mouse, drag, rmbDelete, pendingWire, hoverPin, selection, selectedWire, lastClickPos, compById, lastAsmProgram, _subDepth, animTime, _lastAnim,
-  setComps, setWires, setNextCompId, setNextWireId, setOutVals, setSubcircuitDefs, setCustomGates, setView, setTick, assignAutoPlay, assignTool, setPlaceType, setMouse, setDrag, setRmbDelete, setPendingWire, setHoverPin, setSelection, setSelectedWire, setLastClickPos, setCompById, setLastAsmProgram, setSubDepth, setAnimTime, setLastAnim,
+  setComps, setWires, setNextCompId, setNextWireId, setOutVals, setSubcircuitDefs, setCustomGates, setView, setTick, assignAutoPlay, assignTool, setPlaceType, setMouse, setDrag, setRmbDelete, setPendingWire, setHoverPin, setSelection, setSelectedWire, setLastClickPos, setCompById, setLastAsmProgram, setSubDepth, setAnimTime, setLastAnim, setSwitchingNets,
   _pathCache, _wireOccupied, undoStack, redoStack,
   cv, ctx, statusEl, selInfo, waveCv, waveCtx
 } from './state.js';
@@ -253,6 +253,9 @@ TYPES.ADDER = {
 
 TYPES.MUX = {
   w: 80, h: 104,
+  // Per-type default delay (A2): a 3:1 select is ~two gate levels of logic, so
+  // it lags a single gate by a step in Timing mode without per-instance config.
+  delay: 2,
   pins: {
     s:   { side: 'left',  dx: 0,  dy: 20, kind: 'in' },
     dT:  { side: 'left',  dx: 0,  dy: 44, kind: 'in' },
@@ -367,6 +370,8 @@ function ramAddr(a0, a1) {
 
 TYPES.RAM = {
   w: 132, h: 162,
+  // Per-type default delay (A2): address decode + read-mux ≈ two gate levels.
+  delay: 2,
   pins: {
     a0:  { side: 'left',  dx: 0,   dy: 22,  kind: 'in' },
     a1:  { side: 'left',  dx: 0,   dy: 40,  kind: 'in' },
@@ -427,6 +432,10 @@ TYPES.RAM = {
 
 TYPES.ALU = {
   w: 120, h: 162,
+  // Per-type default delay (A2): the deepest native block — ADD ripples three
+  // full-trit stages internally, so it settles ~three gate-delays after its
+  // inputs. Gives a mixed datapath a visibly staged wavefront in Timing mode.
+  delay: 3,
   pins: {
     a0: { side: 'left',  dx: 0,   dy: 22,  kind: 'in' },
     a1: { side: 'left',  dx: 0,   dy: 40,  kind: 'in' },
@@ -896,7 +905,7 @@ function fanoutPins() {
 
 const engineDeps = { TYPES, compDef };
 const {
-  simulate, simulateScope, simulateTimed, stepSequential,
+  simulate, simulateScope, simulateTimed, switchingKeysAt, stepSequential,
   subInstanceDef, simulateSubInstance, cloneSubScope,
   inputValueFromWires,
 } = createEngine(engineDeps);
@@ -1493,17 +1502,28 @@ function updateInspector() {
       form.appendChild(inputEl);
     }
     if (propagates) {
+      const typeDelay = Number.isInteger(tdef && tdef.delay) ? tdef.delay : 1;
       const labelEl = document.createElement('label');
       labelEl.textContent = 'Delay (timing)';
-      labelEl.title = 'Propagation delay in abstract time units for Timing mode (≥1).';
+      labelEl.title = `Propagation delay in abstract time units for Timing mode (≥1). ` +
+        `Blank uses this type's default (${typeDelay}).`;
       form.appendChild(labelEl);
       const inputEl = document.createElement('input');
       inputEl.type = 'number'; inputEl.min = '1'; inputEl.step = '1';
-      inputEl.value = String(Number.isInteger(c.state.delay) ? c.state.delay : 1);
+      // Show the per-instance override if set; otherwise leave blank and surface
+      // the per-type default (A2) as the placeholder, so the field never lies
+      // about the effective delay.
+      inputEl.placeholder = String(typeDelay);
+      inputEl.value = Number.isInteger(c.state.delay) ? String(c.state.delay) : '';
       inputEl.addEventListener('change', () => {
-        const n = Math.max(1, Math.round(parseInt(inputEl.value, 10) || 1));
         pushHistory();           // also drops out of any active timing playback
-        c.state.delay = n;
+        const raw = inputEl.value.trim();
+        if (raw === '') {
+          // Blank ⇒ drop the override and fall back to the per-type default.
+          delete c.state.delay;
+        } else {
+          c.state.delay = Math.max(1, Math.round(parseInt(raw, 10) || 1));
+        }
         updateInspector();
       });
       form.appendChild(inputEl);
@@ -2085,6 +2105,8 @@ function timingValsAt(t) {
 function timingFrame() {
   if (!timing.active) return;
   setOutVals(timingValsAt(timing.t));
+  // Nets transitioning on this exact step glow yellow (the switching overlay).
+  setSwitchingNets(switchingKeysAt(timing.run.changes, timing.t));
   const slider = document.getElementById('timing-slider');
   if (slider) slider.value = String(timing.t);
   const ro = document.getElementById('timing-readout');
@@ -2128,7 +2150,7 @@ function enterTimingMode() {
   document.getElementById('btn-timing').classList.add('active');
   timingFrame();
   setStatus(`timing mode — settles in ${timing.run.settleTime} delay units, ` +
-            `${timing.run.hazards.length} glitch net(s)`);
+            `${timing.run.hazards.length} glitch net(s). Yellow = nets switching at the cursor.`);
 }
 
 function exitTimingMode() {
@@ -2136,6 +2158,7 @@ function exitTimingMode() {
   timingPlay(false);
   timing.active = false;
   timing.run = null;
+  setSwitchingNets(new Set());                   // clear the switching overlay
   document.body.classList.remove('timing-open');
   document.getElementById('btn-timing').classList.remove('active');
   simulate(); draw();                            // restore live values
@@ -3894,7 +3917,7 @@ const { TESTS, runAllTests } = registerTests({
   debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
-  simulateTimed, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
+  simulateTimed, switchingKeysAt, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
 });
 
 

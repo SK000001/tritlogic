@@ -295,6 +295,21 @@ function simulateTimed(scope, opts = {}) {
   return { changes, hazards, settleTime, finalVals: vals, settled: !overflow };
 }
 
+// Net keys transitioning at exactly time t in a timed run's change log — the
+// live wavefront edge at that instant. Drives the yellow "switching" overlay in
+// Timing mode (A2): as the cursor advances each net flashes on the step it
+// flips, so the wavefront sweeps and a glitching net flashes again when it
+// flips back. `changes` is ascending in t, so we can stop at the first later
+// event.
+function switchingKeysAt(changes, t) {
+  const keys = new Set();
+  for (const ch of changes) {
+    if (ch.t === t) keys.add(ch.key);
+    else if (ch.t > t) break;
+  }
+  return keys;
+}
+
 function simulate() {
   const root = { comps, wires, outVals };
   const { iters, stable } = simulateScope(root);
@@ -506,5 +521,5 @@ function cloneSubScope(def) {
   return scope;
 }
 
-  return { simulate, simulateScope, simulateTimed, stepSequential, subInstanceDef, simulateSubInstance, cloneSubScope, inputValueFromWires };
+  return { simulate, simulateScope, simulateTimed, switchingKeysAt, stepSequential, subInstanceDef, simulateSubInstance, cloneSubScope, inputValueFromWires };
 }

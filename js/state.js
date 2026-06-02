@@ -43,12 +43,17 @@ export let _pathCache = new Map();
 export let _wireOccupied = new Map();
 export let animTime = 0;
 export let _lastAnim = 0;
+// Net keys ("fromId:fromPort") transitioning at the current Timing-mode cursor
+// time — the yellow "switching" wavefront overlay (A2). Empty outside Timing
+// mode, so it has no effect on the normal live render.
+export let switchingNets = new Set();
 
 // ---- setters ------------------------------------------------------------
 // Each setter returns the PREVIOUS value of the binding. That preserves the
 // semantics of postfix increment after the mechanical transform turns
 // `tick++` into `setTick(tick + 1)` — which then evaluates to the old tick
 // just like the postfix form does.
+export function setSwitchingNets(v)   { const o = switchingNets; switchingNets = v; return o; }
 export function setComps(v)           { const o = comps; comps = v; return o; }
 export function setWires(v)           { const o = wires; wires = v; return o; }
 export function setNextCompId(v)      { const o = nextCompId; nextCompId = v; return o; }

@@ -15,7 +15,7 @@
 import {
   cv, ctx, waveCv, waveCtx, minimapCv, minimapCtx,
   view, comps, wires, mouse, drag, hoverPin, selection, selectedWire,
-  pendingWire, animTime, outVals, tick,
+  pendingWire, animTime, outVals, tick, switchingNets,
 } from './state.js';
 import { tritColor, tritLabel, intToTrits, tritsToInt } from './util.js';
 
@@ -656,6 +656,57 @@ function computeWireCrossings() {
 function drawWire(w) {
   const path = wirePath(w);
   const v = outVals[`${w.fromId}:${w.fromPort}`] ?? null;
+  // Pull the crossings list for this wire (horizontal-segment crossings
+  // only — by convention horizontal wires hump over vertical wires).
+  const crossings = _wireCrossings.get(w.id) || [];
+  const jumpR = 5;
+  // Trace the wire path (with arc-jumps over crossings) into the current
+  // sub-path; factored out so we can stroke it twice — once for the yellow
+  // switching glow underlay, once for the value-coloured wire on top.
+  const tracePath = () => {
+    ctx.beginPath();
+    ctx.moveTo(path[0].x, path[0].y);
+    for (let i = 1; i < path.length; i++) {
+      const p1 = path[i-1], p2 = path[i];
+      if (p1.y === p2.y && p1.x !== p2.x) {
+        // Horizontal segment.  Find any crossings that fall strictly inside
+        // it, sorted in the direction of travel, and render line→arc→line.
+        const dir = p1.x < p2.x ? 1 : -1;
+        const segCrossings = crossings
+          .filter(c => Math.abs(c.y - p1.y) < 0.5 &&
+                       c.x > Math.min(p1.x, p2.x) + jumpR &&
+                       c.x < Math.max(p1.x, p2.x) - jumpR)
+          .sort((a, b) => dir * (a.x - b.x));
+        for (const c of segCrossings) {
+          ctx.lineTo(c.x - dir * jumpR, p1.y);
+          // Arc the line UP (negative y) over the crossing.
+          if (dir > 0) ctx.arc(c.x, p1.y, jumpR, Math.PI, 0, true);
+          else         ctx.arc(c.x, p1.y, jumpR, 0, Math.PI, true);
+        }
+        ctx.lineTo(p2.x, p2.y);
+      } else {
+        // Vertical (or degenerate) segment — just draw straight.  The
+        // perpendicular horizontal wire is the one that humps over us.
+        ctx.lineTo(p2.x, p2.y);
+      }
+    }
+  };
+
+  // Switching overlay (A2): in Timing mode, a net transitioning at the cursor
+  // time glows yellow underneath the coloured wire, so the propagation
+  // wavefront visibly sweeps and a glitching net flashes again on its glitch.
+  if (switchingNets.has(`${w.fromId}:${w.fromPort}`)) {
+    ctx.save();
+    ctx.strokeStyle = '#ffd000';
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 8 / view.scale;
+    ctx.lineCap = 'round';
+    ctx.setLineDash([]);
+    tracePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+
   ctx.strokeStyle = tritColor(v);
   ctx.lineWidth = (selectedWire === w.id ? 3 : 2) / view.scale;
   // Live wires get a dashed pattern whose offset advances each animation
@@ -671,36 +722,7 @@ function drawWire(w) {
     ctx.setLineDash([]);
     ctx.lineDashOffset = 0;
   }
-  // Pull the crossings list for this wire (horizontal-segment crossings
-  // only — by convention horizontal wires hump over vertical wires).
-  const crossings = _wireCrossings.get(w.id) || [];
-  const jumpR = 5;
-  ctx.beginPath();
-  ctx.moveTo(path[0].x, path[0].y);
-  for (let i = 1; i < path.length; i++) {
-    const p1 = path[i-1], p2 = path[i];
-    if (p1.y === p2.y && p1.x !== p2.x) {
-      // Horizontal segment.  Find any crossings that fall strictly inside
-      // it, sorted in the direction of travel, and render line→arc→line.
-      const dir = p1.x < p2.x ? 1 : -1;
-      const segCrossings = crossings
-        .filter(c => Math.abs(c.y - p1.y) < 0.5 &&
-                     c.x > Math.min(p1.x, p2.x) + jumpR &&
-                     c.x < Math.max(p1.x, p2.x) - jumpR)
-        .sort((a, b) => dir * (a.x - b.x));
-      for (const c of segCrossings) {
-        ctx.lineTo(c.x - dir * jumpR, p1.y);
-        // Arc the line UP (negative y) over the crossing.
-        if (dir > 0) ctx.arc(c.x, p1.y, jumpR, Math.PI, 0, true);
-        else         ctx.arc(c.x, p1.y, jumpR, 0, Math.PI, true);
-      }
-      ctx.lineTo(p2.x, p2.y);
-    } else {
-      // Vertical (or degenerate) segment — just draw straight.  The
-      // perpendicular horizontal wire is the one that humps over us.
-      ctx.lineTo(p2.x, p2.y);
-    }
-  }
+  tracePath();
   ctx.stroke();
   ctx.setLineDash([]);  // reset state for other shapes
 }
