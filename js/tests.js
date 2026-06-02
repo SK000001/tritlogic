@@ -848,6 +848,38 @@ test('C1 word bus is tri-stateable: TRIBUF3 + one-hot read on a single bus wire'
   assertEq(JSON.stringify(splitOut(s)), JSON.stringify([null, null, null]), 'split of X is all undef:');
 });
 
+test('C1 tryte bus: MERGE6 / SPLIT6 carry a full 6-trit value', () => {
+  const trits = intToTrits(215, 6);
+  const inv = {}; trits.forEach((t, i) => inv['t' + i] = t);
+  const bus = TYPES.MERGE6.eval(null, inv).bus;
+  assertEq(isBus(bus), true, 'MERGE6 packs a tryte bus:');
+  // Width is inferred from the value, so the label shows all six trits + decimal
+  // (a width-3 inference would corrupt both).
+  assertEq(busLabel(bus), '10T00T=215', 'busLabel infers the 6-trit width:');
+  const out = TYPES.SPLIT6.eval(null, { bus });
+  const back = [out.t0, out.t1, out.t2, out.t3, out.t4, out.t5];
+  assertEq(tritsToInt(back), 215, 'SPLIT6 recovers the tryte value:');
+  assertEq(JSON.stringify(back), JSON.stringify(trits), 'all six trits round-trip:');
+});
+
+test('C1 tryte-bus demo: a tryte survives TRYTE_IN → MERGE6 → bus → SPLIT6', () => {
+  const { comps, wires } = EXAMPLES['tryte-bus'].build();
+  const tin = comps.find(c => c.type === 'TRYTE_IN');
+  const merge = comps.find(c => c.type === 'MERGE6');
+  const split = comps.find(c => c.type === 'SPLIT6');
+  const run = () => { const s = { comps, wires, outVals: {} }; simulateScope(s); return s; };
+  const word = (s) => [0, 1, 2, 3, 4, 5].map(i => s.outVals[`${split.id}:t${i}`] ?? null);
+
+  let s = run();
+  assertEq(tritsToInt(word(s)), 215, 'default tryte 215 reproduced after the bus:');
+  assertEq(isBus(s.outVals[`${merge.id}:bus`]), true, 'the MERGE6 drives a bus value:');
+
+  // A different tryte (incl. a negative) tracks through.
+  tin.state.value = -100;
+  s = run();
+  assertEq(tritsToInt(word(s)), -100, 'edited tryte tracks through the bus:');
+});
+
 test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () => {
   registerBuiltinSubcircuits();
   const expect = {

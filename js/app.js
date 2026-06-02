@@ -272,6 +272,37 @@ TYPES.TRIBUF3 = {
   eval: (_, v) => ({ out: v.en === 1 ? (v.in == null ? null : v.in) : 'Z' }),
 };
 
+// 6-trit (tryte) bus merge / split — the same primitive as MERGE3/SPLIT3 at
+// the full tryte width (±364), so a TRYTE_IN's six trit pins bundle onto one
+// bus wire and a SPLIT6 fans them back out into a TRYTE_OUT. The packed value
+// is width-tagged by its slot count, so TRIBUF3 (width-agnostic) tri-states a
+// tryte bus just as well as a word bus.
+const BUS_WIDTH6 = 6;
+TYPES.MERGE6 = {
+  w: 64, h: 120,
+  pins: (() => {
+    const p = {};
+    for (let i = 0; i < 6; i++) p['t' + i] = { side: 'left', dx: 0, dy: 18 + i * 16, kind: 'in' };
+    p.bus = { side: 'right', dx: 64, dy: 60, kind: 'out', bus: true };
+    return p;
+  })(),
+  defaults: () => ({}),
+  eval: (_, v) => ({ bus: packBus([v.t0, v.t1, v.t2, v.t3, v.t4, v.t5].map(x => x ?? null)) }),
+};
+TYPES.SPLIT6 = {
+  w: 64, h: 120,
+  pins: (() => {
+    const p = { bus: { side: 'left', dx: 0, dy: 60, kind: 'in', bus: true } };
+    for (let i = 0; i < 6; i++) p['t' + i] = { side: 'right', dx: 64, dy: 18 + i * 16, kind: 'out' };
+    return p;
+  })(),
+  defaults: () => ({}),
+  eval: (_, v) => {
+    const t = unpackBus(v.bus, BUS_WIDTH6);
+    return { t0: t[0], t1: t[1], t2: t[2], t3: t[3], t4: t[4], t5: t[5] };
+  },
+};
+
 // ---- Full-trit adder ------------------------------------------------------
 const ADDER_TABLE = {
   '-3': { sum:  0, cout: -1 },

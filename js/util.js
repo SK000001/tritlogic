@@ -60,9 +60,12 @@ export function unpackBus(v, width) {
 export const isBus = (v) => typeof v === 'string' && v[0] === 'b';
 // Short human label for a bus value: the balanced-ternary pattern (MSB first,
 // '?' for a non-strong slot) plus the decimal word value when fully strong.
+// Width is inferred from the packed value when not given (the string already
+// encodes its slot count), so the same label works for any bus width.
 export function busLabel(v, width) {
   if (!isBus(v)) return '?';
-  const trits = unpackBus(v, width);
+  const n = width ?? v.slice(1).split(',').length;
+  const trits = unpackBus(v, n);
   const pat = trits.slice().reverse()
     .map(t => t === -1 ? 'T' : t === 0 ? '0' : t === 1 ? '1' : '?').join('');
   return trits.every(isStrong) ? `${pat}=${tritsToInt(trits)}` : pat;

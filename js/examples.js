@@ -179,6 +179,28 @@ const EXAMPLES = {
       ],
     })),
   },
+  'tryte-bus': {
+    label: 'Tryte bus (6-trit word on one wire)',
+    build: () => buildExample((c, w) => ({
+      // A whole tryte (6 trits, ±364) travels as ONE bus wire: a TRYTE_IN's six
+      // trit pins are MERGEd onto the bus, carried as a single violet labelled
+      // wire, then SPLIT back into a TRYTE_OUT. Edit the source's decimal /
+      // balanced-ternary value and watch the bus label + the readout follow.
+      comps: [
+        c('in', 'TRYTE_IN',  90, 150, { value: 215 }),
+        c('m',  'MERGE6',    260, 140),
+        c('s',  'SPLIT6',    470, 140),
+        c('out', 'TRYTE_OUT', 640, 150),
+      ],
+      wires: [
+        w('in', 't0', 'm', 't0'), w('in', 't1', 'm', 't1'), w('in', 't2', 'm', 't2'),
+        w('in', 't3', 'm', 't3'), w('in', 't4', 'm', 't4'), w('in', 't5', 'm', 't5'),
+        w('m', 'bus', 's', 'bus'),
+        w('s', 't0', 'out', 't0'), w('s', 't1', 'out', 't1'), w('s', 't2', 'out', 't2'),
+        w('s', 't3', 'out', 't3'), w('s', 't4', 'out', 't4'), w('s', 't5', 'out', 't5'),
+      ],
+    })),
+  },
   'min-max': {
     label: 'MIN / MAX (ternary AND / OR)',
     build: () => buildExample((c, w) => ({

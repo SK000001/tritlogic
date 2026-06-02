@@ -21,7 +21,7 @@ export const INFO_CATEGORIES = [
   ['Sinks',      ['OUTPUT', 'TRYTE_OUT', 'WAVE']],
   ['Inverters',  ['STI', 'PTI', 'NTI']],
   ['Gates',      ['MIN', 'MAX', 'ADDER', 'MUX', 'TRIBUF']],
-  ['Buses',      ['MERGE3', 'SPLIT3', 'TRIBUF3']],
+  ['Buses',      ['MERGE3', 'SPLIT3', 'TRIBUF3', 'MERGE6', 'SPLIT6']],
   ['Sequential', ['DFF', 'REG3', 'RAM']],
   ['CPU',        ['ALU', 'PC']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
@@ -617,6 +617,29 @@ LOOP:
       bus)</em> example — the same two-register read port as the
       <em>Tri-state register file</em>, but on a single bus wire instead of
       six. </p>`,
+  },
+
+  MERGE6: {
+    name: 'MERGE6', tagline: 'Bundle 6 trits (a tryte) onto one bus wire',
+    body: `
+      <p>The full-<b>tryte</b> bus merger: it packs six trit inputs
+      <code>t0</code>…<code>t5</code> (<code>t0</code> low) into a single bus
+      output — the 6-trit-wide version of <code>MERGE3</code>, covering the
+      whole tryte range (−364…+364).</p>
+      <p>It pairs directly with <code>TRYTE_IN</code> / <code>TRYTE_OUT</code>,
+      whose six trit pins this bundles to (and from, via <code>SPLIT6</code>)
+      one labelled wire. The packed value carries its own width, so a
+      <code>TRIBUF3</code> tri-states a tryte bus exactly as it does a word
+      bus. See the <em>Tryte bus</em> example.</p>`,
+  },
+
+  SPLIT6: {
+    name: 'SPLIT6', tagline: 'Unpack a tryte bus into 6 trits',
+    body: `
+      <p>The inverse of <code>MERGE6</code>: it fans a tryte bus back out to six
+      trit outputs <code>t0</code>…<code>t5</code> (<code>t0</code> low), e.g.
+      straight into a <code>TRYTE_OUT</code>. A non-bus or floating input yields
+      six undefined outputs. See the <em>Tryte bus</em> example.</p>`,
   },
 
   DFF: {

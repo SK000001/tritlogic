@@ -564,22 +564,24 @@ function drawTriBuf(c) {
   ctx.textAlign = 'right';
   ctx.fillText('out', t.w - 2, 22);
 }
-// Bus merge: three trit pins funnel into a single violet bus pin.
-function drawMerge3(c) {
-  const t = TYPES.MERGE3;
+// Bus merge: N trit pins funnel into a single violet bus pin. Width-generic —
+// reads the trit pins from the type, so MERGE3 and MERGE6 share it.
+function drawMerge(c) {
+  const t = TYPES[c.type];
   ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
   ctx.strokeRect(0.5, 0.5, t.w - 1, t.h - 1);
-  // Three funnel lines converging toward the bus pin.
+  const busDy = t.pins.bus.dy;
+  const ins = Object.keys(t.pins).filter(p => p !== 'bus');
   ctx.strokeStyle = BUS_COLOR; ctx.lineWidth = 1.5 / view.scale;
   ctx.beginPath();
-  for (const dy of [20, 40, 60]) { ctx.moveTo(12, dy); ctx.lineTo(t.w - 14, t.h / 2); }
+  for (const p of ins) { ctx.moveTo(12, t.pins[p].dy); ctx.lineTo(t.w - 14, busDy); }
   ctx.stroke();
   ctx.fillStyle = BUS_COLOR; ctx.font = 'bold 9px monospace';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText('MRG', t.w / 2, 4);
   ctx.fillStyle = '#8a92a1'; ctx.font = '8px monospace';
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.fillText('0', 4, 20); ctx.fillText('1', 4, 40); ctx.fillText('2', 4, 60);
+  for (const p of ins) ctx.fillText(p.slice(1), 4, t.pins[p].dy);
 }
 // Bus tri-state buffer: a buffer triangle with violet (bus) data pins.
 function drawTriBuf3(c) {
@@ -597,21 +599,24 @@ function drawTriBuf3(c) {
   ctx.textAlign = 'left';
   ctx.fillText('en', 3, 32);
 }
-// Bus split: a single violet bus pin fans out to three trit pins.
-function drawSplit3(c) {
-  const t = TYPES.SPLIT3;
+// Bus split: a single violet bus pin fans out to N trit pins. Width-generic —
+// SPLIT3 and SPLIT6 share it.
+function drawSplit(c) {
+  const t = TYPES[c.type];
   ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
   ctx.strokeRect(0.5, 0.5, t.w - 1, t.h - 1);
+  const busDy = t.pins.bus.dy;
+  const outs = Object.keys(t.pins).filter(p => p !== 'bus');
   ctx.strokeStyle = BUS_COLOR; ctx.lineWidth = 1.5 / view.scale;
   ctx.beginPath();
-  for (const dy of [20, 40, 60]) { ctx.moveTo(14, t.h / 2); ctx.lineTo(t.w - 12, dy); }
+  for (const p of outs) { ctx.moveTo(14, busDy); ctx.lineTo(t.w - 12, t.pins[p].dy); }
   ctx.stroke();
   ctx.fillStyle = BUS_COLOR; ctx.font = 'bold 9px monospace';
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
   ctx.fillText('SPL', t.w / 2, 4);
   ctx.fillStyle = '#8a92a1'; ctx.font = '8px monospace';
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  ctx.fillText('0', t.w - 4, 20); ctx.fillText('1', t.w - 4, 40); ctx.fillText('2', t.w - 4, 60);
+  for (const p of outs) ctx.fillText(p.slice(1), t.w - 4, t.pins[p].dy);
 }
 function drawPC(c) {
   const t = TYPES.PC;
@@ -797,7 +802,7 @@ function drawWire(w) {
     const mid = path[Math.floor((path.length - 1) / 2)];
     const next = path[Math.floor((path.length - 1) / 2) + 1] || mid;
     const lx = (mid.x + next.x) / 2, ly = (mid.y + next.y) / 2;
-    const label = busLabel(v, 3);
+    const label = busLabel(v);   // width inferred from the packed value
     ctx.font = `${10 / view.scale}px monospace`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
     const pad = 3 / view.scale, tw = ctx.measureText(label).width;
@@ -1040,8 +1045,10 @@ const DRAW = {
   RAM:      drawRAM,
   ALU:      drawALU,
   PC:       drawPC,
-  MERGE3:   drawMerge3,
-  SPLIT3:   drawSplit3,
+  MERGE3:   drawMerge,
+  SPLIT3:   drawSplit,
+  MERGE6:   drawMerge,
+  SPLIT6:   drawSplit,
   TRIBUF3:  drawTriBuf3,
   // Inverter family — same shape function, different label trit.
   STI: (c) => drawInverterShape(c, 'STI'),
