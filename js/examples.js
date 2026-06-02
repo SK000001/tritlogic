@@ -14,7 +14,7 @@
 export function createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
-  buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef,
+  buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef, buildUfieldsDef,
   subcircuitDefs,
 }) {
 const EXAMPLES = {
@@ -294,6 +294,72 @@ const EXAMPLES = {
           w('urom', 'q1', 'oA', 'in'), w('urom', 'q2', 'oB', 'in'),
           w('upc', 'p0', 'op0', 'in'), w('upc', 'p1', 'op1', 'in'),
           w('urom', 'q1', 'wA', 'in'),
+        ],
+      }));
+    },
+  },
+  'microcode-fields': {
+    label: 'Microcode control store (µword → named control lines)',
+    build: () => {
+      if (!subcircuitDefs['MSEQ'])    subcircuitDefs['MSEQ']    = buildMseqDef();
+      if (!subcircuitDefs['UFIELDS']) subcircuitDefs['UFIELDS'] = buildUfieldsDef();
+      return buildExample((c, w) => ({
+        // E3 Phase 2 (see MICROCODE.md). The control store is now TWO parallel
+        // RAM banks holding a horizontal 6-trit microinstruction per µword;
+        // UFIELDS taps them into named control lines. The µPC (PC) + MSEQ walk
+        // a 4-µword microprogram (CONT,CONT,CONT,FETCH) and the control lines
+        // aluOp / accWrite / memWrite / memRead change per µstep — the control
+        // unit "running dry" (no datapath yet; that's Phase 4).
+        //   µword = [m_seq, m_alu, m_accW] (lo) + [m_accSrc, m_mem, m_pc] (hi)
+        //   m_mem: T=none, 0=read, +1=write  (decoded to memWrite/memRead)
+        comps: [
+          c('clk',   'CLOCK',       40, 470, { value: -1, mode: 'bi' }),
+          c('upc',   'PC',          180, 410, { p: [-1, -1] }),   // start at µword 0
+          c('romLo', 'RAM',         360, 120, { mem: [
+            [0,  0,  1],   // µ0: seq=CONT, alu=ADD,  accW=+1
+            [0,  1,  0],   // µ1: seq=CONT, alu=MAX,  accW=0
+            [0, -1,  1],   // µ2: seq=CONT, alu=MIN,  accW=+1
+            [-1, 0,  0],   // µ3: seq=FETCH
+            [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+          ] }),
+          c('romHi', 'RAM',         360, 470, { mem: [
+            [0,  0,  0],   // µ0: accSrc=0, mem=read,  pc=0
+            [0,  1,  0],   // µ1: accSrc=0, mem=write, pc=0
+            [1, -1,  1],   // µ2: accSrc=+1, mem=none, pc=+1
+            [0,  0,  0],   // µ3
+            [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+          ] }),
+          c('zero',  'CONST',       360, 770, { value: 0 }),
+          c('uf',    'SUB:UFIELDS', 620, 230),
+          c('mseq',  'SUB:MSEQ',    620, 470),
+          c('oAlu',  'OUTPUT',      900, 150, { name: 'aluOp' }),
+          c('oAccW', 'OUTPUT',      900, 210, { name: 'accWrite' }),
+          c('oMemW', 'OUTPUT',      900, 270, { name: 'memWrite' }),
+          c('oMemR', 'OUTPUT',      900, 330, { name: 'memRead' }),
+          c('op0',   'OUTPUT',      900, 410, { name: 'uPC0' }),
+          c('op1',   'OUTPUT',      900, 470, { name: 'uPC1' }),
+          c('wW',    'WAVE',        900, 560, { name: 'memWrite', trace: [] }),
+        ],
+        wires: [
+          w('clk', 'out', 'upc', 'clk'), w('clk', 'out', 'romLo', 'clk'), w('clk', 'out', 'romHi', 'clk'),
+          // µPC addresses both control-store banks.
+          w('upc', 'p0', 'romLo', 'a0'), w('upc', 'p1', 'romLo', 'a1'),
+          w('upc', 'p0', 'romHi', 'a0'), w('upc', 'p1', 'romHi', 'a1'),
+          // Read-only control store.
+          w('zero', 'out', 'romLo', 'we'), w('zero', 'out', 'romLo', 'd0'), w('zero', 'out', 'romLo', 'd1'), w('zero', 'out', 'romLo', 'd2'),
+          w('zero', 'out', 'romHi', 'we'), w('zero', 'out', 'romHi', 'd0'), w('zero', 'out', 'romHi', 'd1'), w('zero', 'out', 'romHi', 'd2'),
+          // µword trits → UFIELDS.
+          w('romLo', 'q0', 'uf', 'm_seq'), w('romLo', 'q1', 'uf', 'm_alu'), w('romLo', 'q2', 'uf', 'm_accW'),
+          w('romHi', 'q0', 'uf', 'm_accSrc'), w('romHi', 'q1', 'uf', 'm_mem'), w('romHi', 'q2', 'uf', 'm_pc'),
+          // seqMode field → microsequencer → µPC (no dispatch in this demo).
+          w('uf', 'seqMode', 'mseq', 'seqMode'),
+          w('zero', 'out', 'mseq', 'disp0'), w('zero', 'out', 'mseq', 'disp1'),
+          w('mseq', 'jmp', 'upc', 'jmp'), w('mseq', 'j0', 'upc', 'j0'), w('mseq', 'j1', 'upc', 'j1'),
+          // Named control lines → readouts.
+          w('uf', 'aluOp', 'oAlu', 'in'), w('uf', 'accWrite', 'oAccW', 'in'),
+          w('uf', 'memWrite', 'oMemW', 'in'), w('uf', 'memRead', 'oMemR', 'in'),
+          w('upc', 'p0', 'op0', 'in'), w('upc', 'p1', 'op1', 'in'),
+          w('uf', 'memWrite', 'wW', 'in'),
         ],
       }));
     },

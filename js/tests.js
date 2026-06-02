@@ -28,7 +28,7 @@ import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
 export function registerTests(deps) {
   const {
     TYPES, EXAMPLES,
-    buildAccSignDef, buildDecode2Def, buildMseqDef,
+    buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef,
     cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
     debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
@@ -1458,6 +1458,53 @@ test('Microcode-seq demo: the µPC walks the control store CONT,CONT,CONT,FETCH'
     // ctrlA tracks the µROM word the µPC lands on: µ1=0, µ2=T, µ3=0, µ0=+1.
     assertEq(JSON.stringify(seenA), JSON.stringify([0, 0, -1, -1, 0, 0, 1, 1]),
              'control bit A follows the microprogram:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+// ---- E3 Phase 2: control store + microinstruction field decode ----
+test('UFIELDS passes through fields and decodes the 1-of-3 memory control', () => {
+  if (!subcircuitDefs['UFIELDS']) subcircuitDefs['UFIELDS'] = buildUfieldsDef();
+  const def = subcircuitDefs['UFIELDS'];
+  const run = (f) => {
+    const instance = { type: 'SUB:UFIELDS', state: {}, subScope: cloneSubScope(def) };
+    return simulateSubInstance(instance, f);
+  };
+  // Pass-through fields surface unchanged under their semantic names.
+  let o = run({ m_seq: -1, m_alu: 1, m_accW: 1, m_accSrc: -1, m_mem: -1, m_pc: 1 });
+  assertEq(`${o.seqMode},${o.aluOp},${o.accWrite},${o.accSrc},${o.pcCtl}`, '-1,1,1,-1,1',
+           'pass-through fields:');
+  // memCtl 1-of-3 decode: T=none, 0=read, +1=write → two {0,+1} enables.
+  const mem = (m) => { const r = run({ m_seq: 0, m_alu: 0, m_accW: 0, m_accSrc: 0, m_mem: m, m_pc: 0 });
+                       return `${r.memWrite},${r.memRead}`; };
+  assertEq(mem(1),  '1,0', 'm_mem=+1 → write:');
+  assertEq(mem(0),  '0,1', 'm_mem=0 → read:');
+  assertEq(mem(-1), '0,0', 'm_mem=T → neither (none):');
+});
+
+test('Microcode-fields demo: control lines follow the microprogram', () => {
+  const ex = EXAMPLES['microcode-fields'].build();
+  const upc = ex.comps.find(c => c.type === 'PC');
+  const uf  = ex.comps.find(c => c.type === 'SUB:UFIELDS');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    assertEq(tritsToInt(upc.state.p) + 4, 0, 'µPC starts at µword 0:');
+    const field = (n) => outVals[`${uf.id}:${n}`] ?? null;
+    const seen = { alu: [], accW: [], memW: [], memR: [] };
+    for (let i = 0; i < 8; i++) {
+      stepSequential();
+      seen.alu.push(field('aluOp')); seen.accW.push(field('accWrite'));
+      seen.memW.push(field('memWrite')); seen.memR.push(field('memRead'));
+    }
+    // µPC walks µ1,µ1,µ2,µ2,µ3,µ3,µ0,µ0 (bi clock); fields are read at each.
+    assertEq(JSON.stringify(seen.alu),  JSON.stringify([1, 1, -1, -1, 0, 0, 0, 0]),  'aluOp sequence:');
+    assertEq(JSON.stringify(seen.accW), JSON.stringify([0, 0, 1, 1, 0, 0, 1, 1]),    'accWrite sequence:');
+    assertEq(JSON.stringify(seen.memW), JSON.stringify([1, 1, 0, 0, 0, 0, 0, 0]),    'memWrite (µ1 only):');
+    assertEq(JSON.stringify(seen.memR), JSON.stringify([0, 0, 0, 0, 1, 1, 1, 1]),    'memRead (µ3,µ0):');
   } finally {
     setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     syncCompMap();

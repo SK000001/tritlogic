@@ -29,7 +29,7 @@ export const INFO_CATEGORIES = [
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
   ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
   ['Control kit',    ['SUB:DECODE2', 'SUB:ACC_SIGN']],
-  ['Microcode kit',  ['SUB:MSEQ']],
+  ['Microcode kit',  ['SUB:MSEQ', 'SUB:UFIELDS']],
   ['ISA',            ['_asm', '_isa2', '_debugger']],
 ];
 
@@ -1711,5 +1711,41 @@ j1  = MUX(seqMode; dT=−1, d0=disp1, dP=disp1)</pre>
       <em>Microcode sequencer</em> example, where MSEQ + a PC + a RAM
       control store walk a CONT,CONT,CONT,FETCH microprogram that loops on
       its own.</p>`,
+  },
+
+  'SUB:UFIELDS': {
+    name: 'UFIELDS — microinstruction field decoder',
+    tagline: 'Splits a horizontal control word into named control lines (E3 Phase 2)',
+    body: `
+      <p><b>UFIELDS</b> is the second Microcode-kit subcircuit. A
+      microcoded machine stores each instruction's control as a
+      <b>horizontal control word</b> — one field per control line — in a
+      <b>control store</b> (two parallel <code>RAM</code> banks here, six
+      trits per µword). UFIELDS taps those six trits and exposes them as
+      named control lines for the datapath.</p>
+
+      <h4>µword layout</h4>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+  bank-lo  q0 = m_seq    bank-hi  q0 = m_accSrc
+           q1 = m_alu             q1 = m_mem
+           q2 = m_accW            q2 = m_pc</pre>
+
+      <h4>Fields</h4>
+      <p>Most fields are <b>pass-through</b> — horizontal microcode means a
+      field <em>is</em> the control line: <code>seqMode</code> (→ MSEQ),
+      <code>aluOp</code> (→ ALU.op), <code>accWrite</code> (→ ACC.ld),
+      <code>accSrc</code> (→ the ACC-source MUX), <code>pcCtl</code>
+      (→ the macro-PC).</p>
+      <p>The one packed field is <code>m_mem</code>, a 1-of-3 memory
+      control (<code>T</code>=none / <code>0</code>=read / <code>+1</code>=write)
+      decoded into two <code>{0,+1}</code> enables using the DECODE2
+      detector pattern:</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+memWrite = isP(m_mem) = MAX(STI(MAX(PTI, NTI)), 0)   ; +1 iff write
+memRead  = is0(m_mem) = MAX(MIN(PTI, STI(NTI)), 0)   ; +1 iff read</pre>
+      <p>See the <em>Microcode control store</em> example: MSEQ + UFIELDS +
+      a two-bank control store walk a microprogram, and the named control
+      lines (aluOp / accWrite / memWrite / memRead) change per µstep — the
+      control unit running dry, ahead of the Phase-4 datapath.</p>`,
   },
 };

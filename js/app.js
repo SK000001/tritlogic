@@ -3638,6 +3638,77 @@ function buildMseqDef() {
   };
 }
 
+//  UFIELDS — microinstruction field decoder (Microcode Kit, E3 Phase 2 — see
+//  MICROCODE.md). A horizontal control word is six trits across two control-
+//  store RAM banks; UFIELDS taps them and exposes named control lines:
+//    bank-lo q0=m_seq   bank-hi q0=m_accSrc
+//            q1=m_alu           q1=m_mem
+//            q2=m_accW          q2=m_pc
+//  Most fields drive a control line directly, so they pass through under a
+//  semantic name (seqMode→MSEQ, aluOp→ALU.op, accWrite→ACC.ld, accSrc→ACC-src
+//  MUX, pcCtl→macro-PC). The one packed field is `m_mem`, a 1-of-3 memory
+//  control (T=none / 0=read / +1=write) decoded into two {0,+1} enables
+//  (memWrite, memRead) via the DECODE2 detector pattern.
+function buildUfieldsDef() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [];
+    const wires = [];
+    comps.push(c('m_seq',    'INPUT', 40,  30, { value: 0, name: 'm_seq' }));
+    comps.push(c('m_alu',    'INPUT', 40,  90, { value: 0, name: 'm_alu' }));
+    comps.push(c('m_accW',   'INPUT', 40, 150, { value: 0, name: 'm_accW' }));
+    comps.push(c('m_accSrc', 'INPUT', 40, 210, { value: 0, name: 'm_accSrc' }));
+    comps.push(c('m_mem',    'INPUT', 40, 270, { value: 0, name: 'm_mem' }));
+    comps.push(c('m_pc',     'INPUT', 40, 330, { value: 0, name: 'm_pc' }));
+    comps.push(c('zero',     'CONST', 40, 400, { value: 0 }));
+
+    // Pass-through fields — a SUB output may read straight from an input.
+    [['m_seq', 'seqMode'], ['m_alu', 'aluOp'], ['m_accW', 'accWrite'],
+     ['m_accSrc', 'accSrc'], ['m_pc', 'pcCtl']].forEach(([src, out], i) => {
+      comps.push(c('out_' + out, 'OUTPUT', 360, 30 + i * 60, { name: out }));
+      wires.push(w(src, 'out', 'out_' + out, 'in'));
+    });
+
+    // memCtl 1-of-3 decode:
+    //   memWrite = isP(m_mem) = MAX(STI(MAX(PTI, NTI)), 0)   ; +1 iff write
+    //   memRead  = is0(m_mem) = MAX(MIN(PTI, STI(NTI)), 0)   ; +1 iff read
+    comps.push(c('pti',    'PTI', 200, 290));
+    comps.push(c('nti',    'NTI', 200, 350));
+    comps.push(c('mxPN',   'MAX', 340, 290));
+    comps.push(c('sNeg',   'STI', 470, 290));
+    comps.push(c('memWr',  'MAX', 600, 290));
+    comps.push(c('notNti', 'STI', 340, 380));
+    comps.push(c('is0t',   'MIN', 470, 380));
+    comps.push(c('memRd',  'MAX', 600, 380));
+    comps.push(c('out_memWrite', 'OUTPUT', 760, 290, { name: 'memWrite' }));
+    comps.push(c('out_memRead',  'OUTPUT', 760, 380, { name: 'memRead' }));
+    wires.push(w('m_mem', 'out', 'pti', 'in'));
+    wires.push(w('m_mem', 'out', 'nti', 'in'));
+    wires.push(w('pti', 'out', 'mxPN', 'a'));
+    wires.push(w('nti', 'out', 'mxPN', 'b'));
+    wires.push(w('mxPN', 'out', 'sNeg', 'in'));
+    wires.push(w('sNeg', 'out', 'memWr', 'a'));
+    wires.push(w('zero', 'out', 'memWr', 'b'));
+    wires.push(w('memWr', 'out', 'out_memWrite', 'in'));
+    wires.push(w('nti', 'out', 'notNti', 'in'));
+    wires.push(w('pti', 'out', 'is0t', 'a'));
+    wires.push(w('notNti', 'out', 'is0t', 'b'));
+    wires.push(w('is0t', 'out', 'memRd', 'a'));
+    wires.push(w('zero', 'out', 'memRd', 'b'));
+    wires.push(w('memRd', 'out', 'out_memRead', 'in'));
+    return { comps, wires };
+  });
+  return {
+    inputs:  [{ name: 'm_seq' }, { name: 'm_alu' }, { name: 'm_accW' },
+              { name: 'm_accSrc' }, { name: 'm_mem' }, { name: 'm_pc' }],
+    outputs: [{ name: 'seqMode' }, { name: 'aluOp' }, { name: 'accWrite' },
+              { name: 'accSrc' }, { name: 'pcCtl' },
+              { name: 'memWrite' }, { name: 'memRead' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
 // ============================================================================
 //  SEQUENTIAL KIT — gate-level structural twins of the stateful primitives
 // ============================================================================
@@ -3989,6 +4060,7 @@ const BUILTIN_SUBCIRCUITS = {
   DECODE2:  { kit: 'Control Kit',    build: buildDecode2Def },
   ACC_SIGN: { kit: 'Control Kit',    build: buildAccSignDef },
   MSEQ:     { kit: 'Microcode Kit',  build: buildMseqDef },
+  UFIELDS:  { kit: 'Microcode Kit',  build: buildUfieldsDef },
 };
 // Kit headings, in library-panel order.
 const BUILTIN_SUBCIRCUIT_KITS = [
@@ -3996,7 +4068,7 @@ const BUILTIN_SUBCIRCUIT_KITS = [
   { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3', 'MUX3'] },
   { label: 'Sequential Kit', names: ['TLATCH', 'TFLOP', 'TREG3', 'TPC', 'TRAM'] },
   { label: 'Control Kit',    names: ['DECODE2', 'ACC_SIGN'] },
-  { label: 'Microcode Kit',  names: ['MSEQ'] },
+  { label: 'Microcode Kit',  names: ['MSEQ', 'UFIELDS'] },
 ];
 // Seed the built-ins into the library. Called at boot and re-called after a
 // load; the `if absent` guard means a loaded file's own same-named
@@ -4010,7 +4082,7 @@ function registerBuiltinSubcircuits() {
 const EXAMPLES = createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
-  buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef,
+  buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef, buildUfieldsDef,
   subcircuitDefs,
 });
 
@@ -4062,7 +4134,7 @@ function loadExample() { loadExampleNamed('t-flop'); }
 
 const { TESTS, runAllTests } = registerTests({
   TYPES, EXAMPLES,
-  buildAccSignDef, buildDecode2Def, buildMseqDef, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
+  buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
   debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,

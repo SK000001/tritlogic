@@ -1,9 +1,11 @@
 # MICROCODE.md — design doc for E3 (microcoded CPU3)
 
-> **Status (2026-06-02):** design + **Phase 1 shipped** (the `MSEQ`
-> microsequencer subcircuit + a `microcode-seq` demo). Phases 2–5 below
-> are the remaining multi-session plan for the full microcoded CPU3.
-> This is the live spec — mirrors how `ISA_v2.md` preceded E2b.
+> **Status (2026-06-02):** design + **Phases 1–2 shipped** — Phase 1 the
+> `MSEQ` microsequencer + `microcode-seq` demo; Phase 2 the `UFIELDS`
+> field decoder + a two-bank control store (`microcode-fields` demo).
+> Phases 3–5 below are the remaining multi-session plan for the full
+> microcoded CPU3. This is the live spec — mirrors how `ISA_v2.md`
+> preceded E2b.
 
 ---
 
@@ -94,26 +96,35 @@ Unchanged from the v2 ISA — 6 trits across two parallel RAMs
 macro-PC still addresses IMEM. **CPU3 keeps the v2 assembler and word
 format**, so existing programs run; only the control unit changes.
 
-### Microinstruction (the control store word)
+### Microinstruction (the control store word) — **Phase 2 DONE**
 
-Horizontal, one field per control line. A first cut (subject to Phase-2
-field allocation), packed across parallel control-store RAM banks:
+Horizontal, one field per control line. Finalized at **6 trits across
+two parallel control-store RAM banks** (`romLo`, `romHi`), tapped by the
+`UFIELDS` decoder:
 
 ```
-  seqMode    1 trit   CONT / DISP / FETCH         (→ MSEQ)
-  aluOpSel   1 trit   MIN / ADD / MAX             (→ ALU.op)
-  accWrite   1 trit   load ACC this µstep?        (→ ACC.ld, {0,+1})
-  accSrc     1 trit   ALU result vs DMEM read     (→ ACC-source MUX)
-  bSrc       1 trit   operand vs ACC vs const     (→ ALU.b MUX)
-  memCtl     1 trit   none / read / write         (→ DMEM we + addr enable)
-  pcCtl      1 trit   hold / inc / branch         (→ macro-PC)
-  …reserved          spare fields for new ops
+  bank-lo  q0 = m_seq    seqMode  CONT / DISP / FETCH     (→ MSEQ)
+           q1 = m_alu    aluOp    MIN / ADD / MAX = T/0/+1 (→ ALU.op)
+           q2 = m_accW   accWrite load ACC this µstep?     (→ ACC.ld, {0,+1})
+  bank-hi  q0 = m_accSrc accSrc   ALU result vs DMEM read  (→ ACC-source MUX)
+           q1 = m_mem    memCtl   none / read / write = T/0/+1
+           q2 = m_pc     pcCtl    macro-PC control
 ```
+
+Most fields are **pass-through** (horizontal microcode: the field *is*
+the control line). The one packed field is `m_mem`, a 1-of-3 memory
+control that `UFIELDS` decodes into two `{0,+1}` enables `memWrite`
+(`isP`) + `memRead` (`is0`). `bSrc` (ALU.b operand source) was dropped
+from the first cut to fit six trits; it returns as a reserved-slot field
+if Phase 4 needs it (e.g. operand vs ACC vs const), likely as a third
+bank.
 
 Each macro-op's routine is a few of these in sequence. ADDI is one
-µinstruction (`aluOpSel=ADD, accWrite=1, pcCtl=inc, seqMode=FETCH`);
+µinstruction (`aluOp=ADD, accWrite=1, pcCtl=advance, seqMode=FETCH`);
 LOAD/STORE become two (address then transfer); a future microcoded
-multiply is a loop.
+multiply is a loop. `UFIELDS` + the two-bank control store ship in the
+`microcode-fields` demo, walking a microprogram with the control lines
+changing per µstep (the control unit running "dry," no datapath yet).
 
 ### Dispatch map
 
@@ -126,12 +137,13 @@ a `DECODE2`-style detector feeding a priority/MUX tree that emits the
 ## Phase plan (one commit per phase, suite green throughout)
 
 - **Phase 1 — microsequencer.** ✅ `MSEQ` subcircuit + `microcode-seq`
-  demo + tests. (This session.)
-- **Phase 2 — control store + field decode.** Build the µROM from
-  parallel RAMs; define the microinstruction field layout; a
-  `UFIELDS`-style splitter exposing each field as a named line. A demo
-  that drives a *dummy* datapath (LEDs/outputs) through a multi-step
-  microprogram. Tests on the field decode.
+  demo + tests.
+- **Phase 2 — control store + field decode.** ✅ Two-bank control store
+  (parallel RAMs); the 6-trit microinstruction layout above; the
+  `UFIELDS` decoder exposing each field as a named line (+ the `m_mem`
+  1-of-3 → memWrite/memRead decode). `microcode-fields` demo drives
+  named control outputs through a multi-step microprogram. Tests on the
+  field decode + the stepped control-line sequence.
 - **Phase 3 — dispatch + fetch loop.** The opcode→µaddr dispatch map;
   wire fetch(µ0)→dispatch→routine→FETCH back. A two-op micro-ISA
   running multi-cycle end to end (no real ALU yet). Tests on the µPC
