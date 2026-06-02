@@ -1,14 +1,17 @@
 # MICROCODE.md — design doc for E3 (microcoded CPU3)
 
-> **Status (2026-06-03):** design + **Phases 1–4 shipped** — Phase 1 the
+> **Status (2026-06-03):** design + **all 5 phases shipped** — Phase 1 the
 > `MSEQ` microsequencer + `microcode-seq` demo; Phase 2 the `UFIELDS`
 > field decoder + a two-bank control store (`microcode-fields` demo);
 > Phase 3 the dispatch map + the fetch/dispatch/return loop
 > (`microcode-dispatch` demo); Phase 4 the **`cpu3` preset** — the
 > microengine driving the real ACC/ALU/DMEM datapath, running the counter
-> identically to CPU2, plus the `MPCSEQ` macro-PC sequencer.
-> Phase 5 below is the remaining plan. This is the live spec — mirrors how
-> `ISA_v2.md` preceded E2b.
+> identically to CPU2, plus the `MPCSEQ` macro-PC sequencer; Phase 5 the
+> **debugger µPC view** (the CPU Debugger now shows the µPC + the decoded
+> current microinstruction alongside the macro-PC). What remains is *full*
+> CPU3 (the deferred conditional jumps JMPP/JMPZ → a 3-trit µPC + a deeper
+> store + a conditional sequencer) and an optional microcode-store editor.
+> This is the live spec — mirrors how `ISA_v2.md` preceded E2b.
 
 ---
 
@@ -242,10 +245,16 @@ Tests: the counter ACC progression + a STORE/LOAD round-trip through DMEM.
   to CPU2 (just 2 clocks/instruction). New **`MPCSEQ`** macro-PC sequencer
   + the µ0-holds refinement + a 9-µword microprogram for 7 of the 9 ops.
   See the section below.
-- **Phase 5 — assembler/debugger + microcode authoring.** Debugger
-  shows the µPC + current microinstruction alongside the macro-PC; a
-  way to view/edit the control store. The macro-assembler is unchanged
-  (CPU3 runs v2 binaries); add a microassembler view if time permits.
+- **Phase 5 — debugger µPC view + microcode authoring.** ✅ (view half)
+  The CPU Debugger now finds a microcoded CPU (`findMicrocodeTargets`:
+  locate UFIELDS → its control store → the addressing PC = µPC) and shows a
+  **µcode line** — the µPC address plus the decoded current microinstruction
+  (seq / alu / accW / src / mem / pc), read live from UFIELDS's outputs, so it
+  tracks every Step. The macro view (macro-PC, ACC, v2 instr decode, IMEM
+  dump) already worked for CPU3 unchanged. The macro-assembler is unchanged
+  (CPU3 runs v2 binaries). **Remaining (optional):** an in-panel control-store
+  viewer/editor (a "microassembler") — deferred; the control store is
+  currently authored as preset `mem` arrays.
 
 ## Open questions (resolve as phases land)
 

@@ -2737,6 +2737,56 @@ function findDebuggerTargets(scope) {
   return { pc, imem, imemHi: pairV2 ? pairV2.ramHi : null, acc, version: pairV2 ? 2 : 1 };
 }
 
+// Microcode targets for the debugger's µPC view (E3 Phase 5). A microcoded CPU
+// (CPU3) has a UFIELDS field decoder reading a control store addressed by a
+// second PC (the µPC). Returns { uf, upc } or null when the canvas isn't
+// microcoded. The current microinstruction is read from UFIELDS's live outputs
+// (in outVals), so this works whether the store is two 3-trit RAMs or one ROM.
+function findMicrocodeTargets(scope) {
+  scope = scope || { comps, wires };
+  const uf = scope.comps.find(c => c.type === 'SUB:UFIELDS');
+  if (!uf) return null;
+  // The control store is whatever feeds UFIELDS's m_seq input; the µPC is the
+  // PC that addresses it.
+  const seqWire = scope.wires.find(w => w.toId === uf.id && w.toPort === 'm_seq');
+  if (!seqWire) return null;
+  const store = scope.comps.find(c => c.id === seqWire.fromId);
+  if (!store) return null;
+  const aWire = scope.wires.find(w => w.toId === store.id && w.toPort === 'a0');
+  const upc = aWire ? scope.comps.find(c => c.id === aWire.fromId && c.type === 'PC') : null;
+  if (!upc) return null;
+  return { uf, upc };
+}
+
+// Render the µPC + current microinstruction line. Reads the decoded fields
+// straight from UFIELDS's live outputs (outVals), labelling each.
+const MICRO_FIELD_LABELS = {
+  seqMode: { '1': 'DISP',  '0': 'CONT', '-1': 'FETCH' },
+  aluOp:   { '-1': 'MIN',  '0': 'ADD',  '1': 'MAX' },
+  pcCtl:   { '0': 'ADV',   '1': 'HOLD', '-1': 'JMP' },
+};
+function refreshMicroView(microEl) {
+  const micro = findMicrocodeTargets();
+  if (!micro) {
+    microEl.innerHTML = '<span style="color: var(--muted);">(not microcoded — load CPU3)</span>';
+    return;
+  }
+  const uAddr = tritsToInt(micro.upc.state.p) + 4;
+  const f = (port) => outVals[`${micro.uf.id}:${port}`];
+  const lbl = (port) => MICRO_FIELD_LABELS[port][String(f(port))] ?? '?';
+  const on = (port) => (f(port) === 1 ? '1' : '0');
+  const seqL = lbl('seqMode');
+  // Highlight the sequencing field — it's what moves the µPC next.
+  const seqClass = seqL === 'FETCH' ? 'trit-T' : seqL === 'DISP' ? 'trit-P' : 'trit-0';
+  microEl.innerHTML =
+    `µ${uAddr} [${micro.upc.state.p.map(tritLabel).join(' ')}]  ` +
+    `<span class="${seqClass}">seq:${seqL}</span>  ` +
+    `alu:${lbl('aluOp')}  accW:${on('accWrite')}  ` +
+    `src:${f('accSrc') === 1 ? 'DMEM' : 'ALU'}  ` +
+    `mem:${on('memWrite') === '1' ? 'W' : on('memRead') === '1' ? 'R' : '—'}  ` +
+    `pc:${lbl('pcCtl')}`;
+}
+
 function refreshDebugger() {
   const panel = document.getElementById('dbg-panel');
   if (!panel || panel.style.display === 'none') return;
@@ -2748,10 +2798,13 @@ function refreshDebugger() {
   const brksEl  = document.getElementById('dbg-brks');
   const srcEl   = document.getElementById('dbg-src');
   const memEl   = document.getElementById('dbg-mem');
+  const microEl = document.getElementById('dbg-micro');
   tickEl.textContent = tick;
   brksEl.textContent = debuggerState.breakpoints.size
     ? Array.from(debuggerState.breakpoints).sort((a,b)=>a-b).join(', ')
     : '(none)';
+
+  if (microEl) refreshMicroView(microEl);
 
   if (!targets) {
     pcEl.textContent = '—'; accEl.textContent = '—';
@@ -4294,6 +4347,7 @@ const { TESTS, runAllTests } = registerTests({
   TYPES, EXAMPLES,
   buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
   debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
+  findMicrocodeTargets,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
   simulateTimed, switchingKeysAt, simulateSubInstance, stepSequential, syncCompMap, undo, redo,

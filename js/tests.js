@@ -31,6 +31,7 @@ export function registerTests(deps) {
     buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef,
     cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
     debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
+    findMicrocodeTargets,
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
     simulateTimed, switchingKeysAt, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
@@ -1657,6 +1658,36 @@ test('ROM reads its 6-trit word combinationally for every address', () => {
       const word = [0, 1, 2, 3, 4, 5].map(i => outVals[`${rom.id}:q${i}`] ?? 0);
       assertEq(tritsToInt(word), addr * addr, `ROM[addr=${addr}] = addr²:`);
     }
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+// ---- E3 Phase 5: debugger µPC / microinstruction view ----
+test('Debugger detects the CPU3 µPC + reads the live microinstruction', () => {
+  const ex = EXAMPLES['cpu3'].build();
+  const micro = findMicrocodeTargets({ comps: ex.comps, wires: ex.wires });
+  assertEq(micro != null, true, 'CPU3 is detected as microcoded:');
+  assertEq(micro.uf.type, 'SUB:UFIELDS', 'UFIELDS located:');
+  // The µPC is the control-store PC, NOT the macro-PC. cpu3 places the
+  // macro-PC at y=120 and the µPC at y=430.
+  assertEq(micro.upc.y, 430, 'µPC is the control-store PC (not the macro-PC):');
+  const macroPc = ex.comps.filter(c => c.type === 'PC').find(c => c.y === 120);
+  assertEq(micro.upc.id !== macroPc.id, true, 'µPC is distinct from the macro-PC:');
+
+  // CPU2 is single-cycle — no UFIELDS, so it is not detected as microcoded.
+  const cpu2 = EXAMPLES['cpu2'].build();
+  assertEq(findMicrocodeTargets({ comps: cpu2.comps, wires: cpu2.wires }), null,
+           'CPU2 (single-cycle) is not microcoded:');
+
+  // Live read: at reset the µPC sits on µ0, whose seqMode field is DISP (+1) —
+  // exactly what the debugger's µcode line surfaces.
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    assertEq(outVals[`${micro.uf.id}:seqMode`], 1, 'µ0 microinstruction is DISP:');
   } finally {
     setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     syncCompMap();

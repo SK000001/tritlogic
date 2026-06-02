@@ -88,6 +88,12 @@ export const COMPONENT_INFO = {
         <li><b>IMEM dump</b> of all 9 words, each decoded back to its
             mnemonic (<code>ADDI</code> / <code>MAXI</code> / <code>JMP</code>);
             the current word is highlighted.</li>
+        <li><b>µcode</b> line — for a microcoded CPU (<b>CPU3</b>), the µPC
+            address plus the decoded current microinstruction
+            (<code>seq</code> / <code>alu</code> / <code>accW</code> /
+            <code>src</code> / <code>mem</code> / <code>pc</code>), read live
+            from the control unit. Reads <em>(not microcoded)</em> for the
+            plain CPU / CPU2.</li>
       </ul>
       <h4>Controls</h4>
       <ul>
