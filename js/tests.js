@@ -802,6 +802,52 @@ test('C1 word-bus demo: a word survives MERGE → bus wire → SPLIT through the
   assertEq(JSON.stringify(word(s)), JSON.stringify([null, 0, -1]), 'a floating slot stays floating:');
 });
 
+test('C1 word bus is tri-stateable: TRIBUF3 + one-hot read on a single bus wire', () => {
+  // eval level: drive the word when enabled, float (Z) otherwise.
+  assertEq(TYPES.TRIBUF3.eval(null, { in: packBus([1, -1, 0]), en: 1 }).out, packBus([1, -1, 0]),
+           'enabled TRIBUF3 drives its word:');
+  assertEq(TYPES.TRIBUF3.eval(null, { in: packBus([1, -1, 0]), en: 0 }).out, 'Z',
+           'disabled TRIBUF3 floats (Z):');
+
+  // End-to-end on the regfile-wordbus preset: two word drivers, one bus wire.
+  const { comps, wires } = EXAMPLES['regfile-wordbus'].build();
+  const inByName = {}, outByName = {};
+  for (const c of comps) {
+    if (c.type === 'INPUT')  inByName[c.state.name]  = c;
+    if (c.type === 'OUTPUT') outByName[c.state.name] = c;
+  }
+  const gates = comps.filter(c => c.type === 'TRIBUF3');   // g0, g1 in placement order
+  const run = () => { const s = { comps, wires, outVals: {} }; simulateScope(s); return s; };
+  const busVal = (s) => resolveDrivers(gates.map(g => s.outVals[`${g.id}:out`] ?? null));
+  const splitOut = (s) => ['bus0', 'bus1', 'bus2'].map(n => {
+    const wr = wires.find(x => x.toId === outByName[n].id && x.toPort === 'in');
+    return s.outVals[`${wr.fromId}:${wr.fromPort}`] ?? null;
+  });
+
+  // Default one-hot (R0): the bus carries R0's word and the split recovers it.
+  let s = run();
+  assertEq(busVal(s), packBus([1, -1, 0]), 'rdR0 → R0 word on the bus:');
+  assertEq(JSON.stringify(splitOut(s)), JSON.stringify([1, -1, 0]), 'split recovers R0 trits:');
+
+  // Select R1.
+  inByName.rdR0.state.value = 0; inByName.rdR1.state.value = 1;
+  s = run();
+  assertEq(busVal(s), packBus([-1, 0, 1]), 'rdR1 → R1 word on the bus:');
+  assertEq(JSON.stringify(splitOut(s)), JSON.stringify([-1, 0, 1]), 'split recovers R1 trits:');
+
+  // None enabled → floating word bus (Z) → split floats every trit.
+  inByName.rdR0.state.value = 0; inByName.rdR1.state.value = 0;
+  s = run();
+  assertEq(busVal(s), 'Z', 'no read-enable floats the word bus:');
+  assertEq(JSON.stringify(splitOut(s)), JSON.stringify([null, null, null]), 'split of Z is all undef:');
+
+  // Both enabled with different words → contention (X) → split floats.
+  inByName.rdR0.state.value = 1; inByName.rdR1.state.value = 1;
+  s = run();
+  assertEq(busVal(s), 'X', 'two different words contend → X:');
+  assertEq(JSON.stringify(splitOut(s)), JSON.stringify([null, null, null]), 'split of X is all undef:');
+});
+
 test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () => {
   registerBuiltinSubcircuits();
   const expect = {

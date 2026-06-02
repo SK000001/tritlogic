@@ -21,7 +21,7 @@ export const INFO_CATEGORIES = [
   ['Sinks',      ['OUTPUT', 'TRYTE_OUT', 'WAVE']],
   ['Inverters',  ['STI', 'PTI', 'NTI']],
   ['Gates',      ['MIN', 'MAX', 'ADDER', 'MUX', 'TRIBUF']],
-  ['Buses',      ['MERGE3', 'SPLIT3']],
+  ['Buses',      ['MERGE3', 'SPLIT3', 'TRIBUF3']],
   ['Sequential', ['DFF', 'REG3', 'RAM']],
   ['CPU',        ['ALU', 'PC']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
@@ -594,6 +594,29 @@ LOOP:
       opaque value to the rest of the simulator, so a bus propagates, settles
       and times exactly like any other wire. See the <em>Word bus</em>
       example.</p>`,
+  },
+
+  TRIBUF3: {
+    name: 'TRIBUF3', tagline: 'Tri-state buffer for a whole word bus',
+    body: `
+      <p>A <b>bus tri-state buffer</b> — the word-wide version of
+      <code>TRIBUF</code>. It drives its bus input <code>in</code> onto the bus
+      output <code>out</code> when the enable <code>en</code> is <code>+1</code>,
+      and is otherwise <b>high-impedance</b> (<code>Z</code>).</p>
+      <h4>Tri-state word buses</h4>
+      <p>Because a packed bus value is just a scalar to the simulator, the
+      resolver treats it exactly like a trit: wire several
+      <code>TRIBUF3</code> outputs onto one bus net to build a <b>tri-state
+      word bus</b>. Enable exactly one to select its word; enable none and the
+      bus floats (<code>Z</code>); enable two that carry <em>different</em>
+      words and the bus is in <b>contention</b> (<code>X</code>).</p>
+      <p>This is the compact way to build a register-file read port: feed each
+      register's <code>MERGE3</code> word through a <code>TRIBUF3</code> gated
+      by that register's read-enable, all sharing one bus wire, then
+      <code>SPLIT3</code> at the destination. See the <em>Register file (word
+      bus)</em> example — the same two-register read port as the
+      <em>Tri-state register file</em>, but on a single bus wire instead of
+      six. </p>`,
   },
 
   DFF: {

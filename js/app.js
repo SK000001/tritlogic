@@ -254,6 +254,24 @@ TYPES.SPLIT3 = {
   },
 };
 
+// A bus tri-state buffer — TRIBUF for a whole word. Drives its bus input onto
+// the bus output when en = +1, else high-impedance Z. Because the packed bus
+// value is a scalar the engine resolves through `resolveDrivers` exactly like a
+// trit, wiring several TRIBUF3 outputs onto one bus net makes a tri-state WORD
+// bus: one enabled buffer selects its word, none floats (Z), two disagreeing
+// contend (X) — a whole register file's read port on a single wire.
+TYPES.TRIBUF3 = {
+  w: 64, h: 44,
+  pins: {
+    in:  { side: 'left',  dx: 0,  dy: 14, kind: 'in', bus: true },
+    en:  { side: 'left',  dx: 0,  dy: 32, kind: 'in' },
+    out: { side: 'right', dx: 64, dy: 22, kind: 'out', bus: true },
+  },
+  defaults: () => ({}),
+  tristate: true,
+  eval: (_, v) => ({ out: v.en === 1 ? (v.in == null ? null : v.in) : 'Z' }),
+};
+
 // ---- Full-trit adder ------------------------------------------------------
 const ADDER_TABLE = {
   '-3': { sum:  0, cout: -1 },

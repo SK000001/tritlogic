@@ -581,6 +581,22 @@ function drawMerge3(c) {
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillText('0', 4, 20); ctx.fillText('1', 4, 40); ctx.fillText('2', 4, 60);
 }
+// Bus tri-state buffer: a buffer triangle with violet (bus) data pins.
+function drawTriBuf3(c) {
+  const t = TYPES.TRIBUF3;
+  ctx.beginPath();
+  ctx.moveTo(10, 5);
+  ctx.lineTo(t.w - 12, t.h / 2);
+  ctx.lineTo(10, t.h - 5);
+  ctx.closePath();
+  ctx.strokeStyle = BUS_COLOR; ctx.fill(); ctx.stroke();
+  ctx.fillStyle = BUS_COLOR; ctx.font = 'bold 8px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('▷3', t.w / 2 - 4, t.h / 2);
+  ctx.fillStyle = '#8a92a1'; ctx.font = '8px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('en', 3, 32);
+}
 // Bus split: a single violet bus pin fans out to three trit pins.
 function drawSplit3(c) {
   const t = TYPES.SPLIT3;
@@ -754,7 +770,10 @@ function drawWire(w) {
     ctx.restore();
   }
 
-  ctx.strokeStyle = busWire ? (v == null ? tritColor(null) : BUS_COLOR) : tritColor(v);
+  // Bus wire: violet when carrying a word; a floating (Z) / contended (X) /
+  // undefined bus falls back to the normal cyan / magenta / undef colour so
+  // those states still read.
+  ctx.strokeStyle = busWire ? (isBus(v) ? BUS_COLOR : tritColor(v)) : tritColor(v);
   ctx.lineWidth = ((selectedWire === w.id ? 3 : 2) + (busWire ? 1.5 : 0)) / view.scale;
   // Live wires get a dashed pattern whose offset advances each animation
   // tick, producing a slow "marching ants" toward the destination.
@@ -1023,6 +1042,7 @@ const DRAW = {
   PC:       drawPC,
   MERGE3:   drawMerge3,
   SPLIT3:   drawSplit3,
+  TRIBUF3:  drawTriBuf3,
   // Inverter family — same shape function, different label trit.
   STI: (c) => drawInverterShape(c, 'STI'),
   NTI: (c) => drawInverterShape(c, 'NTI'),

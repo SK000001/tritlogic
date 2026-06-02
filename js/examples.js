@@ -143,6 +143,42 @@ const EXAMPLES = {
       ],
     })),
   },
+  'regfile-wordbus': {
+    label: 'Register file (word bus — one wire instead of six)',
+    build: () => buildExample((c, w) => ({
+      // The same two-entry, 3-trit register-file read port as `regfile-bus`,
+      // but each register's word is MERGEd to a bus and driven onto a single
+      // shared bus wire through a TRIBUF3, gated by a one-hot read-enable.
+      // Asserting one enable puts that register's word on the bus; none floats
+      // it (Z); both (differing words) is contention (X). A SPLIT3 recovers the
+      // trits at the destination. Six tri-state wires collapse to one.
+      comps: [
+        c('rd0', 'INPUT', 70, 110, { value: 1, name: 'rdR0' }),
+        c('rd1', 'INPUT', 70, 330, { value: 0, name: 'rdR1' }),
+        c('r0', 'REG3', 200,  70, { q: [ 1, -1,  0] }),
+        c('r1', 'REG3', 200, 300, { q: [-1,  0,  1] }),
+        c('m0', 'MERGE3', 360,  80),
+        c('m1', 'MERGE3', 360, 310),
+        c('g0', 'TRIBUF3', 470, 110),
+        c('g1', 'TRIBUF3', 470, 340),
+        c('s',  'SPLIT3', 620, 200),
+        c('o0', 'OUTPUT', 770, 160, { name: 'bus0' }),
+        c('o1', 'OUTPUT', 770, 220, { name: 'bus1' }),
+        c('o2', 'OUTPUT', 770, 280, { name: 'bus2' }),
+      ],
+      wires: [
+        // R0 word → MERGE → TRIBUF3 (gated by rdR0).
+        w('r0', 'q0', 'm0', 't0'), w('r0', 'q1', 'm0', 't1'), w('r0', 'q2', 'm0', 't2'),
+        w('m0', 'bus', 'g0', 'in'), w('rd0', 'out', 'g0', 'en'),
+        // R1 word → MERGE → TRIBUF3 (gated by rdR1).
+        w('r1', 'q0', 'm1', 't0'), w('r1', 'q1', 'm1', 't1'), w('r1', 'q2', 'm1', 't2'),
+        w('m1', 'bus', 'g1', 'in'), w('rd1', 'out', 'g1', 'en'),
+        // Both buffers share ONE bus wire into the splitter.
+        w('g0', 'out', 's', 'bus'), w('g1', 'out', 's', 'bus'),
+        w('s', 't0', 'o0', 'in'), w('s', 't1', 'o1', 'in'), w('s', 't2', 'o2', 'in'),
+      ],
+    })),
+  },
   'min-max': {
     label: 'MIN / MAX (ternary AND / OR)',
     build: () => buildExample((c, w) => ({
