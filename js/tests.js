@@ -697,6 +697,46 @@ test('A3 tri-state bus: two TRIBUFs onto one net resolve through the engine', ()
   assertEq(s.outVals['7:out'], -1, 'inverter of agreed bus=1 is −1:');
 });
 
+test('A3 register-file demo: one-hot read selects a register onto the shared bus', () => {
+  // Drive the actual `regfile-bus` Examples preset and resolve each bus line
+  // from the TRIBUFs wired into it — verifying the preset's wiring as well as
+  // the multi-driver bus semantics.
+  const { comps, wires } = EXAMPLES['regfile-bus'].build();
+  const inByName = {}, outByName = {};
+  for (const c of comps) {
+    if (c.type === 'INPUT')  inByName[c.state.name]  = c;
+    if (c.type === 'OUTPUT') outByName[c.state.name] = c;
+  }
+  const run = () => { const s = { comps, wires, outVals: {} }; simulateScope(s); return s; };
+  // Resolve a named bus probe: gather every driver wired into its `in` pin.
+  const busVal = (s, name) => {
+    const oid = outByName[name].id;
+    const drivers = wires.filter(wr => wr.toId === oid && wr.toPort === 'in')
+                         .map(wr => s.outVals[`${wr.fromId}:${wr.fromPort}`] ?? null);
+    return resolveDrivers(drivers);
+  };
+  const bus = (s) => JSON.stringify([busVal(s, 'bus0'), busVal(s, 'bus1'), busVal(s, 'bus2')]);
+
+  // Default one-hot (rdR0=1, rdR1=0) → bus reads R0's seeded value.
+  let s = run();
+  assertEq(bus(s), JSON.stringify([1, -1, 0]), 'rdR0 selects R0:');
+
+  // Flip the one-hot to R1 → bus reads R1's seeded value.
+  inByName.rdR0.state.value = 0; inByName.rdR1.state.value = 1;
+  s = run();
+  assertEq(bus(s), JSON.stringify([-1, 0, 1]), 'rdR1 selects R1:');
+
+  // No read-enable asserted → every line floats (Z).
+  inByName.rdR0.state.value = 0; inByName.rdR1.state.value = 0;
+  s = run();
+  assertEq(bus(s), JSON.stringify(['Z', 'Z', 'Z']), 'no read-enable floats the bus:');
+
+  // Both asserted with differing trits on every line → contention (X).
+  inByName.rdR0.state.value = 1; inByName.rdR1.state.value = 1;
+  s = run();
+  assertEq(bus(s), JSON.stringify(['X', 'X', 'X']), 'two disagreeing drivers → X:');
+});
+
 test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () => {
   registerBuiltinSubcircuits();
   const expect = {

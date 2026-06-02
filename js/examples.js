@@ -73,6 +73,52 @@ const EXAMPLES = {
       ],
     })),
   },
+  'regfile-bus': {
+    label: 'Tri-state register file (one-hot read onto a shared bus)',
+    build: () => buildExample((c, w) => ({
+      // A two-entry, 3-trit register-file read port. Two REG3s pre-seeded with
+      // distinct values each drive the shared 3-trit read bus through a column
+      // of TRIBUFs gated by a per-register read-enable. Asserting exactly one
+      // read-enable (one-hot) selects which register's value appears on the
+      // bus0..bus2 probes; asserting none floats the bus (Z); asserting both
+      // (with differing trits) is contention (X). The d/clk/ld ports are left
+      // unconnected — the registers simply hold their seeded contents, so the
+      // demo is purely about the read side. Scales to N registers by adding
+      // more rows; the bus resolution is unchanged.
+      comps: [
+        // One-hot read-enable lines (default: R0 selected).
+        c('rd0', 'INPUT', 80, 120, { value: 1, name: 'rdR0' }),
+        c('rd1', 'INPUT', 80, 360, { value: 0, name: 'rdR1' }),
+        // Two registers, pre-seeded with distinct 3-trit values.
+        c('r0', 'REG3', 220,  80, { q: [ 1, -1,  0] }),
+        c('r1', 'REG3', 220, 320, { q: [-1,  0,  1] }),
+        // R0's read-port column: one TRIBUF per trit, all gated by rdR0.
+        c('a0', 'TRIBUF', 430,  70),
+        c('a1', 'TRIBUF', 430, 130),
+        c('a2', 'TRIBUF', 430, 190),
+        // R1's read-port column, gated by rdR1.
+        c('b0', 'TRIBUF', 430, 310),
+        c('b1', 'TRIBUF', 430, 370),
+        c('b2', 'TRIBUF', 430, 430),
+        // The shared bus: each line driven by both registers' trit-i buffers.
+        c('y0', 'OUTPUT', 650, 150, { name: 'bus0' }),
+        c('y1', 'OUTPUT', 650, 250, { name: 'bus1' }),
+        c('y2', 'OUTPUT', 650, 350, { name: 'bus2' }),
+      ],
+      wires: [
+        // R0 trits → its buffers; rdR0 → each buffer's enable.
+        w('r0', 'q0', 'a0', 'in'), w('r0', 'q1', 'a1', 'in'), w('r0', 'q2', 'a2', 'in'),
+        w('rd0', 'out', 'a0', 'en'), w('rd0', 'out', 'a1', 'en'), w('rd0', 'out', 'a2', 'en'),
+        // R1 trits → its buffers; rdR1 → each buffer's enable.
+        w('r1', 'q0', 'b0', 'in'), w('r1', 'q1', 'b1', 'in'), w('r1', 'q2', 'b2', 'in'),
+        w('rd1', 'out', 'b0', 'en'), w('rd1', 'out', 'b1', 'en'), w('rd1', 'out', 'b2', 'en'),
+        // Both registers' trit-i buffers share bus line i.
+        w('a0', 'out', 'y0', 'in'), w('b0', 'out', 'y0', 'in'),
+        w('a1', 'out', 'y1', 'in'), w('b1', 'out', 'y1', 'in'),
+        w('a2', 'out', 'y2', 'in'), w('b2', 'out', 'y2', 'in'),
+      ],
+    })),
+  },
   'min-max': {
     label: 'MIN / MAX (ternary AND / OR)',
     build: () => buildExample((c, w) => ({
