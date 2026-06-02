@@ -28,7 +28,7 @@ import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
 export function registerTests(deps) {
   const {
     TYPES, EXAMPLES,
-    buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef,
+    buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef,
     cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
     debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
@@ -1548,6 +1548,91 @@ test('Microcode-dispatch demo: macro-ops dispatch to multi-cycle microroutines',
     assertEq(JSON.stringify(seenM),
              JSON.stringify([1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4]),
              'macro-PC advances one instruction per routine, holds mid-routine:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+// ---- E3 Phase 4: macro-PC sequencer + the microcoded CPU3 datapath ----
+test('MPCSEQ macro-PC sequencer: advance / hold / jump', () => {
+  if (!subcircuitDefs['MPCSEQ']) subcircuitDefs['MPCSEQ'] = buildMpcseqDef();
+  const def = subcircuitDefs['MPCSEQ'];
+  const run = (pcCtl, p0, p1, t0, t1) => {
+    const instance = { type: 'SUB:MPCSEQ', state: {}, subScope: cloneSubScope(def) };
+    return simulateSubInstance(instance, { pcCtl, p0, p1, t0, t1 });
+  };
+  // ADV (pcCtl=0): jmp=0 so the native PC increments; targets don't-care.
+  assertEq(run(0, 1, -1, 0, 1).jmp, 0, 'ADV: jmp=0 (PC increments):');
+  // HOLD (pcCtl=+1): jmp=+1 and j ← the PC's own address (self-reload = hold).
+  let o = run(1, 1, -1, 0, 0);
+  assertEq(`${o.jmp},${o.j0},${o.j1}`, '1,1,-1', 'HOLD: reload self (p0,p1):');
+  // JMP (pcCtl=T): jmp=+1 and j ← the jump target (the instruction operand).
+  o = run(-1, 1, -1, -1, 1);
+  assertEq(`${o.jmp},${o.j0},${o.j1}`, '1,-1,1', 'JMP: load the target (t0,t1):');
+});
+
+test('CPU3 (microcoded) runs the counter — ACC climbs 0,1,2,3 like CPU2', () => {
+  // The microengine drives the real ACC/ALU datapath. The default program is
+  // the same counter CPU2 runs (ADDI +1 / JMP 0). CPU3 is multi-cycle (two
+  // clocks per instruction: dispatch + execute), so ACC climbs more slowly in
+  // wall-clock steps, but the VALUE progression must be identical: 0,1,2,3,…
+  const ex = EXAMPLES['cpu3'].build();
+  const acc = ex.comps.find(c => c.type === 'REG3');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    assertEq(tritsToInt(acc.state.q), 0, 'ACC starts at 0:');
+    const seen = [];
+    for (let i = 0; i < 24; i++) { stepSequential(); seen.push(tritsToInt(acc.state.q)); }
+    // Collapse runs of equal values: ACC must only ever step up by 1, never
+    // skip or decrement — the microcoded counter agrees with CPU2's semantics.
+    const progression = seen.filter((v, i) => i === 0 || v !== seen[i - 1]);
+    assertEq(JSON.stringify(progression), JSON.stringify([0, 1, 2, 3]),
+             'ACC increments by 1 each loop (0→1→2→3), no skips:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+test('CPU3 STORE / LOAD round-trip through DMEM', () => {
+  // Exercises the microcoded DMEM datapath: STORE writes ACC to memory, a later
+  // ADDI changes ACC, then LOAD pulls the stored value back. Program:
+  //   0 ADDI +1      ACC = 1
+  //   1 STORE @5     DMEM[5] = 1
+  //   2 ADDI +1      ACC = 2
+  //   3 LOAD  @5     ACC = DMEM[5] = 1   (so ACC drops 2 → 1)
+  //   4 JMP 4        spin
+  const ex = EXAMPLES['cpu3'].build();
+  const alu = ex.comps.find(c => c.type === 'ALU');
+  // imem_lo feeds ALU.b0 (oper0); imem_hi feeds ALU.b1 (oper1).
+  const loId = ex.wires.find(z => z.toId === alu.id && z.toPort === 'b0').fromId;
+  const hiId = ex.wires.find(z => z.toId === alu.id && z.toPort === 'b1').fromId;
+  const imemLo = ex.comps.find(c => c.id === loId);
+  const imemHi = ex.comps.find(c => c.id === hiId);
+  imemLo.state.mem = [
+    [0, 0, 1],   // 0: ADDI +1
+    [1, 1, 1],   // 1: STORE  opL=+1,opH=+1, oper0=+1  → DMEM addr (1,0)=idx5
+    [0, 0, 1],   // 2: ADDI +1
+    [0, 1, 1],   // 3: LOAD   opL=0, opH=+1, oper0=+1  → DMEM addr (1,0)=idx5
+    [0, -1, 0],  // 4: JMP    opL=0, opH=T,  oper0=0   → target (0,0)=word4 (self)
+    [-1, -1, 0], [-1, -1, 0], [-1, -1, 0], [-1, -1, 0],
+  ];
+  imemHi.state.mem = [
+    [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+    [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+  ];
+  const acc = ex.comps.find(c => c.type === 'REG3');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    const seen = [];
+    for (let i = 0; i < 24; i++) { stepSequential(); seen.push(tritsToInt(acc.state.q)); }
+    assertEq(seen.includes(2), true, 'ACC reaches 2 (second ADDI, before LOAD):');
+    assertEq(tritsToInt(acc.state.q), 1, 'LOAD restores ACC to the STORE-d value 1:');
   } finally {
     setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     syncCompMap();

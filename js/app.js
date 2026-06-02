@@ -3771,6 +3771,66 @@ function buildUfieldsDef() {
   };
 }
 
+//  MPCSEQ — macro-PC sequencer (Microcode Kit, E3 Phase 4 — see MICROCODE.md).
+//  The sibling of MSEQ, but for the *macro*-PC instead of the µPC. A
+//  microcoded instruction takes several clocks, so the macro-PC must HOLD its
+//  address mid-routine (the native PC has no hold — it always increments or
+//  loads). MPCSEQ turns a 1-trit `pcCtl` field into the PC's jmp / j0 / j1:
+//    pcCtl = 0  (ADV)  → jmp=0            : PC increments to the next instr
+//    pcCtl = +1 (HOLD) → jmp=+1, j=(p0,p1): PC reloads itself → holds
+//    pcCtl = T  (JMP)  → jmp=+1, j=(t0,t1): PC loads the jump target (operand)
+//  p0/p1 are fed back from the macro-PC's own outputs (self-reload = hold);
+//  t0/t1 are the jump-target address (the instruction operand). Like MSEQ it
+//  is three native MUXes keyed on pcCtl — the routing IS the decode.
+function buildMpcseqDef() {
+  const { comps, wires } = buildExample((c, w) => {
+    const comps = [];
+    const wires = [];
+    comps.push(c('pcCtl', 'INPUT', 40,  40, { value: 0, name: 'pcCtl' }));
+    comps.push(c('p0',    'INPUT', 40, 100, { value: 0, name: 'p0' }));
+    comps.push(c('p1',    'INPUT', 40, 160, { value: 0, name: 'p1' }));
+    comps.push(c('t0',    'INPUT', 40, 220, { value: 0, name: 't0' }));
+    comps.push(c('t1',    'INPUT', 40, 280, { value: 0, name: 't1' }));
+    comps.push(c('cP', 'CONST', 40, 340, { value: 1 }));   // +1 (load on HOLD/JMP)
+    comps.push(c('cZ', 'CONST', 40, 400, { value: 0 }));   //  0 (increment on ADV)
+
+    // jmp = MUX(pcCtl; dT=+1 (JMP load), d0=0 (ADV inc), dP=+1 (HOLD load)).
+    comps.push(c('mxJmp', 'MUX', 280, 60));
+    wires.push(w('pcCtl', 'out', 'mxJmp', 's'));
+    wires.push(w('cP', 'out', 'mxJmp', 'dT'));
+    wires.push(w('cZ', 'out', 'mxJmp', 'd0'));
+    wires.push(w('cP', 'out', 'mxJmp', 'dP'));
+    // j0 = MUX(pcCtl; dT=t0 (JMP target), d0=p0 (ADV don't-care), dP=p0 (HOLD self)).
+    comps.push(c('mxJ0', 'MUX', 280, 200));
+    wires.push(w('pcCtl', 'out', 'mxJ0', 's'));
+    wires.push(w('t0', 'out', 'mxJ0', 'dT'));
+    wires.push(w('p0', 'out', 'mxJ0', 'd0'));
+    wires.push(w('p0', 'out', 'mxJ0', 'dP'));
+    // j1 = MUX(pcCtl; dT=t1, d0=p1, dP=p1).
+    comps.push(c('mxJ1', 'MUX', 280, 340));
+    wires.push(w('pcCtl', 'out', 'mxJ1', 's'));
+    wires.push(w('t1', 'out', 'mxJ1', 'dT'));
+    wires.push(w('p1', 'out', 'mxJ1', 'd0'));
+    wires.push(w('p1', 'out', 'mxJ1', 'dP'));
+
+    comps.push(c('out_jmp', 'OUTPUT', 500,  70, { name: 'jmp' }));
+    comps.push(c('out_j0',  'OUTPUT', 500, 210, { name: 'j0' }));
+    comps.push(c('out_j1',  'OUTPUT', 500, 350, { name: 'j1' }));
+    wires.push(w('mxJmp', 'out', 'out_jmp', 'in'));
+    wires.push(w('mxJ0',  'out', 'out_j0',  'in'));
+    wires.push(w('mxJ1',  'out', 'out_j1',  'in'));
+    return { comps, wires };
+  });
+  return {
+    inputs:  [{ name: 'pcCtl' }, { name: 'p0' }, { name: 'p1' },
+              { name: 't0' }, { name: 't1' }],
+    outputs: [{ name: 'jmp' }, { name: 'j0' }, { name: 'j1' }],
+    comps, wires,
+    nextCompId: comps.reduce((m, c) => Math.max(m, c.id), 0) + 1,
+    nextWireId: wires.reduce((m, z) => Math.max(m, z.id), 0) + 1,
+  };
+}
+
 // ============================================================================
 //  SEQUENTIAL KIT — gate-level structural twins of the stateful primitives
 // ============================================================================
@@ -4123,6 +4183,7 @@ const BUILTIN_SUBCIRCUITS = {
   ACC_SIGN: { kit: 'Control Kit',    build: buildAccSignDef },
   MSEQ:     { kit: 'Microcode Kit',  build: buildMseqDef },
   UFIELDS:  { kit: 'Microcode Kit',  build: buildUfieldsDef },
+  MPCSEQ:   { kit: 'Microcode Kit',  build: buildMpcseqDef },
 };
 // Kit headings, in library-panel order.
 const BUILTIN_SUBCIRCUIT_KITS = [
@@ -4130,7 +4191,7 @@ const BUILTIN_SUBCIRCUIT_KITS = [
   { label: 'Arithmetic Kit', names: ['TSUM', 'TCARRY', 'FADD', 'ALU3', 'MUX3'] },
   { label: 'Sequential Kit', names: ['TLATCH', 'TFLOP', 'TREG3', 'TPC', 'TRAM'] },
   { label: 'Control Kit',    names: ['DECODE2', 'ACC_SIGN'] },
-  { label: 'Microcode Kit',  names: ['MSEQ', 'UFIELDS'] },
+  { label: 'Microcode Kit',  names: ['MSEQ', 'UFIELDS', 'MPCSEQ'] },
 ];
 // Seed the built-ins into the library. Called at boot and re-called after a
 // load; the `if absent` guard means a loaded file's own same-named
@@ -4145,6 +4206,7 @@ const EXAMPLES = createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
   buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef, buildUfieldsDef,
+  buildMpcseqDef,
   subcircuitDefs,
 });
 
@@ -4196,7 +4258,7 @@ function loadExample() { loadExampleNamed('t-flop'); }
 
 const { TESTS, runAllTests } = registerTests({
   TYPES, EXAMPLES,
-  buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
+  buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
   debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,

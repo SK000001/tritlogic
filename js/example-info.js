@@ -21,7 +21,7 @@ export const EXAMPLE_INFO_CATEGORIES = [
   ['Routing & memory',   ['mux-demo', 'd-storage', 't-flop', 'ram-store', 'pc-demo', 'tryte-io']],
   ['Buses',              ['tristate-bus', 'regfile-bus', 'word-bus', 'regfile-wordbus', 'tryte-bus', 'bus-datapath']],
   ['CPU',                ['cpu', 'cpu-structural', 'cpu2']],
-  ['Microcode',          ['microcode-seq', 'microcode-fields', 'microcode-dispatch']],
+  ['Microcode',          ['microcode-seq', 'microcode-fields', 'microcode-dispatch', 'cpu3']],
   ['Neural net',         ['ternary-mac', 'ternary-layer', 'ternary-mlp']],
 ];
 
@@ -749,6 +749,59 @@ export const EXAMPLE_INFO = {
       <p>(With the <code>bi</code> clock each value is held for 2 steps.) No
       datapath is wired yet — this proves the <em>control flow</em> is multi-cycle.
       Phase 4 will attach the real ACC/ALU/DMEM so the routines actually compute.</p>`,
+  },
+  'cpu3': {
+    name: 'CPU3 — microcoded processor (Phase 4)',
+    tagline: 'The microengine drives a real ACC/ALU/DMEM datapath — runs CPU2’s counter',
+    body: `
+      <p>The payoff of the microcode track: a working processor whose control
+      unit is <em>soft</em>. CPU3 has the <b>same datapath and same v2
+      instruction words as CPU2</b> — ACC, ALU, data memory, the two-bank IMEM —
+      but CPU2's one-shot <code>DECODE2</code> is replaced by the microengine
+      from Phases 1–3. Each instruction now runs a multi-cycle microroutine.</p>
+      <pre class="info-diagram">
+   macro side                       micro side (the soft control unit)
+   ──────────                       ──────────────────────────────────
+   mPC ─▶ IMEM ─▶ opcode ─▶ dispatch ROM ─ entry µaddr ─▶ MSEQ ─▶ µPC
+    ▲       │                                              ▲       │
+    │       └─ operand ─▶ ALU.b / DMEM.addr / jump tgt     │  control store
+    │                                                       └── UFIELDS ◀┘
+    │   ┌──────┐ aluOp   ┌─────┐ accSrc  ┌─────┐                 │ fields
+    └─ MPCSEQ ◀┤ pcCtl   │ ALU │─▶ MUX ─▶│ ACC │   memWrite ─▶ DMEM
+        ▲      └─────────┴──┬──┘  ▲      └─────┘
+        └ p0,p1 (self)      │     └─ DMEM read (LOAD)
+                         accWrite
+      </pre>
+      <p>Every control line the datapath needs comes out of <b>UFIELDS</b>
+      reading the current microinstruction: <code>aluOp</code> → ALU mode,
+      <code>accWrite</code> → ACC load-enable, <code>accSrc</code> → the
+      ALU-vs-DMEM MUX, <code>memWrite</code> → DMEM write, and <code>pcCtl</code>
+      → the new <b>MPCSEQ</b> macro-PC sequencer (advance / hold / jump).</p>
+
+      <h4>How an instruction executes</h4>
+      <ol>
+        <li><b>µ0 — dispatch.</b> The opcode indexes the dispatch ROM; MSEQ jumps
+        the µPC to that op's routine. <code>pcCtl = HOLD</code> keeps the macro-PC
+        parked on this instruction so its operand stays valid all through the
+        routine.</li>
+        <li><b>routine.</b> The op's µword(s) drive the datapath — e.g. ADDI sets
+        <code>aluOp = ADD</code>, <code>accWrite = +1</code>, so ACC ← ACC +
+        operand. The final µword also sets <code>pcCtl = ADV</code> (next
+        instruction) or <code>JMP</code> (load the operand as target), and
+        <code>seqMode = FETCH</code> to send the µPC back to µ0.</li>
+      </ol>
+      <p>The microprogram fits the 9-word store exactly: µ0 dispatch + one-µword
+      routines for <b>NOP, ADDI, MAXI, MINI, JMP, LOAD, STORE</b> + a spare.
+      (The two conditional jumps JMPP/JMPZ are deferred — they need a conditional
+      sequencer and the µword budget is full; see <code>MICROCODE.md</code>.)</p>
+
+      <h4>What to watch</h4>
+      <p>The default program is CPU2's counter — <code>ADDI +1</code> /
+      <code>JMP 0</code>. Press <b>Play</b>: <code>ACC0/1/2</code> climbs
+      0, 1, 2, 3, … exactly like CPU2, but each instruction now takes <b>two
+      clocks</b> (dispatch, then execute), so it counts at half the wall-clock
+      rate. That slowdown <em>is</em> microcode — the control unit is a little
+      program now, not a slab of gates.</p>`,
   },
 
   // ---- Neural net ----------------------------------------------------------

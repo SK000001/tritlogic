@@ -1,12 +1,14 @@
 # MICROCODE.md — design doc for E3 (microcoded CPU3)
 
-> **Status (2026-06-03):** design + **Phases 1–3 shipped** — Phase 1 the
+> **Status (2026-06-03):** design + **Phases 1–4 shipped** — Phase 1 the
 > `MSEQ` microsequencer + `microcode-seq` demo; Phase 2 the `UFIELDS`
 > field decoder + a two-bank control store (`microcode-fields` demo);
-> Phase 3 the dispatch map + the fetch/dispatch/return loop, running a
-> two-op micro-ISA multi-cycle end to end (`microcode-dispatch` demo).
-> Phases 4–5 below are the remaining plan for the full microcoded CPU3.
-> This is the live spec — mirrors how `ISA_v2.md` preceded E2b.
+> Phase 3 the dispatch map + the fetch/dispatch/return loop
+> (`microcode-dispatch` demo); Phase 4 the **`cpu3` preset** — the
+> microengine driving the real ACC/ALU/DMEM datapath, running the counter
+> identically to CPU2, plus the `MPCSEQ` macro-PC sequencer.
+> Phase 5 below is the remaining plan. This is the live spec — mirrors how
+> `ISA_v2.md` preceded E2b.
 
 ---
 
@@ -164,6 +166,58 @@ The `microcode-dispatch` example runs a two-op micro-ISA — **ADDI** (a
 macro-PC advances exactly once per instruction; no datapath yet, so this
 proves the *control flow* is multi-cycle. Tested on both PC trajectories.
 
+### Datapath integration — the `cpu3` preset (Phase 4) — **DONE**
+
+`cpu3` is the microcoded twin of CPU2: **the same v2 instruction words and
+the same ACC / ALU / DMEM datapath**, but the single-cycle `DECODE2` +
+combinational control is gone — control now comes from the microengine
+(µPC → control store → `UFIELDS` → the datapath control lines).
+
+**`MPCSEQ` (Microcode Kit, new).** The sibling of `MSEQ`, for the *macro*-PC.
+Phase 3 held the macro-PC by hardwiring `pcCtl→jmp` + self-feedback; Phase 4
+needs a real `JMP` too, so this is promoted to a subcircuit — three native
+MUXes keyed on a 1-trit `pcCtl`, mirroring MSEQ:
+
+```
+  pcCtl = 0  (ADV)  → jmp=0            : PC increments to the next instruction
+  pcCtl = +1 (HOLD) → jmp=+1, j=(p0,p1): PC reloads itself  → holds
+  pcCtl = T  (JMP)  → jmp=+1, j=(t0,t1): PC loads the operand → branch
+```
+
+`p0/p1` feed back from the macro-PC's own outputs; `t0/t1` are the jump
+target (the instruction operand, same `imem_lo.q2`/`imem_hi.q0` CPU2 uses).
+
+**The µ0-holds refinement.** Phase 3's demo advanced the macro-PC *at* µ0
+(dispatch). With a real datapath that breaks: the routine reads the
+instruction's operand on a *later* clock, by which point the macro-PC has
+already moved on. So Phase 4 flips it — **µ0 holds** (`pcCtl = HOLD`, keeping
+the macro-PC on the current instruction so its operand stays valid through
+the whole routine), and the routine's **last µword advances**: `pcCtl = ADV`
+for the next instruction, or `pcCtl = JMP` to load the operand as target.
+Both latch on the same edge as `seqMode = FETCH`, from the pre-edge settled
+values, so the operand-driven ACC write and the macro-PC advance are
+consistent.
+
+**The microprogram** (9 µwords — fits the 9×3 store exactly):
+
+```
+  µ0 dispatch (DISP, HOLD)   µ5 JMP   (FETCH, pcCtl=JMP)
+  µ1 NOP                     µ6 LOAD  (accSrc=DMEM, mem=read, accW, ADV)
+  µ2 ADDI (ADD, accW, ADV)   µ7 STORE (mem=write, ADV)
+  µ3 MAXI (MAX, accW, ADV)   µ8 spare
+  µ4 MINI (MIN, accW, ADV)
+```
+
+The dispatch ROM maps all 9 opcodes; **7 are wired** (NOP/ADDI/MAXI/MINI/
+JMP/LOAD/STORE). The two **conditional jumps JMPP/JMPZ are deferred** — they
+need the µPC's *next* address to depend on an ACC-sign condition (a
+conditional microsequencer, not a static `seqMode` field), and the 9-µword
+budget is already full. They're the natural Phase 5 / deeper-ROM work.
+
+The default program is CPU2's counter (`ADDI +1` / `JMP 0`); ACC climbs
+0,1,2,3,… identically, just at 2 clocks/instruction (dispatch + execute).
+Tests: the counter ACC progression + a STORE/LOAD round-trip through DMEM.
+
 ---
 
 ## Phase plan (one commit per phase, suite green throughout)
@@ -182,11 +236,12 @@ proves the *control flow* is multi-cycle. Tested on both PC trajectories.
   A two-op micro-ISA (ADDI 1-µword, LOAD 2-µword) running multi-cycle end
   to end (no real ALU yet). `microcode-dispatch` demo + a test on both PC
   trajectories.
-- **Phase 4 — datapath integration (CPU3 preset).** Replace CPU2's
-  `DECODE2`+combinational control with the microengine driving the
-  *real* ACC/ALU/DMEM datapath. The `cpu3` preset. Re-run the counter
-  program; ACC must climb identically to CPU2. This is the big wiring
-  phase.
+- **Phase 4 — datapath integration (CPU3 preset).** ✅ Replaced CPU2's
+  `DECODE2`+combinational control with the microengine driving the *real*
+  ACC/ALU/DMEM datapath — the `cpu3` preset. Runs the counter identically
+  to CPU2 (just 2 clocks/instruction). New **`MPCSEQ`** macro-PC sequencer
+  + the µ0-holds refinement + a 9-µword microprogram for 7 of the 9 ops.
+  See the section below.
 - **Phase 5 — assembler/debugger + microcode authoring.** Debugger
   shows the µPC + current microinstruction alongside the macro-PC; a
   way to view/edit the control store. The macro-assembler is unchanged
@@ -198,12 +253,14 @@ proves the *control flow* is multi-cycle. Tested on both PC trajectories.
   µword needs ~7 fields → 3 parallel banks, and a real microprogram
   needs >9 µwords → either accept ≤9 µwords for CPU3's small ISA, or add
   a wider/deeper native `ROM` (breaks the "composition only" ethos but
-  may be necessary past Phase 3). **Lean:** stay on parallel 9×3 RAMs
-  through Phase 3; revisit a `ROM` primitive only if Phase 4's
-  microprogram overflows 9 µwords. **Phase 3 fit easily** — the two-op
-  demo uses 5 µwords (µ0 dispatch + ADDI's 1 + LOAD's 2 + a NOP word).
-  Phase 4's full 9-op ISA, with several multi-µword routines, is the real
-  test of the 9-µword ceiling; that's where a deeper `ROM` may land.
+  may be necessary past Phase 4). **RESOLVED for Phase 4 by keeping every
+  routine to 1 µword** (the combinational ALU/DMEM read lets ADDI, LOAD,
+  STORE each finish in one µword): µ0 dispatch + 7 one-µword routines + 1
+  spare = 9 µwords, an exact fit. **What the ceiling cost us:** the two
+  conditional jumps (JMPP/JMPZ) are deferred — they'd need either extra
+  µwords or a conditional sequencer. So the 9-µword wall is real and is
+  the trigger for a deeper `ROM` primitive (E5) the moment CPU3 wants the
+  full 9 ops or any multi-µword routine (a microcoded multiply, shifts).
 - **µPC encoding.** Reuse `PC` (the `+4` offset, wrap-at-8) as the µPC —
   `MSEQ` already targets that encoding. Good enough for ≤9 µwords.
 - **Save-format.** Pure composition + existing components → no

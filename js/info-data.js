@@ -29,7 +29,7 @@ export const INFO_CATEGORIES = [
   ['Arithmetic kit', ['SUB:TSUM', 'SUB:TCARRY', 'SUB:FADD', 'SUB:ALU3', 'SUB:MUX3']],
   ['Sequential kit', ['SUB:TLATCH', 'SUB:TFLOP', 'SUB:TREG3', 'SUB:TPC', 'SUB:TRAM']],
   ['Control kit',    ['SUB:DECODE2', 'SUB:ACC_SIGN']],
-  ['Microcode kit',  ['SUB:MSEQ', 'SUB:UFIELDS']],
+  ['Microcode kit',  ['SUB:MSEQ', 'SUB:UFIELDS', 'SUB:MPCSEQ']],
   ['ISA',            ['_asm', '_isa2', '_debugger']],
 ];
 
@@ -1754,5 +1754,43 @@ memRead  = is0(m_mem) = MAX(MIN(PTI, STI(NTI)), 0)   ; +1 iff read</pre>
       a two-bank control store walk a microprogram, and the named control
       lines (aluOp / accWrite / memWrite / memRead) change per µstep — the
       control unit running dry, ahead of the Phase-4 datapath.</p>`,
+  },
+
+  'SUB:MPCSEQ': {
+    name: 'MPCSEQ — macro-PC sequencer',
+    tagline: 'Steers the macro-PC: advance / hold / jump (E3 Phase 4)',
+    body: `
+      <p><b>MPCSEQ</b> is the third Microcode-kit subcircuit — the sibling of
+      <b>MSEQ</b>, but for the <em>macro</em>-PC instead of the µPC. In a
+      microcoded CPU a single instruction takes several clocks, so the macro-PC
+      must be able to <em>hold</em> its address while the microroutine runs. The
+      native <code>PC</code> can't hold — every edge it either increments or
+      loads — so MPCSEQ supplies the missing behaviour.</p>
+
+      <h4>Control modes</h4>
+      <table class="info-tt" style="text-align:center">
+        <thead><tr><th>pcCtl</th><th>mode</th><th>macro-PC next</th></tr></thead>
+        <tbody>
+          <tr><td class="trit-0">0</td><td>ADV</td><td>PC + 1 (next instruction)</td></tr>
+          <tr><td class="trit-P">+1</td><td>HOLD</td><td>same address (stay put)</td></tr>
+          <tr><td class="trit-T">T</td><td>JMP</td><td>jump target (the operand)</td></tr>
+        </tbody>
+      </table>
+
+      <h4>Internal structure</h4>
+      <p>Like MSEQ, it is <b>three native MUXes</b> keyed on <code>pcCtl</code>,
+      driving a <code>PC</code>'s <code>jmp</code> / <code>j0</code> /
+      <code>j1</code>:</p>
+      <pre style="margin: 4px 0; padding: 6px; background: var(--panel-2); border-radius: 4px; font-size: 11px;">
+jmp = MUX(pcCtl; dT=+1,  d0=0,  dP=+1)
+j0  = MUX(pcCtl; dT=t0,  d0=p0, dP=p0)
+j1  = MUX(pcCtl; dT=t1,  d0=p1, dP=p1)</pre>
+      <p>ADV lets the PC increment (<code>jmp = 0</code>); HOLD makes the PC
+      <em>reload its own address</em> (<code>j ← p0,p1</code>) so it stays put;
+      JMP loads the target <code>t0,t1</code> (wired to the instruction operand).
+      Feed <code>p0/p1</code> back from the macro-PC's own outputs and
+      <code>t0/t1</code> from the operand. See the <b>CPU3</b> example, where the
+      <code>pcCtl</code> field of each microinstruction drives MPCSEQ — µ0 HOLDs
+      during dispatch, and each routine's final µword ADVances or JMPs.</p>`,
   },
 };

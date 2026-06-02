@@ -15,6 +15,7 @@ export function createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
   buildTsumDef, buildDecode2Def, buildAccSignDef, buildMseqDef, buildUfieldsDef,
+  buildMpcseqDef,
   subcircuitDefs,
 }) {
 const EXAMPLES = {
@@ -495,6 +496,168 @@ const EXAMPLES = {
           w('upc', 'p0', 'oUpc0', 'in'), w('upc', 'p1', 'oUpc1', 'in'),
           w('uf', 'seqMode', 'oSeq', 'in'), w('uf', 'pcCtl', 'oPc', 'in'),
           w('upc', 'p0', 'wU', 'in'),
+        ],
+      }));
+    },
+  },
+  'cpu3': {
+    label: 'CPU3 — microcoded processor (microengine drives the datapath)',
+    build: () => {
+      if (!subcircuitDefs['MSEQ'])    subcircuitDefs['MSEQ']    = buildMseqDef();
+      if (!subcircuitDefs['UFIELDS']) subcircuitDefs['UFIELDS'] = buildUfieldsDef();
+      if (!subcircuitDefs['MPCSEQ'])  subcircuitDefs['MPCSEQ']  = buildMpcseqDef();
+      return buildExample((c, w) => ({
+        // E3 Phase 4 (see MICROCODE.md). The microcoded counterpart of CPU2:
+        // the same ACC / ALU / DMEM datapath and the same v2 instruction words,
+        // but the single-cycle DECODE2 + combinational control is replaced by a
+        // MICROENGINE. Each macro-op now runs a multi-cycle MICROROUTINE.
+        //
+        //   macro side                         micro side (the control unit)
+        //   ──────────                         ─────────────────────────────
+        //   mPC → IMEM(lo,hi) → opcode         µPC → control store(romLo,romHi)
+        //          │  │            │                   → UFIELDS → control lines
+        //          │  │            ▼                        │ seqMode → MSEQ → µPC
+        //          │  │     dispatch ROM ─ entry µaddr ─────┘ disp
+        //          │  └── operand → ALU.b / DMEM.addr / jump target
+        //          ▼
+        //   datapath: ALU(ACC, operand) → accSrc MUX(ALU | DMEM) → ACC ; DMEM
+        //   mPC steered by MPCSEQ from the pcCtl field (ADV / HOLD / JMP).
+        //
+        // CONTROL FLOW: µ0 is the shared fetch/dispatch word — seqMode=DISP
+        // sends the µPC to the opcode's routine, pcCtl=HOLD keeps the macro-PC
+        // on the current instruction (so its operand stays valid all through the
+        // routine). The routine's last µword does the work AND advances: pcCtl=
+        // ADV (next instruction) or JMP (load the operand as target), seqMode=
+        // FETCH (µPC back to µ0). Microprogram (9 µwords, fits the 9×3 store):
+        //   µ0 dispatch · µ1 NOP · µ2 ADDI · µ3 MAXI · µ4 MINI · µ5 JMP
+        //   µ6 LOAD · µ7 STORE · µ8 spare. (JMPP/JMPZ deferred — they need a
+        //   conditional sequencer + the µword budget is full; see MICROCODE.md.)
+        //
+        // The default program is the v2 COUNTER (identical to CPU2's): word 0
+        // ADDI +1, word 1 JMP 0. Press Play — ACC climbs 0,1,2,3,… exactly like
+        // CPU2, just taking two clocks per instruction (dispatch + execute).
+        comps: [
+          c('clk',    'CLOCK',       40, 760, { value: -1, mode: 'bi' }),
+          // ---- macro side ----
+          c('mpc',    'PC',          170, 120, { p: [-1, -1] }),
+          c('imem_lo', 'RAM',        340,  60, { mem: [
+            [0, 0,  1],   // word 0: ADDI +1   (opL=0,opH=0, oper0=+1)
+            [0, -1, -1],  // word 1: JMP  0    (opL=0,opH=T, oper0=T)
+            [-1, -1, 0], [-1, -1, 0], [-1, -1, 0],
+            [-1, -1, 0], [-1, -1, 0], [-1, -1, 0], [-1, -1, 0],   // NOP padding
+          ] }),
+          c('imem_hi', 'RAM',        340, 250, { mem: [
+            [0, 0, 0],    // word 0
+            [-1, 0, 0],   // word 1: oper1=T  → jump target = (oper0,oper1)=(T,T)=word 0
+            [0, 0, 0], [0, 0, 0], [0, 0, 0],
+            [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
+          ] }),
+          // Dispatch ROM: opcode (a0=opL, a1=opH) → routine entry µaddr in q0/q1.
+          c('dmap',   'RAM',         560, 120, { mem: [
+            [0, -1, 0],   // 0 NOP  → µ1
+            [1, 0, 0],    // 1 JMP  → µ5
+            [0, -1, 0],   // 2 JMPP → µ1 (deferred)
+            [0, -1, 0],   // 3 JMPZ → µ1 (deferred)
+            [1, -1, 0],   // 4 ADDI → µ2
+            [-1, 0, 0],   // 5 MAXI → µ3
+            [0, 0, 0],    // 6 MINI → µ4
+            [-1, 1, 0],   // 7 LOAD → µ6
+            [0, 1, 0],    // 8 STORE→ µ7
+          ] }),
+          // ---- micro side ----
+          c('upc',    'PC',          170, 430, { p: [-1, -1] }),
+          c('romLo',  'RAM',         340, 430, { mem: [
+            [1, 0, 0],    // µ0: DISP
+            [-1, 0, 0],   // µ1: NOP   (FETCH)
+            [-1, 0, 1],   // µ2: ADDI  (FETCH, ADD, accW)
+            [-1, 1, 1],   // µ3: MAXI  (FETCH, MAX, accW)
+            [-1, -1, 1],  // µ4: MINI  (FETCH, MIN, accW)
+            [-1, 0, 0],   // µ5: JMP   (FETCH)
+            [-1, 0, 1],   // µ6: LOAD  (FETCH, accW)
+            [-1, 0, 0],   // µ7: STORE (FETCH)
+            [-1, 0, 0],   // µ8: spare (FETCH)
+          ] }),
+          c('romHi',  'RAM',         340, 620, { mem: [
+            [0, -1, 1],   // µ0: accSrc dc, mem none, pcCtl=HOLD
+            [0, -1, 0],   // µ1: pcCtl=ADV
+            [0, -1, 0],   // µ2: accSrc=ALU, mem none, pcCtl=ADV
+            [0, -1, 0],   // µ3: ADV
+            [0, -1, 0],   // µ4: ADV
+            [0, -1, -1],  // µ5: pcCtl=JMP
+            [1, 0, 0],    // µ6: accSrc=DMEM, mem=read, pcCtl=ADV
+            [0, 1, 0],    // µ7: mem=write, pcCtl=ADV
+            [0, -1, 0],   // µ8: ADV
+          ] }),
+          c('zero',   'CONST',       340, 880, { value: 0 }),
+          c('uf',     'SUB:UFIELDS', 560, 470),
+          c('mseq',   'SUB:MSEQ',    560, 700),
+          c('mpcseq', 'SUB:MPCSEQ',  560, 860),
+          // ---- datapath ----
+          c('alu',    'ALU',         820, 160),
+          c('accSrc0', 'MUX',        1020, 120),
+          c('accSrc1', 'MUX',        1020, 240),
+          c('accSrc2', 'MUX',        1020, 360),
+          c('acc',    'REG3',        1200, 200),
+          c('dmem',   'RAM',         820, 460),
+          // ---- readouts ----
+          c('oA0', 'OUTPUT', 1380, 200, { name: 'ACC0' }),
+          c('oA1', 'OUTPUT', 1380, 240, { name: 'ACC1' }),
+          c('oA2', 'OUTPUT', 1380, 280, { name: 'ACC2' }),
+          c('wclk', 'WAVE',  40,  860, { name: 'clk',  trace: [] }),
+          c('wacc', 'WAVE',  1380, 360, { name: 'ACC0', trace: [] }),
+        ],
+        wires: [
+          // Clock distribution.
+          w('clk', 'out', 'mpc', 'clk'),
+          w('clk', 'out', 'imem_lo', 'clk'), w('clk', 'out', 'imem_hi', 'clk'),
+          w('clk', 'out', 'dmap', 'clk'),
+          w('clk', 'out', 'upc', 'clk'),
+          w('clk', 'out', 'romLo', 'clk'), w('clk', 'out', 'romHi', 'clk'),
+          w('clk', 'out', 'acc', 'clk'), w('clk', 'out', 'dmem', 'clk'),
+          // Macro-PC addresses IMEM (both banks).
+          w('mpc', 'p0', 'imem_lo', 'a0'), w('mpc', 'p1', 'imem_lo', 'a1'),
+          w('mpc', 'p0', 'imem_hi', 'a0'), w('mpc', 'p1', 'imem_hi', 'a1'),
+          w('zero', 'out', 'imem_lo', 'we'), w('zero', 'out', 'imem_lo', 'd0'), w('zero', 'out', 'imem_lo', 'd1'), w('zero', 'out', 'imem_lo', 'd2'),
+          w('zero', 'out', 'imem_hi', 'we'), w('zero', 'out', 'imem_hi', 'd0'), w('zero', 'out', 'imem_hi', 'd1'), w('zero', 'out', 'imem_hi', 'd2'),
+          // Opcode (opL=imem_lo.q0, opH=imem_lo.q1) addresses the dispatch ROM.
+          w('imem_lo', 'q0', 'dmap', 'a0'), w('imem_lo', 'q1', 'dmap', 'a1'),
+          w('zero', 'out', 'dmap', 'we'), w('zero', 'out', 'dmap', 'd0'), w('zero', 'out', 'dmap', 'd1'), w('zero', 'out', 'dmap', 'd2'),
+          // µPC addresses the two-bank control store.
+          w('upc', 'p0', 'romLo', 'a0'), w('upc', 'p1', 'romLo', 'a1'),
+          w('upc', 'p0', 'romHi', 'a0'), w('upc', 'p1', 'romHi', 'a1'),
+          w('zero', 'out', 'romLo', 'we'), w('zero', 'out', 'romLo', 'd0'), w('zero', 'out', 'romLo', 'd1'), w('zero', 'out', 'romLo', 'd2'),
+          w('zero', 'out', 'romHi', 'we'), w('zero', 'out', 'romHi', 'd0'), w('zero', 'out', 'romHi', 'd1'), w('zero', 'out', 'romHi', 'd2'),
+          // µword → UFIELDS.
+          w('romLo', 'q0', 'uf', 'm_seq'), w('romLo', 'q1', 'uf', 'm_alu'), w('romLo', 'q2', 'uf', 'm_accW'),
+          w('romHi', 'q0', 'uf', 'm_accSrc'), w('romHi', 'q1', 'uf', 'm_mem'), w('romHi', 'q2', 'uf', 'm_pc'),
+          // Microsequencer: seqMode from UFIELDS, dispatch addr from the map.
+          w('uf', 'seqMode', 'mseq', 'seqMode'),
+          w('dmap', 'q0', 'mseq', 'disp0'), w('dmap', 'q1', 'mseq', 'disp1'),
+          w('mseq', 'jmp', 'upc', 'jmp'), w('mseq', 'j0', 'upc', 'j0'), w('mseq', 'j1', 'upc', 'j1'),
+          // Macro-PC sequencer: pcCtl + self-feedback + jump target (operand).
+          w('uf', 'pcCtl', 'mpcseq', 'pcCtl'),
+          w('mpc', 'p0', 'mpcseq', 'p0'), w('mpc', 'p1', 'mpcseq', 'p1'),
+          w('imem_lo', 'q2', 'mpcseq', 't0'), w('imem_hi', 'q0', 'mpcseq', 't1'),
+          w('mpcseq', 'jmp', 'mpc', 'jmp'), w('mpcseq', 'j0', 'mpc', 'j0'), w('mpcseq', 'j1', 'mpc', 'j1'),
+          // ALU: a = ACC, b = operand[0..2], op = aluOp field.
+          w('acc', 'q0', 'alu', 'a0'), w('acc', 'q1', 'alu', 'a1'), w('acc', 'q2', 'alu', 'a2'),
+          w('imem_lo', 'q2', 'alu', 'b0'), w('imem_hi', 'q0', 'alu', 'b1'), w('imem_hi', 'q1', 'alu', 'b2'),
+          w('uf', 'aluOp', 'alu', 'op'),
+          // ACC data source MUX: accSrc=0 → ALU result (d0/dT), +1 → DMEM read (dP).
+          w('uf', 'accSrc', 'accSrc0', 's'), w('uf', 'accSrc', 'accSrc1', 's'), w('uf', 'accSrc', 'accSrc2', 's'),
+          w('alu', 'r0', 'accSrc0', 'd0'), w('alu', 'r1', 'accSrc1', 'd0'), w('alu', 'r2', 'accSrc2', 'd0'),
+          w('alu', 'r0', 'accSrc0', 'dT'), w('alu', 'r1', 'accSrc1', 'dT'), w('alu', 'r2', 'accSrc2', 'dT'),
+          w('dmem', 'q0', 'accSrc0', 'dP'), w('dmem', 'q1', 'accSrc1', 'dP'), w('dmem', 'q2', 'accSrc2', 'dP'),
+          w('accSrc0', 'out', 'acc', 'd0'), w('accSrc1', 'out', 'acc', 'd1'), w('accSrc2', 'out', 'acc', 'd2'),
+          // ACC write enable = accWrite field.
+          w('uf', 'accWrite', 'acc', 'ld'),
+          // DMEM: address = operand[0..1], data = ACC, we = memWrite field.
+          w('imem_lo', 'q2', 'dmem', 'a0'), w('imem_hi', 'q0', 'dmem', 'a1'),
+          w('acc', 'q0', 'dmem', 'd0'), w('acc', 'q1', 'dmem', 'd1'), w('acc', 'q2', 'dmem', 'd2'),
+          w('uf', 'memWrite', 'dmem', 'we'),
+          // Readouts.
+          w('acc', 'q0', 'oA0', 'in'), w('acc', 'q1', 'oA1', 'in'), w('acc', 'q2', 'oA2', 'in'),
+          w('clk', 'out', 'wclk', 'in'), w('acc', 'q0', 'wacc', 'in'),
         ],
       }));
     },
