@@ -27,6 +27,47 @@ export const tritClass = (v) => v === -1 ? 'trit-T' : v === 0 ? 'trit-0' : v ===
 // (not driving), 'X' (contention), or null (undefined).
 export const isStrong = (v) => v === -1 || v === 0 || v === 1;
 
+// ---- Bus values (C1) ------------------------------------------------------
+//
+//  A "bus" bundles several trits onto one wire so a datapath word travels as a
+//  single net. The packed value is a canonical STRING — a 'b' marker followed
+//  by the per-slot trits comma-joined ('_' for a floating slot, 'Z'/'X' kept
+//  verbatim). Being a scalar string it (a) never collides with a single trit
+//  (a number) or 'Z'/'X', and (b) compares by value, so the event-driven
+//  engine's `!==` change-detection settles a bus exactly like any other net —
+//  no engine changes needed. MERGE/SPLIT components are the only producers /
+//  consumers; render styles bus pins + wires from the pin's `bus:true` flag.
+export const BUS_COLOR = '#a98eff';   // violet — distinct from trits / Z / X
+const busSlot = (t) => t == null ? '_' : String(t);
+export function packBus(trits) {
+  // All-floating ⇒ the bus itself is undefined (null), so an unwired MERGE
+  // floats like any other component rather than emitting a "b_,_,_" string.
+  if (trits.every(t => t == null)) return null;
+  return 'b' + trits.map(busSlot).join(',');
+}
+export function unpackBus(v, width) {
+  const out = new Array(width).fill(null);
+  if (typeof v !== 'string' || v[0] !== 'b') return out;
+  const parts = v.slice(1).split(',');
+  for (let i = 0; i < width; i++) {
+    const s = parts[i];
+    if (s == null || s === '_') out[i] = null;
+    else if (s === 'Z' || s === 'X') out[i] = s;
+    else out[i] = parseInt(s, 10);
+  }
+  return out;
+}
+export const isBus = (v) => typeof v === 'string' && v[0] === 'b';
+// Short human label for a bus value: the balanced-ternary pattern (MSB first,
+// '?' for a non-strong slot) plus the decimal word value when fully strong.
+export function busLabel(v, width) {
+  if (!isBus(v)) return '?';
+  const trits = unpackBus(v, width);
+  const pat = trits.slice().reverse()
+    .map(t => t === -1 ? 'T' : t === 0 ? '0' : t === 1 ? '1' : '?').join('');
+  return trits.every(isStrong) ? `${pat}=${tritsToInt(trits)}` : pat;
+}
+
 // Coerce a resolved net value for a component that doesn't understand
 // tri-state: 'Z' and 'X' become null (undefined) so ordinary gate eval()s,
 // which already treat null as "floating", behave sensibly.

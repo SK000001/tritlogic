@@ -6,7 +6,8 @@ import {
 } from './state.js';
 import {
   TRIT_COLOR, tritColor, tritLabel, tritClass, SAVE_FORMAT_VERSION, upgradeSave,
-  deepClone, intToTrits, tritsToInt, parseTryteString, formatTryte, escapeHtml
+  deepClone, intToTrits, tritsToInt, parseTryteString, formatTryte, escapeHtml,
+  packBus, unpackBus, isBus, busLabel
 } from './util.js';
 import {
   INFO_GATE_TYPES, INFO_CATEGORIES, COMPONENT_INFO
@@ -212,6 +213,45 @@ TYPES.TRIBUF = {
   defaults: () => ({}),
   tristate: true,
   eval: (_, v) => ({ out: v.en === 1 ? (v.in == null ? null : v.in) : 'Z' }),
+};
+
+// ---- Bus merge / split (C1) ----------------------------------------------
+//
+//  A bus bundles a 3-trit word onto one wire (see util.js packBus/unpackBus).
+//  MERGE3 packs three trit inputs t0..t2 (t0 = low trit) into a single bus
+//  output; SPLIT3 unpacks a bus back into three trit outputs. Together they
+//  let a datapath word (REG3 q, ALU result, RAM word) travel as one labelled
+//  wire instead of three parallel ones. The packed value is an opaque scalar
+//  string to the engine, so propagation / timing / multi-driver resolution all
+//  work unchanged. The `bus: true` pin flag tells render to draw these pins +
+//  their wires in the bus style (thick violet, decimal label).
+const BUS_WIDTH = 3;
+
+TYPES.MERGE3 = {
+  w: 64, h: 80,
+  pins: {
+    t0:  { side: 'left',  dx: 0,  dy: 20, kind: 'in' },
+    t1:  { side: 'left',  dx: 0,  dy: 40, kind: 'in' },
+    t2:  { side: 'left',  dx: 0,  dy: 60, kind: 'in' },
+    bus: { side: 'right', dx: 64, dy: 40, kind: 'out', bus: true },
+  },
+  defaults: () => ({}),
+  eval: (_, v) => ({ bus: packBus([v.t0 ?? null, v.t1 ?? null, v.t2 ?? null]) }),
+};
+
+TYPES.SPLIT3 = {
+  w: 64, h: 80,
+  pins: {
+    bus: { side: 'left',  dx: 0,  dy: 40, kind: 'in', bus: true },
+    t0:  { side: 'right', dx: 64, dy: 20, kind: 'out' },
+    t1:  { side: 'right', dx: 64, dy: 40, kind: 'out' },
+    t2:  { side: 'right', dx: 64, dy: 60, kind: 'out' },
+  },
+  defaults: () => ({}),
+  eval: (_, v) => {
+    const t = unpackBus(v.bus, BUS_WIDTH);
+    return { t0: t[0], t1: t[1], t2: t[2] };
+  },
 };
 
 // ---- Full-trit adder ------------------------------------------------------

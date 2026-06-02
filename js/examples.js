@@ -119,6 +119,30 @@ const EXAMPLES = {
       ],
     })),
   },
+  'word-bus': {
+    label: 'Word bus (merge 3 trits → one wire → split)',
+    build: () => buildExample((c, w) => ({
+      // Three trit inputs (a low-first word) are MERGEd onto a single bus wire,
+      // carried as one violet labelled wire, then SPLIT back into three trits.
+      // Edit the inputs and watch the bus label (balanced-ternary + decimal)
+      // follow. The point of C1: a datapath word travels as one wire, not three.
+      comps: [
+        c('i0', 'INPUT',  90, 110, { value:  1, name: 't0 (low)' }),
+        c('i1', 'INPUT',  90, 190, { value: -1, name: 't1' }),
+        c('i2', 'INPUT',  90, 270, { value:  1, name: 't2 (high)' }),
+        c('m',  'MERGE3', 270, 150),
+        c('s',  'SPLIT3', 480, 150),
+        c('o0', 'OUTPUT', 660, 110, { name: 'o0' }),
+        c('o1', 'OUTPUT', 660, 190, { name: 'o1' }),
+        c('o2', 'OUTPUT', 660, 270, { name: 'o2' }),
+      ],
+      wires: [
+        w('i0', 'out', 'm', 't0'), w('i1', 'out', 'm', 't1'), w('i2', 'out', 'm', 't2'),
+        w('m', 'bus', 's', 'bus'),
+        w('s', 't0', 'o0', 'in'), w('s', 't1', 'o1', 'in'), w('s', 't2', 'o2', 'in'),
+      ],
+    })),
+  },
   'min-max': {
     label: 'MIN / MAX (ternary AND / OR)',
     build: () => buildExample((c, w) => ({

@@ -11,7 +11,8 @@
 
 import { intToTrits, tritsToInt, parseTryteString,
          SAVE_FORMAT_VERSION, upgradeSave,
-         resolveDrivers, coerceForLogic } from './util.js';
+         resolveDrivers, coerceForLogic,
+         packBus, unpackBus, isBus, busLabel } from './util.js';
 import {
   comps, wires, subcircuitDefs, customGates, outVals,
   nextCompId, nextWireId, tick, undoStack, redoStack,
@@ -735,6 +736,70 @@ test('A3 register-file demo: one-hot read selects a register onto the shared bus
   inByName.rdR0.state.value = 1; inByName.rdR1.state.value = 1;
   s = run();
   assertEq(bus(s), JSON.stringify(['X', 'X', 'X']), 'two disagreeing drivers → X:');
+});
+
+// ---- C1 tryte buses (merge / split) ----
+test('C1 packBus / unpackBus round-trip and bus typing', () => {
+  // A fully-strong word round-trips and never collides with a single trit.
+  const packed = packBus([1, -1, 0]);
+  assertEq(isBus(packed), true, 'packed word is a bus value:');
+  assertEq(isBus(1), false, 'a trit is not a bus:');
+  assertEq(isBus('Z'), false, "'Z' is not a bus:");
+  assertEq(isBus(null), false, 'null is not a bus:');
+  assertEq(JSON.stringify(unpackBus(packed, 3)), JSON.stringify([1, -1, 0]), 'round-trips:');
+  // Lossless on floating / tri-state slots.
+  assertEq(JSON.stringify(unpackBus(packBus([1, null, 'Z']), 3)),
+           JSON.stringify([1, null, 'Z']), 'keeps null + Z slots:');
+  // All-floating collapses to an undefined bus (null), not a "b_,_,_" string.
+  assertEq(packBus([null, null, null]), null, 'all-floating ⇒ null bus:');
+  // Unpacking a non-bus value yields all-undefined.
+  assertEq(JSON.stringify(unpackBus(null, 3)), JSON.stringify([null, null, null]), 'null → all undef:');
+  assertEq(JSON.stringify(unpackBus(1, 3)), JSON.stringify([null, null, null]), 'trit → all undef:');
+  // Label: balanced-ternary pattern (MSB first) + decimal when fully strong.
+  assertEq(busLabel(packBus([1, -1, 1]), 3), '1T1=7', 'fully-strong label shows decimal:');
+  assertEq(busLabel(packBus([1, null, 1]), 3), '1?1', 'floating slot → ? and no decimal:');
+});
+
+test('C1 MERGE3 / SPLIT3 eval pack and unpack a word', () => {
+  assertEq(TYPES.MERGE3.eval(null, { t0: 1, t1: -1, t2: 0 }).bus, packBus([1, -1, 0]),
+           'MERGE3 packs its trits:');
+  assertEq(TYPES.MERGE3.eval(null, { t0: null, t1: null, t2: null }).bus, null,
+           'MERGE3 of all-floating is null:');
+  const out = TYPES.SPLIT3.eval(null, { bus: packBus([1, -1, 0]) });
+  assertEq(JSON.stringify([out.t0, out.t1, out.t2]), JSON.stringify([1, -1, 0]),
+           'SPLIT3 unpacks the word:');
+  const undef = TYPES.SPLIT3.eval(null, { bus: null });
+  assertEq(JSON.stringify([undef.t0, undef.t1, undef.t2]), JSON.stringify([null, null, null]),
+           'SPLIT3 of null floats every trit:');
+});
+
+test('C1 word-bus demo: a word survives MERGE → bus wire → SPLIT through the engine', () => {
+  const { comps, wires } = EXAMPLES['word-bus'].build();
+  const inById = {};
+  for (const c of comps) if (c.type === 'INPUT') inById[c.id] = c;
+  const ins = comps.filter(c => c.type === 'INPUT');   // i0,i1,i2 in placement order
+  const outs = comps.filter(c => c.type === 'OUTPUT');  // o0,o1,o2
+  const merge = comps.find(c => c.type === 'MERGE3');
+  const run = () => { const s = { comps, wires, outVals: {} }; simulateScope(s); return s; };
+  const word = (s) => outs.map(o => {
+    const wr = wires.find(x => x.toId === o.id && x.toPort === 'in');
+    return s.outVals[`${wr.fromId}:${wr.fromPort}`] ?? null;
+  });
+
+  // Default preset values [1,-1,1] survive the bus.
+  let s = run();
+  assertEq(JSON.stringify(word(s)), JSON.stringify([1, -1, 1]), 'word reproduced at the split:');
+  assertEq(isBus(s.outVals[`${merge.id}:bus`]), true, 'the MERGE drives a bus value:');
+
+  // Change the inputs → the split tracks.
+  ins[0].state.value = -1; ins[1].state.value = 0; ins[2].state.value = -1;
+  s = run();
+  assertEq(JSON.stringify(word(s)), JSON.stringify([-1, 0, -1]), 'edited word tracks through the bus:');
+
+  // Float the low trit → that slot floats out the other side, others survive.
+  ins[0].state.value = null;
+  s = run();
+  assertEq(JSON.stringify(word(s)), JSON.stringify([null, 0, -1]), 'a floating slot stays floating:');
 });
 
 test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () => {

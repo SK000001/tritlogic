@@ -17,7 +17,7 @@ import {
   view, comps, wires, mouse, drag, hoverPin, selection, selectedWire,
   pendingWire, animTime, outVals, tick, switchingNets,
 } from './state.js';
-import { tritColor, tritLabel, intToTrits, tritsToInt } from './util.js';
+import { tritColor, tritLabel, intToTrits, tritsToInt, isBus, busLabel, BUS_COLOR } from './util.js';
 
 export function createRender(deps) {
   // `inputValueFromWires` comes from engine.js, which depends back on render
@@ -245,12 +245,20 @@ function drawComp(c) {
       }
     }
     const v = isOut ? outVals[`${c.id}:${port}`] : inputValueFromWires({comps, wires, outVals}, c.id, port);
+    // A bus pin (MERGE out / SPLIT in) draws as a larger violet square so it
+    // reads as "many trits, one wire" and is obviously not a single-trit pin.
+    if (def.pins[port].bus) {
+      ctx.fillStyle = (v == null) ? TRIT_COLOR_UNDEF : BUS_COLOR;
+      ctx.fillRect(p.x - 3.5, p.y - 3.5, 7, 7);
+      continue;
+    }
     ctx.beginPath();
     ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
     ctx.fillStyle = tritColor(v);
     ctx.fill();
   }
 }
+const TRIT_COLOR_UNDEF = '#44485a';   // mirrors util TRIT_COLOR.undef
 
 function drawInput(c) {
   const t = TYPES.INPUT;
@@ -556,6 +564,39 @@ function drawTriBuf(c) {
   ctx.textAlign = 'right';
   ctx.fillText('out', t.w - 2, 22);
 }
+// Bus merge: three trit pins funnel into a single violet bus pin.
+function drawMerge3(c) {
+  const t = TYPES.MERGE3;
+  ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w - 1, t.h - 1);
+  // Three funnel lines converging toward the bus pin.
+  ctx.strokeStyle = BUS_COLOR; ctx.lineWidth = 1.5 / view.scale;
+  ctx.beginPath();
+  for (const dy of [20, 40, 60]) { ctx.moveTo(12, dy); ctx.lineTo(t.w - 14, t.h / 2); }
+  ctx.stroke();
+  ctx.fillStyle = BUS_COLOR; ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText('MRG', t.w / 2, 4);
+  ctx.fillStyle = '#8a92a1'; ctx.font = '8px monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('0', 4, 20); ctx.fillText('1', 4, 40); ctx.fillText('2', 4, 60);
+}
+// Bus split: a single violet bus pin fans out to three trit pins.
+function drawSplit3(c) {
+  const t = TYPES.SPLIT3;
+  ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
+  ctx.strokeRect(0.5, 0.5, t.w - 1, t.h - 1);
+  ctx.strokeStyle = BUS_COLOR; ctx.lineWidth = 1.5 / view.scale;
+  ctx.beginPath();
+  for (const dy of [20, 40, 60]) { ctx.moveTo(14, t.h / 2); ctx.lineTo(t.w - 12, dy); }
+  ctx.stroke();
+  ctx.fillStyle = BUS_COLOR; ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText('SPL', t.w / 2, 4);
+  ctx.fillStyle = '#8a92a1'; ctx.font = '8px monospace';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.fillText('0', t.w - 4, 20); ctx.fillText('1', t.w - 4, 40); ctx.fillText('2', t.w - 4, 60);
+}
 function drawPC(c) {
   const t = TYPES.PC;
   ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
@@ -656,6 +697,12 @@ function computeWireCrossings() {
 function drawWire(w) {
   const path = wirePath(w);
   const v = outVals[`${w.fromId}:${w.fromPort}`] ?? null;
+  // A bus wire (driven by a MERGE/SPLIT `bus` pin) renders thick + violet with
+  // a decimal word label, so a bundled datapath word reads differently from a
+  // single-trit wire.
+  const src = getComp(w.fromId);
+  const srcDef = src && compDef(src);
+  const busWire = !!(srcDef && srcDef.pins[w.fromPort] && srcDef.pins[w.fromPort].bus);
   // Pull the crossings list for this wire (horizontal-segment crossings
   // only — by convention horizontal wires hump over vertical wires).
   const crossings = _wireCrossings.get(w.id) || [];
@@ -707,8 +754,8 @@ function drawWire(w) {
     ctx.restore();
   }
 
-  ctx.strokeStyle = tritColor(v);
-  ctx.lineWidth = (selectedWire === w.id ? 3 : 2) / view.scale;
+  ctx.strokeStyle = busWire ? (v == null ? tritColor(null) : BUS_COLOR) : tritColor(v);
+  ctx.lineWidth = ((selectedWire === w.id ? 3 : 2) + (busWire ? 1.5 : 0)) / view.scale;
   // Live wires get a dashed pattern whose offset advances each animation
   // tick, producing a slow "marching ants" toward the destination.
   // Floating wires stay solid — visually flagging the dead segment. A
@@ -725,6 +772,21 @@ function drawWire(w) {
   tracePath();
   ctx.stroke();
   ctx.setLineDash([]);  // reset state for other shapes
+
+  // Bus value label, centred on the wire's midpoint segment.
+  if (busWire && isBus(v) && path.length >= 2) {
+    const mid = path[Math.floor((path.length - 1) / 2)];
+    const next = path[Math.floor((path.length - 1) / 2) + 1] || mid;
+    const lx = (mid.x + next.x) / 2, ly = (mid.y + next.y) / 2;
+    const label = busLabel(v, 3);
+    ctx.font = `${10 / view.scale}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    const pad = 3 / view.scale, tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(20,22,28,0.82)';
+    ctx.fillRect(lx - tw / 2 - pad, ly - 14 / view.scale, tw + 2 * pad, 13 / view.scale);
+    ctx.fillStyle = BUS_COLOR;
+    ctx.fillText(label, lx, ly - 2 / view.scale);
+  }
 }
 function drawWireGhost(w) {
   // Overlay wire segments that pass through a non-endpoint component, so
@@ -959,6 +1021,8 @@ const DRAW = {
   RAM:      drawRAM,
   ALU:      drawALU,
   PC:       drawPC,
+  MERGE3:   drawMerge3,
+  SPLIT3:   drawSplit3,
   // Inverter family — same shape function, different label trit.
   STI: (c) => drawInverterShape(c, 'STI'),
   NTI: (c) => drawInverterShape(c, 'NTI'),

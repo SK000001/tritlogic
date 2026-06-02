@@ -21,6 +21,7 @@ export const INFO_CATEGORIES = [
   ['Sinks',      ['OUTPUT', 'TRYTE_OUT', 'WAVE']],
   ['Inverters',  ['STI', 'PTI', 'NTI']],
   ['Gates',      ['MIN', 'MAX', 'ADDER', 'MUX', 'TRIBUF']],
+  ['Buses',      ['MERGE3', 'SPLIT3']],
   ['Sequential', ['DFF', 'REG3', 'RAM']],
   ['CPU',        ['ALU', 'PC']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
@@ -557,6 +558,42 @@ LOOP:
       <b>contention</b> (<code>X</code>, drawn magenta). Ordinary gates treat
       <code>Z</code> and <code>X</code> as undefined. See the
       <em>Tri-state bus</em> example.</p>`,
+  },
+
+  MERGE3: {
+    name: 'MERGE3', tagline: 'Bundle 3 trits onto one bus wire',
+    body: `
+      <p>A <b>bus merger</b>: it packs three trit inputs <code>t0</code>,
+      <code>t1</code>, <code>t2</code> (<code>t0</code> is the low trit) into a
+      single <b>bus</b> output, so a 3-trit datapath word can travel as one
+      wire instead of three parallel ones.</p>
+      <h4>The bus wire</h4>
+      <p>A bus pin is drawn as a violet square and its wire is thick and violet,
+      labelled with the word's value — both the balanced-ternary pattern
+      (MSB first, <code>T</code>/<code>0</code>/<code>1</code>) and the decimal
+      (−13…+13). A floating slot reads <code>?</code> in the label; if every
+      input is floating the whole bus is undefined.</p>
+      <h4>Use it with SPLIT3</h4>
+      <p>Feed the bus into a <code>SPLIT3</code> to recover the three trits.
+      Merge/split is the wiring primitive for wider datapaths — bundle a
+      <code>REG3</code>'s <code>q0..q2</code>, an <code>ALU</code> result, or a
+      <code>RAM</code> word into one labelled wire. See the <em>Word bus</em>
+      example.</p>`,
+  },
+
+  SPLIT3: {
+    name: 'SPLIT3', tagline: 'Unpack a bus wire into 3 trits',
+    body: `
+      <p>A <b>bus splitter</b>: the inverse of <code>MERGE3</code>. It takes a
+      single <b>bus</b> input and fans it back out to three trit outputs
+      <code>t0</code>, <code>t1</code>, <code>t2</code> (<code>t0</code> low).</p>
+      <p>Each output carries the corresponding trit of the word — including a
+      floating slot, which comes out as undefined. An input that isn't a bus
+      (e.g. nothing wired) yields three undefined outputs.</p>
+      <p>Pair it with a <code>MERGE3</code> upstream. The packed word is an
+      opaque value to the rest of the simulator, so a bus propagates, settles
+      and times exactly like any other wire. See the <em>Word bus</em>
+      example.</p>`,
   },
 
   DFF: {
