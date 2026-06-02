@@ -1511,6 +1511,49 @@ test('Microcode-fields demo: control lines follow the microprogram', () => {
   }
 });
 
+// ---- E3 Phase 3: dispatch map + fetch/dispatch/return loop ----
+test('Microcode-dispatch demo: macro-ops dispatch to multi-cycle microroutines', () => {
+  // The fetch→dispatch→routine→FETCH loop. Macro-program is ADDI, LOAD, ADDI,
+  // LOAD (then NOPs): ADDI is a 1-µword routine (µ1), LOAD a 2-µword routine
+  // (µ2,µ3). µ0 is the shared dispatch word — it routes the µPC to the current
+  // opcode's routine entry (via the dispatch ROM) AND advances the macro-PC;
+  // routine µwords hold the macro-PC. We watch both program counters walk.
+  const ex = EXAMPLES['microcode-dispatch'].build();
+  // Two PCs: the macro-PC is the higher one (y=80), the µPC sits lower (y=380).
+  const macroPc = ex.comps.filter(c => c.type === 'PC').find(c => c.y === 80);
+  const microPc = ex.comps.filter(c => c.type === 'PC').find(c => c.y === 380);
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    const uWord = () => tritsToInt(microPc.state.p) + 4;
+    const mWord = () => tritsToInt(macroPc.state.p) + 4;
+    assertEq(uWord(), 0, 'µPC starts at the dispatch word µ0:');
+    assertEq(mWord(), 0, 'macro-PC starts at instruction 0:');
+    const seenU = [], seenM = [];
+    for (let i = 0; i < 16; i++) {
+      stepSequential();
+      seenU.push(uWord());
+      seenM.push(mWord());
+    }
+    // bi clock latches every 2 ticks, so each logical step is sampled twice.
+    // Logical µPC trajectory: dispatch→µ1(ADDI), FETCH→µ0, dispatch→µ2(LOAD),
+    // CONT→µ3, FETCH→µ0, dispatch→µ1(ADDI), FETCH→µ0, dispatch→µ2(LOAD)…
+    assertEq(JSON.stringify(seenU),
+             JSON.stringify([1, 1, 0, 0, 2, 2, 3, 3, 0, 0, 1, 1, 0, 0, 2, 2]),
+             'µPC dispatches into routines and FETCHes back:');
+    // Macro-PC advances once per instruction (at the dispatch word) and holds
+    // through the rest of each routine: stays on 1 across ADDI's single µword
+    // and the FETCH, on 2 across LOAD's two µwords + FETCH, etc.
+    assertEq(JSON.stringify(seenM),
+             JSON.stringify([1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4]),
+             'macro-PC advances one instruction per routine, holds mid-routine:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
 test('Assembled v2 counter executes ACC = 1,1,2,2,3,3,... on the live CPU2', () => {
   // Round-trip: assemble the v2 counter, slap its image into CPU2's two
   // parallel RAMs, and run 10 stepSequential() ticks. ACC must climb the

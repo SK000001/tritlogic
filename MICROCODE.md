@@ -1,11 +1,12 @@
 # MICROCODE.md — design doc for E3 (microcoded CPU3)
 
-> **Status (2026-06-02):** design + **Phases 1–2 shipped** — Phase 1 the
+> **Status (2026-06-03):** design + **Phases 1–3 shipped** — Phase 1 the
 > `MSEQ` microsequencer + `microcode-seq` demo; Phase 2 the `UFIELDS`
-> field decoder + a two-bank control store (`microcode-fields` demo).
-> Phases 3–5 below are the remaining multi-session plan for the full
-> microcoded CPU3. This is the live spec — mirrors how `ISA_v2.md`
-> preceded E2b.
+> field decoder + a two-bank control store (`microcode-fields` demo);
+> Phase 3 the dispatch map + the fetch/dispatch/return loop, running a
+> two-op micro-ISA multi-cycle end to end (`microcode-dispatch` demo).
+> Phases 4–5 below are the remaining plan for the full microcoded CPU3.
+> This is the live spec — mirrors how `ISA_v2.md` preceded E2b.
 
 ---
 
@@ -126,11 +127,42 @@ multiply is a loop. `UFIELDS` + the two-bank control store ship in the
 `microcode-fields` demo, walking a microprogram with the control lines
 changing per µstep (the control unit running "dry," no datapath yet).
 
-### Dispatch map
+### Dispatch map — **Phase 3 DONE**
 
-Macro-opcode (2 trits) → start µaddress of its routine. Smallest build:
-a `DECODE2`-style detector feeding a priority/MUX tree that emits the
-9 routine entry points. Phase 3.
+Macro-opcode (2 trits) → start µaddress of its routine. Rather than the
+`DECODE2`-style detector/MUX tree first sketched here, Phase 3 uses a
+**mapping ROM** — the textbook microcode dispatch device, and pure
+composition: a 9-word read-only `RAM` addressed by the opcode itself
+(`a0 = opL`, `a1 = opH`, so word = `opL + 3·opH + 4` — exactly one slot
+per v2 opcode), each slot holding that opcode's routine-entry µaddr in
+`q0/q1`. Those feed `MSEQ.disp0/disp1`, and µ0's `seqMode = DISP` makes
+MSEQ jump there. The map is **soft** (it's data in a ROM), matching the
+ethos that the control unit is reprogrammable, not gates.
+
+### Fetch / dispatch / return loop — **Phase 3 DONE**
+
+µword **µ0** is the shared **fetch/dispatch** microinstruction:
+`seqMode = DISP` (MSEQ → the dispatch addr from the mapping ROM) +
+`pcCtl = ADV` (advance the macro-PC). A macro-op's routine is the µwords
+at its entry µaddr; each sets `pcCtl = HOLD` so the macro-PC freezes
+mid-instruction, and the last sets `seqMode = FETCH` (MSEQ → µ0). So the
+loop is: **µ0 dispatches on the current opcode and bumps the macro-PC →
+the routine runs one µword per clock → FETCH returns to µ0**, which now
+sees the next opcode. Classic fetch/execute overlap.
+
+The macro-PC has no native "hold", so HOLD is done by **reloading the PC
+with its own address**: `pcCtl → PC.jmp`, and `PC.j0/j1 ← PC.p0/p1`. With
+the convention `pcCtl = 0` → advance (`jmp = 0`, increment), `pcCtl = +1`
+→ hold (`jmp = +1`, load self), the `pcCtl` field drives the macro-PC
+directly — no extra gates. (Phase 4 generalizes this: a third `pcCtl`
+state + a MUX on `j0/j1` between *self* and an instruction-operand target
+gives real macro-level `JMP`/branches.)
+
+The `microcode-dispatch` example runs a two-op micro-ISA — **ADDI** (a
+1-µword routine) and **LOAD** (2 µwords) — over a macro-program
+`ADDI, LOAD, ADDI, LOAD, …`. The µPC walks `µ0→µ1→µ0→µ2→µ3→µ0→…` and the
+macro-PC advances exactly once per instruction; no datapath yet, so this
+proves the *control flow* is multi-cycle. Tested on both PC trajectories.
 
 ---
 
@@ -144,10 +176,12 @@ a `DECODE2`-style detector feeding a priority/MUX tree that emits the
   1-of-3 → memWrite/memRead decode). `microcode-fields` demo drives
   named control outputs through a multi-step microprogram. Tests on the
   field decode + the stepped control-line sequence.
-- **Phase 3 — dispatch + fetch loop.** The opcode→µaddr dispatch map;
-  wire fetch(µ0)→dispatch→routine→FETCH back. A two-op micro-ISA
-  running multi-cycle end to end (no real ALU yet). Tests on the µPC
-  trajectory for a sample program.
+- **Phase 3 — dispatch + fetch loop.** ✅ The opcode→µaddr dispatch map
+  (a mapping ROM addressed by the opcode); wire fetch(µ0)→dispatch→
+  routine→FETCH back, with the macro-PC held mid-routine by self-reload.
+  A two-op micro-ISA (ADDI 1-µword, LOAD 2-µword) running multi-cycle end
+  to end (no real ALU yet). `microcode-dispatch` demo + a test on both PC
+  trajectories.
 - **Phase 4 — datapath integration (CPU3 preset).** Replace CPU2's
   `DECODE2`+combinational control with the microengine driving the
   *real* ACC/ALU/DMEM datapath. The `cpu3` preset. Re-run the counter
@@ -166,7 +200,10 @@ a `DECODE2`-style detector feeding a priority/MUX tree that emits the
   a wider/deeper native `ROM` (breaks the "composition only" ethos but
   may be necessary past Phase 3). **Lean:** stay on parallel 9×3 RAMs
   through Phase 3; revisit a `ROM` primitive only if Phase 4's
-  microprogram overflows 9 µwords.
+  microprogram overflows 9 µwords. **Phase 3 fit easily** — the two-op
+  demo uses 5 µwords (µ0 dispatch + ADDI's 1 + LOAD's 2 + a NOP word).
+  Phase 4's full 9-op ISA, with several multi-µword routines, is the real
+  test of the 9-µword ceiling; that's where a deeper `ROM` may land.
 - **µPC encoding.** Reuse `PC` (the `+4` offset, wrap-at-8) as the µPC —
   `MSEQ` already targets that encoding. Good enough for ≤9 µwords.
 - **Save-format.** Pure composition + existing components → no

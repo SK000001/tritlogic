@@ -364,6 +364,141 @@ const EXAMPLES = {
       }));
     },
   },
+  'microcode-dispatch': {
+    label: 'Microcode dispatch (macro-op → microroutine, multi-cycle)',
+    build: () => {
+      if (!subcircuitDefs['MSEQ'])    subcircuitDefs['MSEQ']    = buildMseqDef();
+      if (!subcircuitDefs['UFIELDS']) subcircuitDefs['UFIELDS'] = buildUfieldsDef();
+      return buildExample((c, w) => ({
+        // E3 Phase 3 (see MICROCODE.md). The fetch→dispatch→routine→FETCH loop:
+        // a macro-PC walks IMEM, each macro-op DISPATCHES the µPC to its
+        // microroutine, the routine runs one µword per clock, and a FETCH µword
+        // sends the µPC back to µ0 (the shared dispatch word) for the next op.
+        // No datapath yet — this proves the *control flow* is multi-cycle.
+        //
+        //   ┌── macro side ──┐        ┌──────── micro side ────────┐
+        //   mPC → IMEM(op) → dispatch ROM → MSEQ.disp ─┐
+        //                                              ▼
+        //                       µPC → control store → UFIELDS → MSEQ → µPC
+        //
+        // The DISPATCH MAP is a 9-word mapping ROM addressed by the opcode
+        // (a0=opL, a1=opH → word = opL+3·opH+4, one slot per v2 opcode), each
+        // slot holding the routine-entry µaddr in q0/q1. µ0 is the shared
+        // fetch/dispatch word: seqMode=DISP routes MSEQ to the dispatch addr and
+        // pcCtl=ADV bumps the macro-PC; routine µwords set pcCtl=HOLD so the
+        // macro-PC freezes mid-instruction (the PC "holds" by reloading itself —
+        // pcCtl→jmp, j0/j1←its own p0/p1). Last routine µword is seqMode=FETCH.
+        //
+        // Two-op micro-ISA: ADDI = 1 µword routine (µ1), LOAD = 2 µwords (µ2,µ3).
+        // Macro-program: ADDI, LOAD, ADDI, LOAD, then NOPs.
+        //   µword = [m_seq,m_alu,m_accW] (lo) + [m_accSrc,m_mem,m_pc] (hi)
+        //   m_pc (pcCtl): 0 = advance macro-PC, +1 = hold (self-reload)
+        comps: [
+          c('clk',    'CLOCK',       40, 560, { value: -1, mode: 'bi' }),
+          // --- macro side ---
+          c('mpc',    'PC',          180, 80,  { p: [-1, -1] }),   // macro-PC at word 0
+          c('imemLo', 'RAM',         360, 40,  { mem: [
+            [0, 0, 0],   // 0: ADDI (opL=0)
+            [0, 0, 0],   // 1: LOAD (opL=0)
+            [0, 0, 0],   // 2: ADDI
+            [0, 0, 0],   // 3: LOAD
+            [-1, 0, 0], [-1, 0, 0], [-1, 0, 0], [-1, 0, 0], [-1, 0, 0],   // NOP (opL=T)
+          ] }),
+          c('imemHi', 'RAM',         360, 220, { mem: [
+            [0, 0, 0],   // 0: ADDI (opH=0)
+            [1, 0, 0],   // 1: LOAD (opH=+1)
+            [0, 0, 0],   // 2: ADDI
+            [1, 0, 0],   // 3: LOAD
+            [-1, 0, 0], [-1, 0, 0], [-1, 0, 0], [-1, 0, 0], [-1, 0, 0],   // NOP (opH=T)
+          ] }),
+          // Dispatch map: opcode (a0=opL, a1=opH) → routine-entry µaddr in q0/q1.
+          c('dmap',   'RAM',         620, 130, { mem: [
+            [0, 0, 0],    // 0 NOP  → µ4 (p=[0,0])
+            [-1, -1, 0],  // 1 JMP  → µ0 (unused)
+            [-1, -1, 0],  // 2 JMPP → µ0 (unused)
+            [-1, -1, 0],  // 3 JMPZ → µ0 (unused)
+            [0, -1, 0],   // 4 ADDI → µ1 (p=[0,T])
+            [-1, -1, 0],  // 5 MAXI → µ0 (unused)
+            [-1, -1, 0],  // 6 MINI → µ0 (unused)
+            [1, -1, 0],   // 7 LOAD → µ2 (p=[+1,T])
+            [-1, -1, 0],  // 8 STORE→ µ0 (unused)
+          ] }),
+          // --- micro side ---
+          c('upc',    'PC',          180, 380, { p: [-1, -1] }),   // µPC at µword 0
+          c('romLo',  'RAM',         360, 380, { mem: [
+            [1, 0, 0],    // µ0: DISP            (fetch/dispatch word)
+            [-1, 0, 0],   // µ1: FETCH           (ADDI routine, 1 µword)
+            [0, 0, 0],    // µ2: CONT            (LOAD routine, step 1)
+            [-1, 0, 0],   // µ3: FETCH           (LOAD routine, step 2)
+            [-1, 0, 0],   // µ4: FETCH           (NOP routine)
+            [-1, 0, 0], [-1, 0, 0], [-1, 0, 0], [-1, 0, 0],
+          ] }),
+          c('romHi',  'RAM',         360, 560, { mem: [
+            [0, -1, 0],   // µ0: pcCtl=ADV  (advance macro-PC on dispatch)
+            [0, -1, 1],   // µ1: pcCtl=HOLD
+            [0, -1, 1],   // µ2: pcCtl=HOLD
+            [0, -1, 1],   // µ3: pcCtl=HOLD
+            [0, -1, 1],   // µ4: pcCtl=HOLD
+            [0, -1, 1], [0, -1, 1], [0, -1, 1], [0, -1, 1],
+          ] }),
+          c('zero',   'CONST',       360, 760, { value: 0 }),
+          c('uf',     'SUB:UFIELDS', 620, 360),
+          c('mseq',   'SUB:MSEQ',    620, 560),
+          // --- readouts ---
+          c('oOpL',   'OUTPUT',      900, 60,  { name: 'opL' }),
+          c('oOpH',   'OUTPUT',      900, 120, { name: 'opH' }),
+          c('oMpc0',  'OUTPUT',      900, 180, { name: 'mPC0' }),
+          c('oMpc1',  'OUTPUT',      900, 240, { name: 'mPC1' }),
+          c('oUpc0',  'OUTPUT',      900, 320, { name: 'uPC0' }),
+          c('oUpc1',  'OUTPUT',      900, 380, { name: 'uPC1' }),
+          c('oSeq',   'OUTPUT',      900, 440, { name: 'seqMode' }),
+          c('oPc',    'OUTPUT',      900, 500, { name: 'pcCtl' }),
+          c('wU',     'WAVE',        900, 580, { name: 'uPC0', trace: [] }),
+        ],
+        wires: [
+          // Clock fans out to every sequential element.
+          w('clk', 'out', 'mpc', 'clk'),
+          w('clk', 'out', 'imemLo', 'clk'), w('clk', 'out', 'imemHi', 'clk'),
+          w('clk', 'out', 'dmap', 'clk'),
+          w('clk', 'out', 'upc', 'clk'),
+          w('clk', 'out', 'romLo', 'clk'), w('clk', 'out', 'romHi', 'clk'),
+          // Macro-PC addresses IMEM (both banks).
+          w('mpc', 'p0', 'imemLo', 'a0'), w('mpc', 'p1', 'imemLo', 'a1'),
+          w('mpc', 'p0', 'imemHi', 'a0'), w('mpc', 'p1', 'imemHi', 'a1'),
+          // Read-only IMEM.
+          w('zero', 'out', 'imemLo', 'we'), w('zero', 'out', 'imemLo', 'd0'), w('zero', 'out', 'imemLo', 'd1'), w('zero', 'out', 'imemLo', 'd2'),
+          w('zero', 'out', 'imemHi', 'we'), w('zero', 'out', 'imemHi', 'd0'), w('zero', 'out', 'imemHi', 'd1'), w('zero', 'out', 'imemHi', 'd2'),
+          // Opcode (opL=imemLo.q0, opH=imemHi.q0) addresses the dispatch ROM.
+          w('imemLo', 'q0', 'dmap', 'a0'), w('imemHi', 'q0', 'dmap', 'a1'),
+          // Read-only dispatch ROM.
+          w('zero', 'out', 'dmap', 'we'), w('zero', 'out', 'dmap', 'd0'), w('zero', 'out', 'dmap', 'd1'), w('zero', 'out', 'dmap', 'd2'),
+          // µPC addresses the two-bank control store.
+          w('upc', 'p0', 'romLo', 'a0'), w('upc', 'p1', 'romLo', 'a1'),
+          w('upc', 'p0', 'romHi', 'a0'), w('upc', 'p1', 'romHi', 'a1'),
+          // Read-only control store.
+          w('zero', 'out', 'romLo', 'we'), w('zero', 'out', 'romLo', 'd0'), w('zero', 'out', 'romLo', 'd1'), w('zero', 'out', 'romLo', 'd2'),
+          w('zero', 'out', 'romHi', 'we'), w('zero', 'out', 'romHi', 'd0'), w('zero', 'out', 'romHi', 'd1'), w('zero', 'out', 'romHi', 'd2'),
+          // µword trits → UFIELDS.
+          w('romLo', 'q0', 'uf', 'm_seq'), w('romLo', 'q1', 'uf', 'm_alu'), w('romLo', 'q2', 'uf', 'm_accW'),
+          w('romHi', 'q0', 'uf', 'm_accSrc'), w('romHi', 'q1', 'uf', 'm_mem'), w('romHi', 'q2', 'uf', 'm_pc'),
+          // Microsequencer: seqMode from UFIELDS, dispatch addr from the map.
+          w('uf', 'seqMode', 'mseq', 'seqMode'),
+          w('dmap', 'q0', 'mseq', 'disp0'), w('dmap', 'q1', 'mseq', 'disp1'),
+          w('mseq', 'jmp', 'upc', 'jmp'), w('mseq', 'j0', 'upc', 'j0'), w('mseq', 'j1', 'upc', 'j1'),
+          // Macro-PC control: pcCtl=0 advances (jmp=0), pcCtl=+1 holds by
+          // reloading the PC's own address (jmp=+1, j0/j1 ← p0/p1).
+          w('uf', 'pcCtl', 'mpc', 'jmp'),
+          w('mpc', 'p0', 'mpc', 'j0'), w('mpc', 'p1', 'mpc', 'j1'),
+          // Readouts.
+          w('imemLo', 'q0', 'oOpL', 'in'), w('imemHi', 'q0', 'oOpH', 'in'),
+          w('mpc', 'p0', 'oMpc0', 'in'), w('mpc', 'p1', 'oMpc1', 'in'),
+          w('upc', 'p0', 'oUpc0', 'in'), w('upc', 'p1', 'oUpc1', 'in'),
+          w('uf', 'seqMode', 'oSeq', 'in'), w('uf', 'pcCtl', 'oPc', 'in'),
+          w('upc', 'p0', 'wU', 'in'),
+        ],
+      }));
+    },
+  },
   'min-max': {
     label: 'MIN / MAX (ternary AND / OR)',
     build: () => buildExample((c, w) => ({

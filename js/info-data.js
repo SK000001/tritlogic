@@ -1710,7 +1710,11 @@ j1  = MUX(seqMode; dT=−1, d0=disp1, dP=disp1)</pre>
       the dispatch address, and FETCH loads <code>(T, T)</code>. See the
       <em>Microcode sequencer</em> example, where MSEQ + a PC + a RAM
       control store walk a CONT,CONT,CONT,FETCH microprogram that loops on
-      its own.</p>`,
+      its own. The DISP mode comes alive in the <em>Microcode dispatch</em>
+      example (E3 Phase 3): a dispatch ROM maps the macro-opcode to its
+      microroutine's entry µaddr, MSEQ jumps there, and each macro-op runs
+      multi-cycle before a FETCH returns to the shared dispatch word.</p>`,
+
   },
 
   'SUB:UFIELDS': {
