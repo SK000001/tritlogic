@@ -201,6 +201,50 @@ const EXAMPLES = {
       ],
     })),
   },
+  'bus-datapath': {
+    label: 'Bus datapath — accumulator loop on word wires',
+    build: () => buildExample((c, w) => ({
+      // A word travels as ONE wire end-to-end through a compute loop. Press
+      // Play (or Step): each rising clock edge the accumulator REG3 reloads
+      // with acc + 1. The accumulator's value rides a single bus wire into the
+      // ALU (watch its violet label count up), the ALU's sum rides another bus
+      // wire back into the register — so the whole datapath is two labelled
+      // word wires instead of six parallel trit wires.
+      comps: [
+        c('clk', 'CLOCK', 60, 360, { value: -1, mode: 'bi' }),
+        c('ld',  'CONST', 60, 140, { value: 1 }),       // load-enable held high
+        c('acc', 'REG3',  180, 120, { q: [0, 0, 0] }),
+        c('ma',  'MERGE3', 340, 140),                   // acc value → bus
+        c('sa',  'SPLIT3', 470, 140),                   // bus → ALU operand A
+        c('cb0', 'CONST', 470, 300, { value: 1 }),      // operand B = +1 word
+        c('cb1', 'CONST', 470, 350, { value: 0 }),
+        c('cb2', 'CONST', 470, 400, { value: 0 }),
+        c('op',  'CONST', 470, 450, { value: 0 }),       // op 0 = ADD
+        c('alu', 'ALU',   620, 220),
+        c('mr',  'MERGE3', 810, 250),                   // ALU sum → bus
+        c('sd',  'SPLIT3', 940, 250),                   // bus → acc.d (feedback)
+        c('o0',  'OUTPUT', 200, 300, { name: 'acc0' }),
+        c('o1',  'OUTPUT', 270, 300, { name: 'acc1' }),
+        c('o2',  'OUTPUT', 340, 300, { name: 'acc2' }),
+      ],
+      wires: [
+        w('ld', 'out', 'acc', 'ld'), w('clk', 'out', 'acc', 'clk'),
+        // acc value bundled onto a bus into the ALU's A operand.
+        w('acc', 'q0', 'ma', 't0'), w('acc', 'q1', 'ma', 't1'), w('acc', 'q2', 'ma', 't2'),
+        w('ma', 'bus', 'sa', 'bus'),
+        w('sa', 't0', 'alu', 'a0'), w('sa', 't1', 'alu', 'a1'), w('sa', 't2', 'alu', 'a2'),
+        // ALU B = constant +1, op = ADD.
+        w('cb0', 'out', 'alu', 'b0'), w('cb1', 'out', 'alu', 'b1'), w('cb2', 'out', 'alu', 'b2'),
+        w('op', 'out', 'alu', 'op'),
+        // ALU sum bundled onto a bus, fed back into the register's data port.
+        w('alu', 'r0', 'mr', 't0'), w('alu', 'r1', 'mr', 't1'), w('alu', 'r2', 'mr', 't2'),
+        w('mr', 'bus', 'sd', 'bus'),
+        w('sd', 't0', 'acc', 'd0'), w('sd', 't1', 'acc', 'd1'), w('sd', 't2', 'acc', 'd2'),
+        // Readout taps the live accumulator.
+        w('acc', 'q0', 'o0', 'in'), w('acc', 'q1', 'o1', 'in'), w('acc', 'q2', 'o2', 'in'),
+      ],
+    })),
+  },
   'min-max': {
     label: 'MIN / MAX (ternary AND / OR)',
     build: () => buildExample((c, w) => ({

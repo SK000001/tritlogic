@@ -880,6 +880,29 @@ test('C1 tryte-bus demo: a tryte survives TRYTE_IN → MERGE6 → bus → SPLIT6
   assertEq(tritsToInt(word(s)), -100, 'edited tryte tracks through the bus:');
 });
 
+test('C1 bus datapath: an accumulator loops its word through bus wires', () => {
+  const ex = EXAMPLES['bus-datapath'].build();
+  const acc = ex.comps.find(c => c.type === 'REG3');
+  const ma  = ex.comps.find(c => c.type === 'MERGE3');   // acc-value merge (declared first)
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    // The accumulator's value rides a bus wire even before any clock step.
+    assertEq(isBus(outVals[`${ma.id}:bus`]), true, 'acc value is on a bus wire:');
+    assertEq(outVals[`${ma.id}:bus`], packBus(acc.state.q), 'bus carries the acc word:');
+    const seen = [];
+    for (let i = 0; i < 8; i++) { stepSequential(); seen.push(tritsToInt(acc.state.q)); }
+    assertEq(JSON.stringify(seen), JSON.stringify([1, 1, 2, 2, 3, 3, 4, 4]),
+             'acc increments once per rising edge (bi clock latches every 2 ticks):');
+    // The bus still carries the live accumulator word after stepping.
+    assertEq(outVals[`${ma.id}:bus`], packBus(acc.state.q), 'bus tracks acc after stepping:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
 test('Built-in subcircuits TMUL / MAC3 / ACT register with the right pins', () => {
   registerBuiltinSubcircuits();
   const expect = {
