@@ -662,6 +662,42 @@ const EXAMPLES = {
       }));
     },
   },
+  'rom-lookup': {
+    label: 'ROM lookup table (x² of the address)',
+    build: () => buildExample((c, w) => ({
+      // The read-only ROM as a precomputed lookup table. Two address trits
+      // a0,a1 select one of nine 6-trit words; the word feeds a TRYTE_OUT that
+      // reads it back as a number. The ROM is preloaded with the SQUARES of the
+      // signed address value (addr = tritsToInt(a0,a1) ∈ −4..+4):
+      //   addr  −4 −3 −2 −1  0 +1 +2 +3 +4
+      //   x²     16  9  4  1  0  1  4  9 16   (word index = addr + 4)
+      // No clock — change a0/a1 and the output updates instantly. This is the
+      // "store an answer instead of computing it" use of ROM; the same block,
+      // 6 trits wide, also holds one microinstruction per word for CPU3.
+      comps: [
+        c('a0',  'INPUT',  90,  120, { value: 1, name: 'a0' }),
+        c('a1',  'INPUT',  90,  180, { value: 1, name: 'a1' }),
+        c('rom', 'ROM',    280, 80, { mem: [
+          [1, -1, -1, 1, 0, 0],  // idx0  addr −4 → 16
+          [0, 0, 1, 0, 0, 0],    // idx1  addr −3 → 9
+          [1, 1, 0, 0, 0, 0],    // idx2  addr −2 → 4
+          [1, 0, 0, 0, 0, 0],    // idx3  addr −1 → 1
+          [0, 0, 0, 0, 0, 0],    // idx4  addr  0 → 0
+          [1, 0, 0, 0, 0, 0],    // idx5  addr +1 → 1
+          [1, 1, 0, 0, 0, 0],    // idx6  addr +2 → 4
+          [0, 0, 1, 0, 0, 0],    // idx7  addr +3 → 9
+          [1, -1, -1, 1, 0, 0],  // idx8  addr +4 → 16
+        ] }),
+        c('out', 'TRYTE_OUT', 520, 120),
+      ],
+      wires: [
+        w('a0', 'out', 'rom', 'a0'), w('a1', 'out', 'rom', 'a1'),
+        w('rom', 'q0', 'out', 't0'), w('rom', 'q1', 'out', 't1'),
+        w('rom', 'q2', 'out', 't2'), w('rom', 'q3', 'out', 't3'),
+        w('rom', 'q4', 'out', 't4'), w('rom', 'q5', 'out', 't5'),
+      ],
+    })),
+  },
   'min-max': {
     label: 'MIN / MAX (ternary AND / OR)',
     build: () => buildExample((c, w) => ({

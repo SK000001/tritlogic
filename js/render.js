@@ -513,6 +513,33 @@ function drawRAM(c) {
   ctx.moveTo(2, 138); ctx.lineTo(10, 142); ctx.lineTo(2, 146); ctx.closePath();
   ctx.strokeStyle = '#525a6b'; ctx.stroke();
 }
+function drawROM(c) {
+  const t = TYPES.ROM;
+  ctx.fillStyle = '#2a2630'; ctx.fillRect(0, 0, t.w, t.h);   // violet-ish tint vs RAM
+  ctx.strokeRect(0.5, 0.5, t.w-1, t.h-1);
+  // Title
+  ctx.fillStyle = '#d8dde6'; ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText('ROM', t.w/2, 4);
+  // Live memory map: nine words top-to-bottom, six trit cells per word.
+  const mem = c.state.mem || [];
+  const cw = 11, ch = 11, gx = 1, gy = 2;
+  const gridW = 6 * cw + 5 * gx;
+  const x0 = (t.w - gridW) / 2, y0 = 22;
+  for (let word = 0; word < RAM_WORDS; word++) {
+    const wv = mem[word] || [0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < 6; i++) {
+      ctx.fillStyle = tritColor(wv[i]);
+      ctx.fillRect(x0 + i * (cw + gx), y0 + word * (ch + gy), cw, ch);
+    }
+  }
+  // Pin labels
+  ctx.fillStyle = '#8a92a1'; ctx.font = '9px monospace';
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillText('A0', 4, 24); ctx.fillText('A1', 4, 44);
+  ctx.textAlign = 'right';
+  for (let i = 0; i < 6; i++) ctx.fillText('Q' + i, t.w-4, 24 + i * 20);
+}
 function drawALU(c) {
   const t = TYPES.ALU;
   ctx.fillStyle = '#262a32'; ctx.fillRect(0, 0, t.w, t.h);
@@ -1043,6 +1070,7 @@ const DRAW = {
   DFF:      drawDFF,
   REG3:     drawReg,
   RAM:      drawRAM,
+  ROM:      drawROM,
   ALU:      drawALU,
   PC:       drawPC,
   MERGE3:   drawMerge,

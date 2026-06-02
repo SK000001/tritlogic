@@ -22,7 +22,7 @@ export const INFO_CATEGORIES = [
   ['Inverters',  ['STI', 'PTI', 'NTI']],
   ['Gates',      ['MIN', 'MAX', 'ADDER', 'MUX', 'TRIBUF']],
   ['Buses',      ['MERGE3', 'SPLIT3', 'TRIBUF3', 'MERGE6', 'SPLIT6']],
-  ['Sequential', ['DFF', 'REG3', 'RAM']],
+  ['Sequential', ['DFF', 'REG3', 'RAM', 'ROM']],
   ['CPU',        ['ALU', 'PC']],
   ['Composite',  ['SUBCIRCUIT', 'CUSTOMGATE']],
   ['Neural-net kit', ['SUB:TMUL', 'SUB:MAC3', 'SUB:ACT']],
@@ -762,6 +762,37 @@ LOOP:
       <p>RAM is the addressable store a CPU reads instructions and data from.
       Phase 7 wires it to a program counter and an ALU to build the first
       ternary processor.</p>`,
+  },
+
+  ROM: {
+    name: 'ROM', tagline: '9-word × 6-trit read-only memory',
+    body: `
+      <p>A <b>read-only</b> memory: nine words of <b>six trits</b> each,
+      addressed by two trits <code>a0</code>, <code>a1</code>. It is RAM's
+      simpler cousin — there is no clock, no write-enable, and no data-in. The
+      contents are fixed: they come from a preset or a loaded save file and never
+      change while the circuit runs.</p>
+      <h4>Addressing &amp; reading</h4>
+      <p>Same address decode as RAM — <code>index = (a0+1) + (a1+1)×3</code>,
+      so the nine words are indexed 0–8 and the zero address lands on the middle
+      word. Reading is <b>purely combinational</b>: the six outputs
+      <code>q0..q5</code> continuously show the addressed word. Move the address
+      and the outputs follow instantly. (Because nothing is clocked, ROM takes no
+      part in the Step latch phase at all.)</p>
+      <h4>Why six trits wide</h4>
+      <p>A six-trit word is exactly enough to hold one <b>horizontal
+      microinstruction</b>. In CPU3 the microcode control store is two parallel
+      3-trit RAMs (<code>romLo</code> + <code>romHi</code>) tied read-only with a
+      constant <code>0</code> on every write pin; a single ROM collapses that
+      into one block with no tie-offs — the control store as it ought to be. ROM
+      is also the natural home for any precomputed <b>lookup table</b> (store the
+      answer instead of building gates to compute it).</p>
+      <h4>Internal state</h4>
+      <ul><li><code>mem</code> — nine 6-trit arrays, the stored words. Persists
+      across <b>Reset</b> and is written out by <b>Save</b>, so a ROM keeps its
+      contents the way real firmware does.</li></ul>
+      <p>See the <em>ROM lookup table</em> example, where a ROM holds the squares
+      of its address and a TRYTE_OUT reads them back as numbers.</p>`,
   },
 
   ALU: {

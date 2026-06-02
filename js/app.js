@@ -508,6 +508,40 @@ TYPES.RAM = {
   isSequential: true,
 };
 
+// ---- Ternary ROM (read-only memory) ---------------------------------------
+//
+//  A read-only memory: nine words of SIX trits each, addressed by two trits
+//  a0,a1. Unlike RAM there is no clock / write-enable / data-in — the contents
+//  are fixed (set in a preset or a loaded save) and read purely
+//  combinationally. The six-trit word is wide enough to hold a full horizontal
+//  microinstruction in ONE block, collapsing the microcode control store's two
+//  parallel RAM banks (romLo + romHi) into a single ROM. (E5; see MICROCODE.md.)
+//
+//  Internal state: mem (nine 6-trit arrays). No clkPrev — purely combinational,
+//  so it is NOT sequential and takes no part in the latch phase.
+TYPES.ROM = {
+  w: 150, h: 168,
+  // Per-type default delay (A2): address decode + read mux, like RAM.
+  delay: 2,
+  pins: {
+    a0: { side: 'left',  dx: 0,   dy: 24,  kind: 'in' },
+    a1: { side: 'left',  dx: 0,   dy: 44,  kind: 'in' },
+    q0: { side: 'right', dx: 150, dy: 24,  kind: 'out' },
+    q1: { side: 'right', dx: 150, dy: 44,  kind: 'out' },
+    q2: { side: 'right', dx: 150, dy: 64,  kind: 'out' },
+    q3: { side: 'right', dx: 150, dy: 84,  kind: 'out' },
+    q4: { side: 'right', dx: 150, dy: 104, kind: 'out' },
+    q5: { side: 'right', dx: 150, dy: 124, kind: 'out' },
+  },
+  defaults: () => ({ mem: Array.from({ length: RAM_WORDS }, () => [0, 0, 0, 0, 0, 0]) }),
+  eval: (c, v) => {
+    const idx = ramAddr(v.a0, v.a1);
+    if (idx == null) return { q0: null, q1: null, q2: null, q3: null, q4: null, q5: null };
+    const w = c.state.mem[idx] || [0, 0, 0, 0, 0, 0];
+    return { q0: w[0], q1: w[1], q2: w[2], q3: w[3], q4: w[4], q5: w[5] };
+  },
+};
+
 // ---- ALU ------------------------------------------------------------------
 //
 //  The compute core of the Phase 7 CPU.  Combinational (no state): two

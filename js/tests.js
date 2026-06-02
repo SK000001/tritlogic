@@ -1639,6 +1639,30 @@ test('CPU3 STORE / LOAD round-trip through DMEM', () => {
   }
 });
 
+// ---- E5: read-only memory (ROM) ----
+test('ROM reads its 6-trit word combinationally for every address', () => {
+  // The rom-lookup preset stores x² of the signed address; sweep all nine
+  // addresses and confirm the (combinational, clockless) read returns it.
+  const ex = EXAMPLES['rom-lookup'].build();
+  const a0 = ex.comps.find(c => c.state.name === 'a0');
+  const a1 = ex.comps.find(c => c.state.name === 'a1');
+  const rom = ex.comps.find(c => c.type === 'ROM');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0); syncCompMap();
+    for (let addr = -4; addr <= 4; addr++) {
+      const [t0, t1] = intToTrits(addr, 2);
+      a0.state.value = t0; a1.state.value = t1;
+      simulate();
+      const word = [0, 1, 2, 3, 4, 5].map(i => outVals[`${rom.id}:q${i}`] ?? 0);
+      assertEq(tritsToInt(word), addr * addr, `ROM[addr=${addr}] = addr²:`);
+    }
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
 test('Assembled v2 counter executes ACC = 1,1,2,2,3,3,... on the live CPU2', () => {
   // Round-trip: assemble the v2 counter, slap its image into CPU2's two
   // parallel RAMs, and run 10 stepSequential() ticks. ACC must climb the

@@ -18,7 +18,7 @@ export const EXAMPLE_INFO_CATEGORIES = [
   ['Start here',         ['_exintro']],
   ['Logic & inverters',  ['sti-inverter', 'sti-chain', 'min-max', 'three-way-branch']],
   ['Arithmetic',         ['half-adder', 'full-adder', 'ripple-3', 'alu-demo']],
-  ['Routing & memory',   ['mux-demo', 'd-storage', 't-flop', 'ram-store', 'pc-demo', 'tryte-io']],
+  ['Routing & memory',   ['mux-demo', 'd-storage', 't-flop', 'ram-store', 'rom-lookup', 'pc-demo', 'tryte-io']],
   ['Buses',              ['tristate-bus', 'regfile-bus', 'word-bus', 'regfile-wordbus', 'tryte-bus', 'bus-datapath']],
   ['CPU',                ['cpu', 'cpu-structural', 'cpu2']],
   ['Microcode',          ['microcode-seq', 'microcode-fields', 'microcode-dispatch', 'cpu3']],
@@ -354,6 +354,39 @@ export const EXAMPLE_INFO = {
       that word. <b>Try it:</b> after it has stored, set <code>we</code> to
       <span class="trit-0">0</span>, change the <code>d</code> inputs, and Step —
       the stored word stays put because writes are disabled.</p>`,
+  },
+  'rom-lookup': {
+    name: 'ROM lookup table',
+    tagline: 'A read-only memory used as a precomputed answer table (x²)',
+    body: `
+      <p>The <b>ROM</b> is RAM with the writing taken away: nine words, each
+      <b>six trits</b> wide, read purely combinationally — no clock. Here it is
+      used the classic way, as a <b>lookup table</b>: instead of building gates
+      to compute a function, you precompute the answers and just read them.</p>
+      <pre class="info-diagram">
+   a0 ─▶┌─────┐ q0..q5  ┌───────────┐
+   a1 ─▶│ ROM │════════▶│ TRYTE_OUT │  shows the stored number
+        │ 9×6 │         └───────────┘
+        └─────┘
+      </pre>
+      <p>The two address trits pick one of nine words; the six output trits feed
+      a TRYTE_OUT that reads them back as a number. This ROM is preloaded with
+      the <b>square</b> of the signed address value (<code>addr = </code> the
+      balanced-ternary value of <code>a0,a1</code>, from −4 to +4):</p>
+      <table class="info-tt">
+        <thead><tr><th>addr</th><th>−4</th><th>−3</th><th>−2</th><th>−1</th><th>0</th><th>+1</th><th>+2</th><th>+3</th><th>+4</th></tr></thead>
+        <tbody><tr><td>x²</td><td>16</td><td>9</td><td>4</td><td>1</td><td>0</td><td>1</td><td>4</td><td>9</td><td>16</td></tr></tbody>
+      </table>
+      <p><b>Try it:</b> click <code>a0</code>/<code>a1</code> to change the
+      address — the output jumps to that entry instantly (no clock). Nothing is
+      computed; the answer was baked into the ROM.</p>
+      <h4>Why it matters here</h4>
+      <p>Six trits is exactly one <b>horizontal microinstruction</b>, so the same
+      block is the natural microcode <b>control store</b> — it collapses CPU3's
+      two read-only RAM banks (<code>romLo</code> + <code>romHi</code>, each
+      needing a constant 0 tied to its write pins) into a single ROM. And because
+      a ROM keeps its contents through Reset and Save, it behaves like real
+      firmware.</p>`,
   },
   'pc-demo': {
     name: 'PC — program counter',

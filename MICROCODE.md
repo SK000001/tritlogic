@@ -259,8 +259,17 @@ Tests: the counter ACC progression + a STORE/LOAD round-trip through DMEM.
   spare = 9 µwords, an exact fit. **What the ceiling cost us:** the two
   conditional jumps (JMPP/JMPZ) are deferred — they'd need either extra
   µwords or a conditional sequencer. So the 9-µword wall is real and is
-  the trigger for a deeper `ROM` primitive (E5) the moment CPU3 wants the
-  full 9 ops or any multi-µword routine (a microcoded multiply, shifts).
+  the trigger for a deeper store the moment CPU3 wants the full 9 ops or
+  any multi-µword routine (a microcoded multiply, shifts).
+  **Partly addressed by E5 (`ROM`, shipped 2026-06-03):** a read-only
+  9-word × **6-trit** memory. Its 6-trit word holds one whole horizontal
+  microinstruction, so a single ROM replaces the `romLo`+`romHi` two-bank
+  control store (and drops the constant-0 write tie-offs) — a clean
+  single-bank store. It does **not** by itself raise the 9-µword ceiling:
+  that is the 2-trit address/µPC limit, so the full-9-op CPU3 still needs a
+  **3-trit µPC** (27-word reach) alongside the ROM, plus the conditional
+  sequencer for JMPP/JMPZ. `cpu3` is left on the two read-only RAMs for now
+  (stable + tested); a `cpu3`-on-ROM rebuild is a clean follow-up.
 - **µPC encoding.** Reuse `PC` (the `+4` offset, wrap-at-8) as the µPC —
   `MSEQ` already targets that encoding. Good enough for ≤9 µwords.
 - **Save-format.** Pure composition + existing components → no
