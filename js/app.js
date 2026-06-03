@@ -575,7 +575,16 @@ TYPES.ROM = {
     const w = c.state.mem[idx] || [0, 0, 0, 0, 0, 0];
     return { q0: w[0], q1: w[1], q2: w[2], q3: w[3], q4: w[4], q5: w[5] };
   },
-  inspector: (c) => memInspectorFields(c, 6),
+  inspector: (c) => {
+    const fields = memInspectorFields(c, 6);
+    // When this ROM is wired as a microcode control store, offer the
+    // field-decoded editor (named dropdowns per word) above the raw words.
+    if (microcodeStoreUf(c.id)) {
+      fields.unshift({ kind: 'button', label: 'Edit microcode fields…',
+                       onClick: () => openMicrocodeEditor(c) });
+    }
+    return fields;
+  },
 };
 
 // ---- ALU ------------------------------------------------------------------
@@ -1661,6 +1670,16 @@ function updateInspector() {
   const form = document.getElementById('insp-form');
   if (form) {
     for (const f of fields) {
+      // A 'button' field is a standalone action (no label / input pair) — e.g.
+      // the ROM control-store's "Edit microcode fields…" launcher.
+      if (f.kind === 'button') {
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.textContent = f.label;
+        btn.addEventListener('click', f.onClick);
+        form.appendChild(btn);
+        continue;
+      }
       const labelEl = document.createElement('label');
       labelEl.textContent = f.label;
       form.appendChild(labelEl);
@@ -2394,6 +2413,7 @@ document.getElementById('btn-tt').addEventListener('click', openTruthTable);
 document.getElementById('tt-close').addEventListener('click', () => closeModal('tt-modal'));
 document.getElementById('btn-pack').addEventListener('click', openPackModal);
 document.getElementById('pack-close').addEventListener('click', () => closeModal('pack-modal'));
+document.getElementById('micro-close').addEventListener('click', () => closeModal('micro-modal'));
 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
@@ -2873,6 +2893,94 @@ function refreshMicroView(microEl) {
     `src:${f('accSrc') === 1 ? 'DMEM' : 'ALU'}  ` +
     `mem:${on('memWrite') === '1' ? 'W' : on('memRead') === '1' ? 'R' : '—'}  ` +
     `pc:${lbl('pcCtl')}`;
+}
+
+// ============================================================================
+//  FIELD-DECODED MICROCODE EDITOR
+// ============================================================================
+//
+//  A control-store ROM holds one horizontal microinstruction per word, in
+//  UFIELDS pin order q0→q5: [seq, alu, accW, accSrc, mem, pc]. Editing the raw
+//  trits (the generic ROM editor) works but is opaque; this editor decodes each
+//  word into named dropdowns so you can author microcode by meaning. Each field
+//  carries its word index + the {trit → label} option set; out-of-range values
+//  are shown verbatim so nothing is silently lost.
+const MICRO_WORD_FIELDS = [
+  { key: 'seq',    idx: 0, opts: [['1', 'DISP'],  ['0', 'CONT'], ['-1', 'FETCH']] },
+  { key: 'alu',    idx: 1, opts: [['-1', 'MIN'],  ['0', 'ADD'],  ['1', 'MAX']] },
+  { key: 'accW',   idx: 2, opts: [['1', 'write'], ['0', 'hold']] },
+  { key: 'accSrc', idx: 3, opts: [['0', 'ALU'],   ['1', 'DMEM']] },
+  { key: 'mem',    idx: 4, opts: [['-1', 'none'], ['0', 'read'], ['1', 'write']] },
+  { key: 'pc',     idx: 5, opts: [['0', 'ADV'],   ['1', 'HOLD'], ['-1', 'JMP']] },
+];
+function microFieldLabel(field, trit) {
+  const hit = field.opts.find(([v]) => parseInt(v, 10) === trit);
+  return hit ? hit[1] : `(${trit})`;
+}
+// Decode a 6-trit control word into { seq, alu, accW, accSrc, mem, pc } labels.
+function decodeMicroWord(word) {
+  const out = {};
+  for (const f of MICRO_WORD_FIELDS) out[f.key] = microFieldLabel(f, (word || [])[f.idx] ?? 0);
+  return out;
+}
+// If this ROM is wired as a control store (its q0 drives a UFIELDS m_seq input),
+// return that UFIELDS component; else null. This is what distinguishes a
+// microcode store from a plain lookup ROM or the dispatch-map ROM.
+function microcodeStoreUf(romId, scope = { comps, wires }) {
+  for (const wr of scope.wires) {
+    if (wr.fromId === romId && wr.fromPort === 'q0' && wr.toPort === 'm_seq') {
+      const uf = scope.comps.find(c => c.id === wr.toId);
+      if (uf && uf.type === 'SUB:UFIELDS') return uf;
+    }
+  }
+  return null;
+}
+function openMicrocodeEditor(rom) {
+  const grid = document.getElementById('micro-grid');
+  const headers = ['µ#', ...MICRO_WORD_FIELDS.map(f => f.key), 'raw'];
+  let html = '<table class="micro-tt"><thead><tr>';
+  for (const h of headers) html += `<th>${h}</th>`;
+  html += '</tr></thead><tbody>';
+  for (let i = 0; i < RAM_WORDS; i++) {
+    html += `<tr><th>µ${i}</th>`;
+    for (const f of MICRO_WORD_FIELDS) html += `<td data-word="${i}" data-idx="${f.idx}"></td>`;
+    html += `<td class="micro-raw" data-raw="${i}"></td></tr>`;
+  }
+  html += '</tbody></table>';
+  grid.innerHTML = html;
+
+  const refreshRaw = (i) => {
+    const cell = grid.querySelector(`[data-raw="${i}"]`);
+    if (cell) cell.textContent = (rom.state.mem[i] || []).map(tritChar).join('');
+  };
+  for (let i = 0; i < RAM_WORDS; i++) {
+    for (const f of MICRO_WORD_FIELDS) {
+      const td = grid.querySelector(`[data-word="${i}"][data-idx="${f.idx}"]`);
+      const sel = document.createElement('select');
+      const cur = String((rom.state.mem[i] || [])[f.idx] ?? 0);
+      let matched = false;
+      for (const [val, lab] of f.opts) {
+        const o = document.createElement('option');
+        o.value = val; o.textContent = lab;
+        if (val === cur) { o.selected = true; matched = true; }
+        sel.appendChild(o);
+      }
+      if (!matched) {
+        const o = document.createElement('option');
+        o.value = cur; o.textContent = `(${cur})`; o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.addEventListener('change', () => {
+        pushHistory();
+        if (!Array.isArray(rom.state.mem[i])) rom.state.mem[i] = [0, 0, 0, 0, 0, 0];
+        rom.state.mem[i][f.idx] = parseInt(sel.value, 10);
+        simulate(); draw(); refreshRaw(i); updateInspector();
+      });
+      td.appendChild(sel);
+    }
+    refreshRaw(i);
+  }
+  openModal('micro-modal');
 }
 
 function refreshDebugger() {
@@ -4527,7 +4635,7 @@ const { TESTS, runAllTests } = registerTests({
   TYPES, EXAMPLES,
   buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef, buildCmpcseqDef, cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
   debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
-  findMicrocodeTargets,
+  findMicrocodeTargets, microcodeStoreUf, decodeMicroWord,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
   simulateTimed, switchingKeysAt, simulateSubInstance, stepSequential, syncCompMap, undo, redo,

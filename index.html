@@ -353,6 +353,20 @@
   </div>
 </div>
 
+<!-- Microcode editor modal — field-decoded view of a control-store ROM. Opened
+     from the inspector when a ROM is wired as a UFIELDS control store. -->
+<div class="modal-bg" id="micro-modal">
+  <div class="modal" style="min-width: 720px;">
+    <h2>Edit microcode <button class="btn close" id="micro-close">close</button></h2>
+    <p style="color: var(--muted); font-size: 12px; margin: 0 0 8px 0;">
+      Each row is one microinstruction word (µ0…µ8) in this control-store ROM,
+      decoded into its named fields. Changes apply live to the running circuit.
+      The raw column shows the underlying trits in pin order <code>q0→q5</code>.
+    </p>
+    <div id="micro-grid"></div>
+  </div>
+</div>
+
 <!-- Debugger panel — non-modal, floats over the canvas so the user can keep
      stepping while watching the live CPU. Toggled by the Debug toolbar
      button. Drag-to-move not provided; fixed bottom-right. -->

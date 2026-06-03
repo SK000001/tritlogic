@@ -31,7 +31,7 @@ export function registerTests(deps) {
     buildAccSignDef, buildDecode2Def, buildMseqDef, buildUfieldsDef, buildMpcseqDef, buildCmpcseqDef,
     cloneSubScope, compDef, customGateDef, debuggerRunHeadless,
     debuggerState, deleteSubcircuit, enumerateInputs, filterPalette,
-    findMicrocodeTargets,
+    findMicrocodeTargets, microcodeStoreUf, decodeMicroWord,
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
     simulateTimed, switchingKeysAt, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
@@ -1773,6 +1773,37 @@ test('RAM / ROM contents are hand-editable via inspector word fields', () => {
   assertEq(ra.length, 9, 'RAM exposes one field per word:');
   ra[0].set('1T');       // width 3, zero-pads the high trit
   assertDeepEq(ram.state.mem[0], [1, -1, 0], 'RAM word parsed + zero-padded to width 3:');
+});
+
+test('Field-decoded microcode editor: control-store detection + word decode', () => {
+  // Only a ROM wired as a UFIELDS control store (its q0 → UFIELDS.m_seq) gets
+  // the field editor. In cpu3 that's the `ustore` ROM; the dispatch-map ROM and
+  // a plain lookup ROM must NOT be detected.
+  const ex = EXAMPLES['cpu3'].build();
+  const scope = { comps: ex.comps, wires: ex.wires };
+  const roms = ex.comps.filter(c => c.type === 'ROM');
+  const stores = roms.filter(r => microcodeStoreUf(r.id, scope));
+  assertEq(stores.length, 1, 'exactly one ROM is the control store:');
+  const ustore = stores[0];
+  const uf = microcodeStoreUf(ustore.id, scope);
+  assertEq(uf.type, 'SUB:UFIELDS', 'detection returns the UFIELDS it feeds:');
+  // The other ROM(s) in cpu3 (the dispatch map) are not control stores.
+  for (const r of roms) {
+    if (r === ustore) continue;
+    assertEq(microcodeStoreUf(r.id, scope), null, 'dispatch-map ROM is not a control store:');
+  }
+  // A standalone lookup ROM is not a control store either.
+  const lk = EXAMPLES['rom-lookup'].build();
+  const lkRom = lk.comps.find(c => c.type === 'ROM');
+  assertEq(microcodeStoreUf(lkRom.id, { comps: lk.comps, wires: lk.wires }), null,
+           'lookup-table ROM is not a control store:');
+  // Word decode: µ0 dispatches + holds; µ2 (ADDI) is FETCH/ADD/write/ALU.
+  const d0 = decodeMicroWord(ustore.state.mem[0]);
+  assertEq(d0.seq, 'DISP', 'µ0 seq = DISP:');
+  assertEq(d0.pc,  'HOLD', 'µ0 pc = HOLD:');
+  const d2 = decodeMicroWord(ustore.state.mem[2]);
+  assertDeepEq([d2.seq, d2.alu, d2.accW, d2.accSrc, d2.pc],
+               ['FETCH', 'ADD', 'write', 'ALU', 'ADV'], 'µ2 (ADDI) decodes correctly:');
 });
 
 // ---- E3 Phase 5: debugger µPC / microinstruction view ----

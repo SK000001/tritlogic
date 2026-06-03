@@ -273,6 +273,18 @@
   .info-tt td.trit-0 { color: var(--t-zero); }
   .info-tt td.trit-P { color: var(--t-pos);  font-weight: 600; }
   .info-pintbl td:first-child { font-weight: 600; color: var(--text); }
+  /* Field-decoded microcode editor grid */
+  .micro-tt { border-collapse: collapse; margin: 4px 0; font-family: monospace; width: 100%; }
+  .micro-tt th, .micro-tt td {
+    border: 1px solid var(--border); padding: 3px 6px; font-size: 12px; text-align: center;
+  }
+  .micro-tt thead th { background: var(--panel-2); color: var(--muted); font-weight: 600; }
+  .micro-tt tbody th { background: var(--panel-2); color: var(--text); font-weight: 600; }
+  .micro-tt select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 2px 4px; font-size: 11px; font-family: monospace; outline: none;
+  }
+  .micro-tt td.micro-raw { color: var(--muted); letter-spacing: 1px; }
   .tt-result table { border-collapse: collapse; width: 100%; font-family: monospace; }
   .tt-result th, .tt-result td {
     border: 1px solid var(--border); padding: 3px 8px; font-size: 12px; text-align: center;

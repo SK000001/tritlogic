@@ -807,6 +807,11 @@ LOOP:
       string zero-pads the high pins). The same editor appears on a <b>RAM</b>
       (3-trit words), so you can hand-author memory without a preset or the
       assembler.</p>
+      <p>When a ROM is wired as a microcode <b>control store</b> (its
+      <code>q0</code> drives a UFIELDS <code>m_seq</code>, as in CPU3), the
+      inspector also offers <b>Edit microcode fields…</b> — a grid that decodes
+      each word into named dropdowns (seq / alu / accW / accSrc / mem / pc), so
+      you can author microcode by meaning instead of raw trits.</p>
       <h4>Internal state</h4>
       <ul><li><code>mem</code> — nine 6-trit arrays, the stored words. Persists
       across <b>Reset</b> and is written out by <b>Save</b>, so a ROM keeps its
