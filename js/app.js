@@ -453,6 +453,40 @@ TYPES.REG3 = {
 
 const RAM_WORDS = 9;   // 3^2 — two address trits
 
+// ---- in-canvas memory editor (RAM / ROM contents) -------------------------
+//
+//  RAM and ROM hold `state.mem` — RAM_WORDS words of `width` trits. Build a
+//  set of inspector fields so the contents can be authored directly on the
+//  canvas (select the block → edit a word), instead of only via a preset, a
+//  loaded save, or the assembler modal. Each word is one text field: a string
+//  of trit characters in PIN ORDER q0→q{width-1}, where `T`/`-` = −1, `1`/`+`
+//  = +1, anything else = 0. Short strings zero-pad the high pins; long ones
+//  truncate. (Pin order, not MSB-first, because a RAM/ROM word is a vector of
+//  independent output trits — often control fields — not a single number.)
+function tritChar(t) { return t === -1 ? 'T' : t === 1 ? '1' : '0'; }
+function parseTritWord(str, width) {
+  const out = Array.from({ length: width }, () => 0);
+  const s = String(str || '').trim().toUpperCase();
+  for (let i = 0; i < Math.min(s.length, width); i++) {
+    const ch = s[i];
+    out[i] = (ch === 'T' || ch === '-') ? -1 : (ch === '1' || ch === '+') ? 1 : 0;
+  }
+  return out;
+}
+function memInspectorFields(c, width) {
+  const fields = [];
+  for (let i = 0; i < RAM_WORDS; i++) {
+    const idx = i;
+    fields.push({
+      label: idx === 0 ? `word 0  (T/0/1, pins q0→q${width - 1})` : `word ${idx}`,
+      kind: 'text',
+      get: () => (c.state.mem[idx] || Array.from({ length: width }, () => 0)).map(tritChar).join(''),
+      set: v => { c.state.mem[idx] = parseTritWord(v, width); },
+    });
+  }
+  return fields;
+}
+
 function ramAddr(a0, a1) {
   // Balanced-ternary address decode → word index 0..8, or null when either
   // address trit is floating.
@@ -486,6 +520,7 @@ TYPES.RAM = {
     const w = c.state.mem[idx];
     return { q0: w[0], q1: w[1], q2: w[2] };
   },
+  inspector: (c) => memInspectorFields(c, 3),
   latch: (c, vIn) => {
     const clk = vIn.clk ?? 0;
     if (c.state.clkPrev !== 1 && clk === 1) {
@@ -540,6 +575,7 @@ TYPES.ROM = {
     const w = c.state.mem[idx] || [0, 0, 0, 0, 0, 0];
     return { q0: w[0], q1: w[1], q2: w[2], q3: w[3], q4: w[4], q5: w[5] };
   },
+  inspector: (c) => memInspectorFields(c, 6),
 };
 
 // ---- ALU ------------------------------------------------------------------

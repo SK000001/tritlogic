@@ -1751,6 +1751,30 @@ test('ROM reads its 6-trit word combinationally for every address', () => {
   }
 });
 
+test('RAM / ROM contents are hand-editable via inspector word fields', () => {
+  // The in-canvas memory editor exposes one text field per word, parsed as a
+  // trit string in PIN ORDER q0→q{n} (T/− = −1, 1/+ = +1, else 0; short pads,
+  // long truncates). Lets a ROM/RAM be authored on the canvas, not only via a
+  // preset / save / the assembler.
+  const rom = { id: 1, type: 'ROM', x: 0, y: 0, state: TYPES.ROM.defaults() };
+  const rf = TYPES.ROM.inspector(rom);
+  assertEq(rf.length, 9, 'ROM exposes one field per word:');
+  rf[3].set('T10+0x');   // +→+1, x→0  ⇒ q0..q5 = −1,1,0,1,0,0
+  assertDeepEq(rom.state.mem[3], [-1, 1, 0, 1, 0, 0], 'parsed in pin order; bad chars → 0:');
+  assertEq(rf[3].get(), 'T10100', 'formats back as T/0/1 in pin order:');
+  rf[4].set('1');        // short string zero-pads the high pins
+  assertDeepEq(rom.state.mem[4], [1, 0, 0, 0, 0, 0], 'short word zero-pads to width 6:');
+  // The edited word reads back combinationally on the q outputs.
+  assertEq(TYPES.ROM.eval(rom, { a0: -1, a1: -1 }).q0, rom.state.mem[0][0], 'eval reads mem[0]:');
+
+  // RAM uses 3-trit words through the same editor.
+  const ram = { id: 2, type: 'RAM', x: 0, y: 0, state: TYPES.RAM.defaults() };
+  const ra = TYPES.RAM.inspector(ram);
+  assertEq(ra.length, 9, 'RAM exposes one field per word:');
+  ra[0].set('1T');       // width 3, zero-pads the high trit
+  assertDeepEq(ram.state.mem[0], [1, -1, 0], 'RAM word parsed + zero-padded to width 3:');
+});
+
 // ---- E3 Phase 5: debugger µPC / microinstruction view ----
 test('Debugger detects the CPU3 µPC + reads the live microinstruction', () => {
   const ex = EXAMPLES['cpu3'].build();

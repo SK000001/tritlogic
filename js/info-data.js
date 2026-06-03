@@ -753,6 +753,12 @@ LOOP:
       <code>d0..d2</code> — but only when the write-enable <code>we</code> is
       <code>+1</code>. With <code>we</code> at <code>0</code>, <code>T</code>,
       or floating the memory holds every word through the edge.</p>
+      <h4>Editing the contents</h4>
+      <p>Besides clock-driven writes, you can hand-author the memory: select the
+      RAM and the inspector shows <b>one text field per word</b>. Type each word
+      as trits in pin order <code>q0→q2</code> (<code>T</code> = −1,
+      <code>0</code> = 0, <code>1</code> = +1; short strings zero-pad). Handy for
+      seeding data memory without building a writer circuit.</p>
       <h4>Internal state</h4>
       <ul>
         <li><code>mem</code> — nine 3-trit arrays, the stored words.</li>
@@ -794,6 +800,13 @@ LOOP:
       <em>CPU3</em> / <em>CPU3-full</em> presets now do exactly this. ROM is also
       the natural home for any precomputed <b>lookup table</b> (store the answer
       instead of building gates to compute it).</p>
+      <h4>Editing the contents</h4>
+      <p>Select the ROM and the inspector shows <b>one text field per word</b>.
+      Type each word as a string of trits in pin order <code>q0→q5</code> —
+      <code>T</code> = −1, <code>0</code> = 0, <code>1</code> = +1 (a short
+      string zero-pads the high pins). The same editor appears on a <b>RAM</b>
+      (3-trit words), so you can hand-author memory without a preset or the
+      assembler.</p>
       <h4>Internal state</h4>
       <ul><li><code>mem</code> — nine 6-trit arrays, the stored words. Persists
       across <b>Reset</b> and is written out by <b>Save</b>, so a ROM keeps its
