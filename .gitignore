@@ -12,4 +12,7 @@ Thumbs.db
 node_modules/
 npm-debug.log*
 
+# Build output (produced by `npm run build`, deployed by Vercel)
+dist/
+
 .vercel

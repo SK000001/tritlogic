@@ -71,26 +71,37 @@ the way you'd expect.
 
 ## Running locally
 
-It's static HTML — no build step. Either:
-
-```bash
-# Easiest: just open the file
-xdg-open index.html      # Linux
-open index.html          # macOS
-start index.html         # Windows
-```
-
-Or serve it (recommended if you plan to extend with ES modules later):
+The app source is ES modules in `js/`, loaded by `index.html`. Because ES
+modules don't load over `file://`, serve the folder:
 
 ```bash
 # Python 3
 python -m http.server 8000
-
-# Node
+# or Node
 npx serve .
 ```
 
-Then visit `http://localhost:8000`.
+Then visit `http://localhost:8000`. Edit `js/*.js` and refresh — no build step
+needed for development.
+
+## Building / deploying
+
+The deployed site is a **minified bundle**, not the raw modules. `npm run build`
+(esbuild — see `build.mjs`) bundles everything reachable from `js/app.js` into
+one minified `dist/app.min.js`, minifies the stylesheet, and writes a
+`dist/index.html` that points at the bundle:
+
+```bash
+npm install      # one-time: pulls esbuild (a dev dependency only)
+npm run build    # → dist/{index.html, app.min.js, styles.css}
+```
+
+`dist/` is git-ignored and rebuilt on deploy. Vercel runs `npm run build` and
+serves `dist/` (`buildCommand` + `outputDirectory` in `vercel.json`), so the
+readable `js/` source and the internal `*.md` design docs never reach the
+server — only the bundle does. The bundle is a plain (non-module) IIFE, so
+unlike the source you *can* open `dist/index.html` directly over `file://` to
+smoke-test a build.
 
 ## Run live version
 
