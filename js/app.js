@@ -20,6 +20,7 @@ import {
   ASM2_OPCODES, ASM2_IMM_RANGE, ASM2_ADDR_RANGE, assembleV2, decodeImemWordV2,
   ASM_EXAMPLES, ASM2_EXAMPLES
 } from './assembler.js';
+import { minimizeReport } from './minimizer.js';
 import { createExamples } from './examples.js';
 import { registerTests } from './tests.js';
 import { createRender } from './render.js';
@@ -1415,6 +1416,9 @@ let gbDraft = { numInputs: 2, table: {} };
 function renderGateTable() {
   const host = document.getElementById('gate-table');
   host.innerHTML = '';
+  // Any table edit invalidates a shown minimization report.
+  const res = document.getElementById('gate-min-result');
+  if (res) res.style.display = 'none';
   const n = gbDraft.numInputs;
 
   function cellEl(key) {
@@ -1538,6 +1542,33 @@ document.getElementById('gate-inputs').addEventListener('change', (e) => {
 document.getElementById('gate-clear-table').addEventListener('click', () => {
   gbDraft.table = {};
   renderGateTable();
+  document.getElementById('gate-min-result').style.display = 'none';
+});
+// F1: minimize the current draft table into a MAX-of-MIN expression over the
+// MIN/MAX/STI/PTI/NTI primitives, and show the saving vs the naive canonical
+// form. Pure report — it does not alter the gate (the gate stays a behavioural
+// table-lookup); it tells you the minimal primitive circuit that realises it.
+document.getElementById('gate-minimize').addEventListener('click', () => {
+  // Make the table total first, so unfilled cells count as 0 (matching Add).
+  const table = {};
+  for (const combo of enumerateInputs(gbDraft.numInputs)) {
+    const k = inputKey(combo);
+    table[k] = gbDraft.table[k] ?? 0;
+  }
+  const inNames = Array.from({ length: gbDraft.numInputs }, (_, i) =>
+    'abcd'[i] || ('in' + i));
+  const rep = minimizeReport(table, gbDraft.numInputs, inNames);
+  const saved = rep.gatesBefore - rep.gatesAfter;
+  const pct = rep.gatesBefore > 0 ? Math.round(100 * saved / rep.gatesBefore) : 0;
+  const el = document.getElementById('gate-min-result');
+  el.innerHTML =
+    `<div style="color: var(--accent-2); margin-bottom: 4px;">${escapeHtml(rep.text)}</div>` +
+    `<div style="color: var(--muted); font-size: 11px;">` +
+    `${rep.terms} product term${rep.terms === 1 ? '' : 's'} · ` +
+    `<b style="color: var(--text)">${rep.gatesAfter}</b> gate${rep.gatesAfter === 1 ? '' : 's'} ` +
+    `(canonical ${rep.gatesBefore}${saved > 0 ? `, −${saved} / ${pct}% fewer` : ''})` +
+    `</div>`;
+  el.style.display = '';
 });
 document.getElementById('gate-add').addEventListener('click', () => {
   const name = document.getElementById('gate-name').value.trim();

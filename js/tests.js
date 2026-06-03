@@ -24,6 +24,8 @@ import {
   ASM_EXAMPLES, ASM2_EXAMPLES,
 } from './assembler.js';
 import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
+import { minimizeTernary, evalMinimizedExpr, minimizedGateCount,
+         canonicalGateCount } from './minimizer.js';
 
 export function registerTests(deps) {
   const {
@@ -2361,6 +2363,99 @@ test('Custom gate: enumerateInputs returns 3^n combinations in stable order', ()
   const two = enumerateInputs(2);
   assertDeepEq(two[0], [-1, -1]);
   assertDeepEq(two[two.length - 1], [1, 1]);
+});
+
+// ---- F1: ternary logic minimizer ------------------------------------------
+//
+// The non-negotiable invariant: a minimized expression must reproduce its
+// source truth table on EVERY input. We check that across a battery of named
+// functions and a deterministic pseudo-random sweep, then separately confirm
+// the minimizer never costs more gates than the naive canonical form and that
+// it genuinely shrinks a mergeable function.
+
+// Build a table { "a,b,..": out } from a function over combos.
+function tableFromFn(n, fn) {
+  const t = {};
+  const rec = (prefix) => {
+    if (prefix.length === n) { t[prefix.join(',')] = fn(prefix); return; }
+    for (const v of [-1, 0, 1]) rec([...prefix, v]);
+  };
+  rec([]);
+  return t;
+}
+function eachCombo(n, visit) {
+  const rec = (prefix) => {
+    if (prefix.length === n) { visit(prefix); return; }
+    for (const v of [-1, 0, 1]) rec([...prefix, v]);
+  };
+  rec([]);
+}
+// Assert a minimized table round-trips on every input.
+function assertMinimizes(n, table, label) {
+  const expr = minimizeTernary(table, n);
+  eachCombo(n, (c) => {
+    const want = table[c.join(',')] ?? 0;
+    const got = evalMinimizedExpr(expr, c);
+    if (got !== want) {
+      throw new Error(`${label} f(${c.join(',')}): expected ${want}, minimized gives ${got}`);
+    }
+  });
+  // The minimized form must never be more expensive than the canonical baseline.
+  const before = canonicalGateCount(table, n), after = minimizedGateCount(expr);
+  if (after > before) {
+    throw new Error(`${label}: minimized ${after} gates > canonical ${before}`);
+  }
+  return expr;
+}
+
+test('Minimizer reproduces every named ternary function exactly', () => {
+  // 1-input: the three inverters + identity.
+  assertMinimizes(1, tableFromFn(1, ([a]) => -a || 0), 'STI');
+  assertMinimizes(1, tableFromFn(1, ([a]) => (a === 1 ? -1 : 1)), 'PTI');
+  assertMinimizes(1, tableFromFn(1, ([a]) => (a === -1 ? 1 : -1)), 'NTI');
+  assertMinimizes(1, tableFromFn(1, ([a]) => a), 'identity');
+  // 2-input: MIN, MAX, ADD-without-carry (sum trit), equality.
+  assertMinimizes(2, tableFromFn(2, ([a, b]) => Math.min(a, b)), 'MIN');
+  assertMinimizes(2, tableFromFn(2, ([a, b]) => Math.max(a, b)), 'MAX');
+  assertMinimizes(2, tableFromFn(2, ([a, b]) => { const s = a + b; return s === 0 ? 0 : s > 0 ? (s > 1 ? -1 : 1) : (s < -1 ? 1 : -1); }), 'sumTrit');
+  assertMinimizes(2, tableFromFn(2, ([a, b]) => (a === b ? 1 : -1)), 'equals');
+  // 3-input: full-adder sum trit (a+b+c reduced to its low trit).
+  const sumTrit = (s) => { let r = ((s % 3) + 3) % 3; return r === 2 ? -1 : r; };
+  assertMinimizes(3, tableFromFn(3, ([a, b, c]) => sumTrit(a + b + c)), 'adderSum');
+  // Constants.
+  for (const k of [-1, 0, 1]) assertMinimizes(2, tableFromFn(2, () => k), `const${k}`);
+});
+
+test('Minimizer reproduces pseudo-random truth tables (n = 1..3)', () => {
+  // Deterministic LCG so the test is stable.
+  let seed = 0x1234abcd;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let n = 1; n <= 3; n++) {
+    for (let trial = 0; trial < 12; trial++) {
+      const table = tableFromFn(n, () => [-1, 0, 1][Math.floor(rnd() * 3)]);
+      assertMinimizes(n, table, `rand n=${n} #${trial}`);
+    }
+  }
+});
+
+test('Minimizer shrinks a mergeable function and trivialises constants', () => {
+  // f(a,b) = +1 whenever a = +1 (any b), else T. Canonically that is three
+  // 2-literal minterms; minimized it should collapse to the single literal
+  // "a = +1" (b is don't-care) — far fewer gates.
+  const table = tableFromFn(2, ([a]) => (a === 1 ? 1 : -1));
+  const expr = assertMinimizes(2, table, 'a==+1');
+  assertEq(expr.terms.length, 1, 'one product term after merge:');
+  assertEq(expr.terms[0].sets[1].length, 3, 'input b folded to a don\'t-care:');
+  assertEq(minimizedGateCount(expr) < canonicalGateCount(table, 2), true,
+           'minimized uses strictly fewer gates than canonical:');
+  // A constant function is a single capless/literalless term.
+  const c1 = minimizeTernary(tableFromFn(2, () => 1), 2);
+  assertEq(c1.terms.length, 1, 'constant +1 ⇒ one term:');
+  assertEq(c1.terms[0].sets.every(s => s.length === 3), true, 'all inputs don\'t-care:');
+  assertEq(minimizedGateCount(c1), 0, 'constant ⇒ zero gates:');
+  // Constant T (all −1) ⇒ no terms at all.
+  const cT = minimizeTernary(tableFromFn(2, () => -1), 2);
+  assertEq(cT.terms.length, 0, 'constant T ⇒ empty expression:');
 });
 
 function runAllTests() {
