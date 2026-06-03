@@ -514,7 +514,7 @@ const EXAMPLES = {
         //
         //   macro side                         micro side (the control unit)
         //   ──────────                         ─────────────────────────────
-        //   mPC → IMEM(lo,hi) → opcode         µPC → control store(romLo,romHi)
+        //   mPC → IMEM(lo,hi) → opcode         µPC → control store (one ROM)
         //          │  │            │                   → UFIELDS → control lines
         //          │  │            ▼                        │ seqMode → MSEQ → µPC
         //          │  │     dispatch ROM ─ entry µaddr ─────┘ disp
@@ -528,7 +528,7 @@ const EXAMPLES = {
         // on the current instruction (so its operand stays valid all through the
         // routine). The routine's last µword does the work AND advances: pcCtl=
         // ADV (next instruction) or JMP (load the operand as target), seqMode=
-        // FETCH (µPC back to µ0). Microprogram (9 µwords, fits the 9×3 store):
+        // FETCH (µPC back to µ0). Microprogram (9 µwords in one 9×6-trit ROM):
         //   µ0 dispatch · µ1 NOP · µ2 ADDI · µ3 MAXI · µ4 MINI · µ5 JMP
         //   µ6 LOAD · µ7 STORE · µ8 spare. (JMPP/JMPZ deferred — they need a
         //   conditional sequencer + the µword budget is full; see MICROCODE.md.)
@@ -552,41 +552,36 @@ const EXAMPLES = {
             [0, 0, 0], [0, 0, 0], [0, 0, 0],
             [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
           ] }),
-          // Dispatch ROM: opcode (a0=opL, a1=opH) → routine entry µaddr in q0/q1.
-          c('dmap',   'RAM',         560, 120, { mem: [
-            [0, -1, 0],   // 0 NOP  → µ1
-            [1, 0, 0],    // 1 JMP  → µ5
-            [0, -1, 0],   // 2 JMPP → µ1 (deferred)
-            [0, -1, 0],   // 3 JMPZ → µ1 (deferred)
-            [1, -1, 0],   // 4 ADDI → µ2
-            [-1, 0, 0],   // 5 MAXI → µ3
-            [0, 0, 0],    // 6 MINI → µ4
-            [-1, 1, 0],   // 7 LOAD → µ6
-            [0, 1, 0],    // 8 STORE→ µ7
+          // Dispatch map (ROM): opcode (a0=opL, a1=opH) → routine entry µaddr in
+          // q0/q1. Read-only, so a ROM — no clock, no write-enable / data tie-offs
+          // (only q0/q1 are used; the upper trits are unused padding).
+          c('dmap',   'ROM',         560, 120, { mem: [
+            [0, -1, 0, 0, 0, 0],   // 0 NOP  → µ1
+            [1, 0, 0, 0, 0, 0],    // 1 JMP  → µ5
+            [0, -1, 0, 0, 0, 0],   // 2 JMPP → µ1 (deferred)
+            [0, -1, 0, 0, 0, 0],   // 3 JMPZ → µ1 (deferred)
+            [1, -1, 0, 0, 0, 0],   // 4 ADDI → µ2
+            [-1, 0, 0, 0, 0, 0],   // 5 MAXI → µ3
+            [0, 0, 0, 0, 0, 0],    // 6 MINI → µ4
+            [-1, 1, 0, 0, 0, 0],   // 7 LOAD → µ6
+            [0, 1, 0, 0, 0, 0],    // 8 STORE→ µ7
           ] }),
           // ---- micro side ----
           c('upc',    'PC',          170, 430, { p: [-1, -1] }),
-          c('romLo',  'RAM',         340, 430, { mem: [
-            [1, 0, 0],    // µ0: DISP
-            [-1, 0, 0],   // µ1: NOP   (FETCH)
-            [-1, 0, 1],   // µ2: ADDI  (FETCH, ADD, accW)
-            [-1, 1, 1],   // µ3: MAXI  (FETCH, MAX, accW)
-            [-1, -1, 1],  // µ4: MINI  (FETCH, MIN, accW)
-            [-1, 0, 0],   // µ5: JMP   (FETCH)
-            [-1, 0, 1],   // µ6: LOAD  (FETCH, accW)
-            [-1, 0, 0],   // µ7: STORE (FETCH)
-            [-1, 0, 0],   // µ8: spare (FETCH)
-          ] }),
-          c('romHi',  'RAM',         340, 620, { mem: [
-            [0, -1, 1],   // µ0: accSrc dc, mem none, pcCtl=HOLD
-            [0, -1, 0],   // µ1: pcCtl=ADV
-            [0, -1, 0],   // µ2: accSrc=ALU, mem none, pcCtl=ADV
-            [0, -1, 0],   // µ3: ADV
-            [0, -1, 0],   // µ4: ADV
-            [0, -1, -1],  // µ5: pcCtl=JMP
-            [1, 0, 0],    // µ6: accSrc=DMEM, mem=read, pcCtl=ADV
-            [0, 1, 0],    // µ7: mem=write, pcCtl=ADV
-            [0, -1, 0],   // µ8: ADV
+          // Control store (ROM): one 6-trit horizontal microinstruction per µword.
+          // The single ROM replaces the two parallel romLo/romHi RAM banks (and
+          // their constant-0 write tie-offs). Word = UFIELDS input order
+          //   [m_seq, m_alu, m_accW, m_accSrc, m_mem, m_pc].
+          c('ustore', 'ROM',         340, 470, { mem: [
+            [1, 0, 0, 0, -1, 1],    // µ0 dispatch: DISP, HOLD
+            [-1, 0, 0, 0, -1, 0],   // µ1 NOP:   FETCH, ADV
+            [-1, 0, 1, 0, -1, 0],   // µ2 ADDI:  FETCH, ADD, accW, src=ALU, ADV
+            [-1, 1, 1, 0, -1, 0],   // µ3 MAXI:  FETCH, MAX, accW, ADV
+            [-1, -1, 1, 0, -1, 0],  // µ4 MINI:  FETCH, MIN, accW, ADV
+            [-1, 0, 0, 0, -1, -1],  // µ5 JMP:   FETCH, pcCtl=JMP
+            [-1, 0, 1, 1, 0, 0],    // µ6 LOAD:  FETCH, accW, src=DMEM, mem=read, ADV
+            [-1, 0, 0, 0, 1, 0],    // µ7 STORE: FETCH, mem=write, ADV
+            [-1, 0, 0, 0, -1, 0],   // µ8 spare: FETCH, ADV
           ] }),
           c('zero',   'CONST',       340, 880, { value: 0 }),
           c('uf',     'SUB:UFIELDS', 560, 470),
@@ -610,26 +605,21 @@ const EXAMPLES = {
           // Clock distribution.
           w('clk', 'out', 'mpc', 'clk'),
           w('clk', 'out', 'imem_lo', 'clk'), w('clk', 'out', 'imem_hi', 'clk'),
-          w('clk', 'out', 'dmap', 'clk'),
           w('clk', 'out', 'upc', 'clk'),
-          w('clk', 'out', 'romLo', 'clk'), w('clk', 'out', 'romHi', 'clk'),
           w('clk', 'out', 'acc', 'clk'), w('clk', 'out', 'dmem', 'clk'),
+          // (dmap + the control store are ROMs — clockless, no write tie-offs.)
           // Macro-PC addresses IMEM (both banks).
           w('mpc', 'p0', 'imem_lo', 'a0'), w('mpc', 'p1', 'imem_lo', 'a1'),
           w('mpc', 'p0', 'imem_hi', 'a0'), w('mpc', 'p1', 'imem_hi', 'a1'),
           w('zero', 'out', 'imem_lo', 'we'), w('zero', 'out', 'imem_lo', 'd0'), w('zero', 'out', 'imem_lo', 'd1'), w('zero', 'out', 'imem_lo', 'd2'),
           w('zero', 'out', 'imem_hi', 'we'), w('zero', 'out', 'imem_hi', 'd0'), w('zero', 'out', 'imem_hi', 'd1'), w('zero', 'out', 'imem_hi', 'd2'),
-          // Opcode (opL=imem_lo.q0, opH=imem_lo.q1) addresses the dispatch ROM.
+          // Opcode (opL=imem_lo.q0, opH=imem_lo.q1) addresses the dispatch map.
           w('imem_lo', 'q0', 'dmap', 'a0'), w('imem_lo', 'q1', 'dmap', 'a1'),
-          w('zero', 'out', 'dmap', 'we'), w('zero', 'out', 'dmap', 'd0'), w('zero', 'out', 'dmap', 'd1'), w('zero', 'out', 'dmap', 'd2'),
-          // µPC addresses the two-bank control store.
-          w('upc', 'p0', 'romLo', 'a0'), w('upc', 'p1', 'romLo', 'a1'),
-          w('upc', 'p0', 'romHi', 'a0'), w('upc', 'p1', 'romHi', 'a1'),
-          w('zero', 'out', 'romLo', 'we'), w('zero', 'out', 'romLo', 'd0'), w('zero', 'out', 'romLo', 'd1'), w('zero', 'out', 'romLo', 'd2'),
-          w('zero', 'out', 'romHi', 'we'), w('zero', 'out', 'romHi', 'd0'), w('zero', 'out', 'romHi', 'd1'), w('zero', 'out', 'romHi', 'd2'),
-          // µword → UFIELDS.
-          w('romLo', 'q0', 'uf', 'm_seq'), w('romLo', 'q1', 'uf', 'm_alu'), w('romLo', 'q2', 'uf', 'm_accW'),
-          w('romHi', 'q0', 'uf', 'm_accSrc'), w('romHi', 'q1', 'uf', 'm_mem'), w('romHi', 'q2', 'uf', 'm_pc'),
+          // µPC addresses the control store ROM.
+          w('upc', 'p0', 'ustore', 'a0'), w('upc', 'p1', 'ustore', 'a1'),
+          // µword → UFIELDS (one 6-trit ROM word, UFIELDS input order).
+          w('ustore', 'q0', 'uf', 'm_seq'), w('ustore', 'q1', 'uf', 'm_alu'), w('ustore', 'q2', 'uf', 'm_accW'),
+          w('ustore', 'q3', 'uf', 'm_accSrc'), w('ustore', 'q4', 'uf', 'm_mem'), w('ustore', 'q5', 'uf', 'm_pc'),
           // Microsequencer: seqMode from UFIELDS, dispatch addr from the map.
           w('uf', 'seqMode', 'mseq', 'seqMode'),
           w('dmap', 'q0', 'mseq', 'disp0'), w('dmap', 'q1', 'mseq', 'disp1'),

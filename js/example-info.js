@@ -382,11 +382,12 @@ export const EXAMPLE_INFO = {
       computed; the answer was baked into the ROM.</p>
       <h4>Why it matters here</h4>
       <p>Six trits is exactly one <b>horizontal microinstruction</b>, so the same
-      block is the natural microcode <b>control store</b> — it collapses CPU3's
-      two read-only RAM banks (<code>romLo</code> + <code>romHi</code>, each
-      needing a constant 0 tied to its write pins) into a single ROM. And because
-      a ROM keeps its contents through Reset and Save, it behaves like real
-      firmware.</p>`,
+      block is the natural microcode <b>control store</b> — and that is exactly
+      what the <em>CPU3</em> / <em>CPU3-full</em> presets use: one ROM per µword,
+      collapsing what used to be two read-only RAM banks (<code>romLo</code> +
+      <code>romHi</code>, each needing a constant 0 tied to its write pins) into a
+      single block. And because a ROM keeps its contents through Reset and Save,
+      it behaves like real firmware.</p>`,
   },
   'pc-demo': {
     name: 'PC — program counter',
@@ -827,6 +828,12 @@ export const EXAMPLE_INFO = {
       routines for <b>NOP, ADDI, MAXI, MINI, JMP, LOAD, STORE</b> + a spare.
       (The two conditional jumps JMPP/JMPZ are deferred — they need a conditional
       sequencer and the µword budget is full; see <code>MICROCODE.md</code>.)</p>
+      <p>Both control tables are read-only, so both are single <b>E5
+      <code>ROM</code>s</b>: the control store holds one 6-trit horizontal
+      microinstruction per µword (folding the two parallel <code>romLo</code>/
+      <code>romHi</code> RAM banks of the Phase-2 demo into one block, with no
+      constant-0 write tie-offs), and the dispatch map is a second ROM addressed
+      by the opcode. Only the writable <b>IMEM</b> stays a pair of RAMs.</p>
 
       <h4>What to watch</h4>
       <p>The default program is CPU2's counter — <code>ADDI +1</code> /

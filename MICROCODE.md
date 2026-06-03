@@ -289,7 +289,8 @@ move if a future ISA needs genuinely longer routines (a microcoded multiply).
   ACC/ALU/DMEM datapath — the `cpu3` preset. Runs the counter identically
   to CPU2 (just 2 clocks/instruction). New **`MPCSEQ`** macro-PC sequencer
   + the µ0-holds refinement + a 9-µword microprogram for 7 of the 9 ops.
-  See the section below.
+  See the section below. (Later tidied onto E5 ROMs — the control store +
+  dispatch map are now single ROMs, matching `cpu3-full`.)
 - **Phase 5 — debugger µPC view + microcode authoring.** ✅ (view half)
   The CPU Debugger now finds a microcoded CPU (`findMicrocodeTargets`:
   locate UFIELDS → its control store → the addressing PC = µPC) and shows a
@@ -315,15 +316,17 @@ move if a future ISA needs genuinely longer routines (a microcoded multiply).
   µwords or a conditional sequencer. So the 9-µword wall is real and is
   the trigger for a deeper store the moment CPU3 wants the full 9 ops or
   any multi-µword routine (a microcoded multiply, shifts).
-  **Partly addressed by E5 (`ROM`, shipped 2026-06-03):** a read-only
+  **Addressed by E5 (`ROM`, shipped 2026-06-03):** a read-only
   9-word × **6-trit** memory. Its 6-trit word holds one whole horizontal
   microinstruction, so a single ROM replaces the `romLo`+`romHi` two-bank
   control store (and drops the constant-0 write tie-offs) — a clean
   single-bank store. It does **not** by itself raise the 9-µword ceiling:
-  that is the 2-trit address/µPC limit, so the full-9-op CPU3 still needs a
-  **3-trit µPC** (27-word reach) alongside the ROM, plus the conditional
-  sequencer for JMPP/JMPZ. `cpu3` is left on the two read-only RAMs for now
-  (stable + tested); a `cpu3`-on-ROM rebuild is a clean follow-up.
+  that is the 2-trit address/µPC limit, so a genuinely multi-µword routine
+  (a microcoded multiply) would still need a **3-trit µPC** (27-word reach)
+  alongside the ROM. **Both `cpu3` and `cpu3-full` now run on ROMs** — the
+  `cpu3`-on-ROM tidy landed: its control store + dispatch map are single E5
+  ROMs (no read-only RAM banks, no constant-0 write tie-offs), matching
+  `cpu3-full`. Only the writable IMEM remains a pair of RAMs.
 - **µPC encoding.** Reuse `PC` (the `+4` offset, wrap-at-8) as the µPC —
   `MSEQ` already targets that encoding. Good enough for ≤9 µwords.
 - **Save-format.** Pure composition + existing components → no

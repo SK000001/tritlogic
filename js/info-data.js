@@ -787,12 +787,13 @@ LOOP:
       part in the Step latch phase at all.)</p>
       <h4>Why six trits wide</h4>
       <p>A six-trit word is exactly enough to hold one <b>horizontal
-      microinstruction</b>. In CPU3 the microcode control store is two parallel
+      microinstruction</b>. The microcode control store used to be two parallel
       3-trit RAMs (<code>romLo</code> + <code>romHi</code>) tied read-only with a
-      constant <code>0</code> on every write pin; a single ROM collapses that
-      into one block with no tie-offs — the control store as it ought to be. ROM
-      is also the natural home for any precomputed <b>lookup table</b> (store the
-      answer instead of building gates to compute it).</p>
+      constant <code>0</code> on every write pin; a single ROM collapses that into
+      one block with no tie-offs — the control store as it ought to be — and the
+      <em>CPU3</em> / <em>CPU3-full</em> presets now do exactly this. ROM is also
+      the natural home for any precomputed <b>lookup table</b> (store the answer
+      instead of building gates to compute it).</p>
       <h4>Internal state</h4>
       <ul><li><code>mem</code> — nine 6-trit arrays, the stored words. Persists
       across <b>Reset</b> and is written out by <b>Save</b>, so a ROM keeps its
