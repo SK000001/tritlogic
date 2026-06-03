@@ -1,31 +1,72 @@
 // Build step for the Vercel deploy. Bundles every ES module reachable from
-// js/app.js into one minified IIFE, minifies the stylesheet, and emits an
-// index.html that points at the bundle. The readable source in js/ + the
-// original index.html are left untouched (local dev and the headless test
-// runner keep using them); only dist/ is deployed, so the raw modules and the
-// internal *.md design docs never reach the server.
+// js/app.js into one minified IIFE, runs it through javascript-obfuscator, then
+// emits the obfuscated bundle + a minified stylesheet + an index.html that
+// points at the bundle. The readable source in js/ + the original index.html
+// are left untouched (local dev and the headless test runner keep using them);
+// only dist/ is deployed, so the raw modules and the internal *.md design docs
+// never reach the server.
 //
-//   npm run build   →   dist/{index.html, app.min.js, styles.css}
+//   npm run build              →  dist/{index.html, app.min.js, styles.css}
+//   OBFUSCATE=0 npm run build  →  same, but minify-only (faster, debuggable)
 import { build } from 'esbuild';
+import JavaScriptObfuscator from 'javascript-obfuscator';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const OUT = 'dist';
+const OBFUSCATE = process.env.OBFUSCATE !== '0';
 mkdirSync(OUT, { recursive: true });
 
-// 1) Bundle + minify the app. IIFE so the deployed page needs no module/CORS
-//    handling and there is no public module graph to walk.
-await build({
+// 1) Bundle + minify the app into one IIFE (no public module graph to walk).
+//    write:false so we can hand the code to the obfuscator before it hits disk.
+const result = await build({
   entryPoints: ['js/app.js'],
   bundle: true,
   minify: true,
   format: 'iife',
   target: ['es2020'],
   legalComments: 'none',
+  write: false,
   outfile: `${OUT}/app.min.js`,
 });
+let code = result.outputFiles[0].text;
 
-// 2) Minify the stylesheet (filename unchanged so index.html's <link> still
-//    resolves).
+// 2) Obfuscate. Deliberately a MODERATE profile, not max-paranoia: this app has
+//    a hot simulation/animation loop, and the heavy options (full control-flow
+//    flattening, dead-code injection, object-key transforms) wreck runtime perf
+//    and are the most likely to subtly break the app. Notably OFF:
+//      · debugProtection / selfDefending — the user-hostile "freeze devtools"
+//        traps; trivially bypassed and they punish legitimate inspection.
+//      · transformObjectKeys / deadCodeInjection — break risk + size bloat.
+//    Obfuscation raises the casual-reader bar; it is a deterrent, not a lock.
+//    Dial controlFlowFlatteningThreshold down (or OBFUSCATE=0) if the sim feels
+//    sluggish.
+if (OBFUSCATE) {
+  code = JavaScriptObfuscator.obfuscate(code, {
+    compact: true,
+    simplify: true,
+    identifierNamesGenerator: 'mangled-shuffled',
+    controlFlowFlattening: true,
+    controlFlowFlatteningThreshold: 0.5,
+    deadCodeInjection: false,
+    debugProtection: false,
+    selfDefending: false,
+    disableConsoleOutput: false,
+    numbersToExpressions: false,
+    splitStrings: false,
+    transformObjectKeys: false,
+    unicodeEscapeSequence: false,
+    stringArray: true,
+    stringArrayThreshold: 0.75,
+    stringArrayEncoding: ['base64'],
+    stringArrayRotate: true,
+    stringArrayShuffle: true,
+    stringArrayCallsTransform: true,
+    stringArrayWrappersType: 'variable',
+  }).getObfuscatedCode();
+}
+writeFileSync(`${OUT}/app.min.js`, code);
+
+// 3) Minify the stylesheet (filename unchanged so index.html's <link> resolves).
 await build({
   entryPoints: ['styles.css'],
   minify: true,
@@ -33,7 +74,7 @@ await build({
   outfile: `${OUT}/styles.css`,
 });
 
-// 3) Emit index.html pointing at the bundle instead of the raw module.
+// 4) Emit index.html pointing at the bundle instead of the raw module.
 let html = readFileSync('index.html', 'utf8');
 const before = html;
 html = html.replace(
@@ -45,4 +86,4 @@ if (html === before) {
 }
 writeFileSync(`${OUT}/index.html`, html);
 
-console.log('Built dist/ → index.html + app.min.js + styles.css');
+console.log(`Built dist/ → index.html + app.min.js (${OBFUSCATE ? 'obfuscated' : 'minify-only'}) + styles.css`);

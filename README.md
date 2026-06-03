@@ -86,14 +86,15 @@ needed for development.
 
 ## Building / deploying
 
-The deployed site is a **minified bundle**, not the raw modules. `npm run build`
-(esbuild — see `build.mjs`) bundles everything reachable from `js/app.js` into
-one minified `dist/app.min.js`, minifies the stylesheet, and writes a
-`dist/index.html` that points at the bundle:
+The deployed site is a **minified + obfuscated bundle**, not the raw modules.
+`npm run build` (see `build.mjs`) bundles everything reachable from `js/app.js`
+into one IIFE with esbuild, runs it through `javascript-obfuscator`, minifies the
+stylesheet, and writes a `dist/index.html` that points at the bundle:
 
 ```bash
-npm install      # one-time: pulls esbuild (a dev dependency only)
-npm run build    # → dist/{index.html, app.min.js, styles.css}
+npm install            # one-time: pulls esbuild + javascript-obfuscator (dev only)
+npm run build          # → dist/{index.html, app.min.js, styles.css}  (obfuscated)
+OBFUSCATE=0 npm run build   # minify only — faster + readable stack traces, for debugging
 ```
 
 `dist/` is git-ignored and rebuilt on deploy. Vercel runs `npm run build` and
@@ -102,6 +103,15 @@ readable `js/` source and the internal `*.md` design docs never reach the
 server — only the bundle does. The bundle is a plain (non-module) IIFE, so
 unlike the source you *can* open `dist/index.html` directly over `file://` to
 smoke-test a build.
+
+> **Obfuscation is a deterrent, not a lock.** Client-side JS can always be
+> recovered (Network tab → de-minifier). The obfuscator profile is deliberately
+> moderate (no `debugProtection`/`selfDefending` devtools traps, no
+> object-key transforms) to avoid wrecking the simulator's hot loop or subtly
+> breaking it. **Always smoke-test `dist/index.html` before deploying** — open
+> it and hit **Tests**; all checks should pass against the obfuscated bundle.
+> If anything misbehaves, `OBFUSCATE=0` reverts to a plain minified build and
+> you can dial `controlFlowFlatteningThreshold` in `build.mjs`.
 
 ## Run live version
 
