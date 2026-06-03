@@ -838,6 +838,23 @@ function drawWire(w) {
     ctx.fillStyle = BUS_COLOR;
     ctx.fillText(label, lx, ly - 2 / view.scale);
   }
+
+  // User-assigned wire label (B4): a net name set in the inspector. Drawn on a
+  // dark chip at the wire's midpoint. If this is also a value-labelled bus, the
+  // name sits one line higher so the two don't overlap.
+  if (w.label && path.length >= 2) {
+    const mid = path[Math.floor((path.length - 1) / 2)];
+    const next = path[Math.floor((path.length - 1) / 2) + 1] || mid;
+    const lx = (mid.x + next.x) / 2, ly = (mid.y + next.y) / 2;
+    const lift = ((busWire && isBus(v)) ? -14 : 0) / view.scale;
+    ctx.font = `${10 / view.scale}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    const pad = 3 / view.scale, tw = ctx.measureText(w.label).width;
+    ctx.fillStyle = 'rgba(20,22,28,0.82)';
+    ctx.fillRect(lx - tw / 2 - pad, ly - 14 / view.scale + lift, tw + 2 * pad, 13 / view.scale);
+    ctx.fillStyle = selectedWire === w.id ? '#9fc0ff' : '#cfd4de';
+    ctx.fillText(w.label, lx, ly - 2 / view.scale + lift);
+  }
 }
 function drawWireGhost(w) {
   // Overlay wire segments that pass through a non-endpoint component, so

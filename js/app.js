@@ -1572,7 +1572,26 @@ function updateInspector() {
     const v = outVals[`${w.fromId}:${w.fromPort}`] ?? null;
     selInfo.innerHTML = `<b>Wire</b> #${w.id}<br>
       <span style="color:var(--muted)">${w.fromId}.${w.fromPort} → ${w.toId}.${w.toPort}</span>
-      <div class="kv"><span>value</span><b style="color:${tritColor(v)}">${tritLabel(v)}</b></div>`;
+      <div class="kv"><span>value</span><b style="color:${tritColor(v)}">${tritLabel(v)}</b></div>
+      <div class="inspector-form" id="wire-form"></div>`;
+    // Editable net label (B4): a name the user can hang on the wire; it renders
+    // on the canvas at the wire's midpoint and persists through save / load.
+    const wform = document.getElementById('wire-form');
+    const wlabelEl = document.createElement('label');
+    wlabelEl.textContent = 'Label';
+    wlabelEl.title = 'A name for this wire / net, drawn at its midpoint. Leave blank for none.';
+    wform.appendChild(wlabelEl);
+    const wInput = document.createElement('input');
+    wInput.type = 'text';
+    wInput.placeholder = '(none)';
+    wInput.value = w.label || '';
+    wInput.addEventListener('change', () => {
+      pushHistory();
+      const t = wInput.value.trim();
+      if (t) w.label = t; else delete w.label;
+      draw(); updateInspector();
+    });
+    wform.appendChild(wInput);
     return;
   }
   if (selection.size === 0) { selInfo.textContent = 'nothing selected'; return; }
@@ -1925,7 +1944,18 @@ cv.addEventListener('mousedown', (e) => {
   // Select-tool path
   const pin = hitTestPin(mouse.wx, mouse.wy);
   if (pin) {
-    handlePinClick(pin);
+    if (pendingWire) {
+      // A wire is already armed (from a prior click) — this press completes it.
+      handlePinClick(pin);
+    } else {
+      // Arm the pending wire AND start a potential drag. If the user releases
+      // without moving, it stays armed (click-click); if they drag to another
+      // pin and release, mouseup connects it (drag-to-wire).
+      armPendingWire(pin);
+      setDrag({ kind: 'wire', startMX: mouse.x, startMY: mouse.y });
+      setStatus(`wire start (${pin.kind}) — drag to an opposite-kind pin, or click one`);
+      draw();
+    }
     return;
   }
   const c = hitTestComp(mouse.wx, mouse.wy);
@@ -1994,6 +2024,21 @@ cv.addEventListener('mouseup', (e) => {
     }
     // Else: real drag with movement — keep the snapshot pushed at mousedown.
     updateInspector();
+  } else if (drag.kind === 'wire') {
+    // Drag-to-wire: if the pointer actually moved, treat this as a completed
+    // drag — connect to whatever pin is under the cursor (or cancel on empty
+    // space). If it didn't move, it was a click: leave the wire armed so the
+    // next click finishes it (click-click mode).
+    const moved = Math.abs(mouse.x - drag.startMX) >= 3 || Math.abs(mouse.y - drag.startMY) >= 3;
+    if (moved) {
+      const target = hitTestPin(mouse.wx, mouse.wy);
+      if (target && pendingWire && tryCompleteWire(pendingWire, target)) {
+        setStatus('wire placed');
+      } else {
+        setStatus('wire cancelled');
+      }
+      setPendingWire(null);
+    }
   } else if (drag.kind === 'rect') {
     const x0 = Math.min(drag.x0, mouse.wx), y0 = Math.min(drag.y0, mouse.wy);
     const x1 = Math.max(drag.x0, mouse.wx), y1 = Math.max(drag.y0, mouse.wy);
@@ -2012,30 +2057,37 @@ cv.addEventListener('mouseup', (e) => {
   draw();
 });
 
+// Try to connect a pending pin to a target pin. Returns true if the kinds are
+// compatible (out→in or in→out) and a wire was attempted (addWire still vets
+// duplicates / pin direction). Shared by the click-click and drag-to-wire paths.
+function tryCompleteWire(pending, pin) {
+  if (pending.fromKind === 'out' && pin.kind === 'in') {
+    addWire(pending.compId, pending.port, pin.comp.id, pin.port);
+    return true;
+  }
+  if (pending.fromKind === 'in' && pin.kind === 'out') {
+    addWire(pin.comp.id, pin.port, pending.compId, pending.port);
+    return true;
+  }
+  return false;
+}
+function armPendingWire(pin) {
+  setPendingWire({ compId: pin.comp.id, port: pin.port, fromKind: pin.kind,
+                  fromXY: { x: pin.x, y: pin.y } });
+}
 function handlePinClick(pin) {
   if (pendingWire) {
-    // Complete the wire if pin kinds are compatible.
-    let fromId, fromPort, toId, toPort;
-    if (pendingWire.fromKind === 'out' && pin.kind === 'in') {
-      fromId = pendingWire.compId; fromPort = pendingWire.port;
-      toId = pin.comp.id; toPort = pin.port;
-    } else if (pendingWire.fromKind === 'in' && pin.kind === 'out') {
-      fromId = pin.comp.id; fromPort = pin.port;
-      toId = pendingWire.compId; toPort = pendingWire.port;
+    if (tryCompleteWire(pendingWire, pin)) {
+      setPendingWire(null);
+      setStatus('wire placed');
     } else {
-      // Restart from new pin
-      setPendingWire({ compId: pin.comp.id, port: pin.port, fromKind: pin.kind,
-                      fromXY: { x: pin.x, y: pin.y } });
-      setStatus('wire start (click an opposite-kind pin)');
-      draw(); return;
+      // Same-kind pin — restart the pending wire from here.
+      armPendingWire(pin);
+      setStatus('wire start — click (or drag to) an opposite-kind pin');
     }
-    addWire(fromId, fromPort, toId, toPort);
-    setPendingWire(null);
-    setStatus('wire placed');
   } else {
-    setPendingWire({ compId: pin.comp.id, port: pin.port, fromKind: pin.kind,
-                    fromXY: { x: pin.x, y: pin.y } });
-    setStatus(`wire start (${pin.kind}) — click an opposite-kind pin`);
+    armPendingWire(pin);
+    setStatus(`wire start (${pin.kind}) — click or drag to an opposite-kind pin`);
   }
   draw();
 }

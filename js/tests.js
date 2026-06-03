@@ -2193,6 +2193,50 @@ test('Undo / redo round-trips component add, wire add, delete', () => {
   }
 });
 
+// ---- B4: wire labels ------------------------------------------------------
+//
+// A wire can carry an optional `label` (a user-typed net name set in the
+// inspector, drawn at the wire's midpoint). It is a purely additive field on
+// the wire object, so it must (a) survive the JSON save/load round-trip — save
+// serializes the whole wires array verbatim — (b) survive undo/redo's deep
+// clone, and (c) be ignored by the simulator (the engine keys only on
+// from/to ids + ports). This guards all three.
+test('Wire label is additive — survives save round-trip + undo/redo, ignored by sim', () => {
+  const savedComps = comps, savedWires = wires;
+  const savedNextC = nextCompId, savedNextW = nextWireId;
+  const savedUndo = undoStack.slice(), savedRedo = redoStack.slice();
+  try {
+    setComps([]); setWires([]); setNextCompId(1); setNextWireId(1);
+    syncCompMap(); undoStack.length = 0; redoStack.length = 0;
+    comps.push({ id: setNextCompId(nextCompId + 1), type: 'INPUT', x: 0, y: 0, state: { value: 1 } });
+    comps.push({ id: setNextCompId(nextCompId + 1), type: 'STI', x: 0, y: 80, state: {} });
+    syncCompMap();
+    wires.push({ id: setNextWireId(nextWireId + 1), fromId: 1, fromPort: 'out',
+                 toId: 2, toPort: 'in', label: 'clk' });
+    // (a) Save serializes the whole wire object via JSON — the label must survive.
+    const roundTrip = JSON.parse(JSON.stringify({ wires }));
+    assertEq(roundTrip.wires[0].label, 'clk', 'label survives JSON save/load:');
+    // (c) The simulator keys on ids/ports only — the label must not break eval,
+    // and the wire must still carry the INPUT's value to the STI.
+    simulate();
+    assertEq(outVals['1:out'], 1, 'labelled wire still propagates its source value:');
+    // (b) Undo/redo deep-clone the whole state — the label must survive that too.
+    pushHistory();
+    wires[0].label = 'reset';
+    undo();
+    assertEq(wires[0].label, 'clk', 'undo restores the previous label:');
+    redo();
+    assertEq(wires[0].label, 'reset', 'redo reapplies the new label:');
+  } finally {
+    setComps(savedComps); setWires(savedWires);
+    setNextCompId(savedNextC); setNextWireId(savedNextW);
+    setOutVals({}); syncCompMap();
+    undoStack.length = 0; redoStack.length = 0;
+    for (const s of savedUndo) undoStack.push(s);
+    for (const s of savedRedo) redoStack.push(s);
+  }
+});
+
 // ---- palette search -------------------------------------------------------
 //
 // filterPalette() walks the .pal-item entries and hides ones whose text and
