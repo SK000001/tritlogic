@@ -2533,6 +2533,12 @@ function setAutoPlay(on) {
 }
 document.getElementById('btn-play').addEventListener('click', () => setAutoPlay(!autoPlay));
 
+// Stop every running clock / playback source. The three of them — toolbar Play
+// (autoPlay), the debugger Run loop, and Timing-mode playback — must never run at
+// once (they'd double-step or fight over outVals), and replacing the circuit
+// (clear / load / load-example) must not leave any of them stepping the new one.
+function stopAllClocks() { setAutoPlay(false); debuggerStopRun(); exitTimingMode(); }
+
 document.getElementById('btn-reset').addEventListener('click', () => {
   exitTimingMode();
   // Reset every flip-flop's stored state and every clock's value; clear waves.
@@ -2634,6 +2640,7 @@ function timingPlay(on) {
 
 function enterTimingMode() {
   setAutoPlay(false);
+  debuggerStopRun();   // timing playback owns outVals — don't let the debugger step underneath it
   simulate();                                    // clean steady-state baseline
   timing.run = simulateTimed({ comps, wires });
   timing.active = true;
@@ -2899,6 +2906,7 @@ function tutorialApi() {
   return {
     loadExample: (name) => loadExampleNamed(name),
     clearCanvas: () => {
+      stopAllClocks();
       pushHistory();
       setComps([]); setWires([]); setNextCompId(1); setNextWireId(1); syncCompMap();
       setOutVals({}); selection.clear(); setSelectedWire(null); setTick(0);
@@ -3509,6 +3517,7 @@ function debuggerStopRun() {
 }
 function debuggerStartRun() {
   if (debuggerState.running) return;
+  exitTimingMode();     // live stepping invalidates a timed-trace playback
   setAutoPlay(false);   // take over the clock — don't run on top of toolbar Play (double speed)
   const maxStepsInput = document.getElementById('dbg-runmax');
   let budget = Math.max(1, Math.min(9999, Number(maxStepsInput.value) || 200));
@@ -3545,10 +3554,10 @@ function debuggerRunHeadless(maxSteps) {
 document.getElementById('btn-debug').addEventListener('click', openDebugger);
 document.getElementById('dbg-close').addEventListener('click', closeDebugger);
 document.getElementById('dbg-step').addEventListener('click', () => {
-  stepSequential(); refreshDebugger();
+  exitTimingMode(); stepSequential(); refreshDebugger();
 });
 document.getElementById('dbg-step-cyc').addEventListener('click', () => {
-  stepSequential(); stepSequential(); refreshDebugger();
+  exitTimingMode(); stepSequential(); stepSequential(); refreshDebugger();
 });
 document.getElementById('dbg-run').addEventListener('click', debuggerStartRun);
 document.getElementById('dbg-pause').addEventListener('click', debuggerStopRun);
@@ -3575,6 +3584,7 @@ document.getElementById('dbg-panel').addEventListener('click', (e) => {
 
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (!confirm('Clear the entire circuit? (Subcircuit library is preserved.)')) return;
+  stopAllClocks();
   pushHistory();
   setComps([]); setWires([]); setNextCompId(1); setNextWireId(1); syncCompMap();
   setOutVals({}); selection.clear(); setSelectedWire(null); setTick(0);
@@ -3610,6 +3620,7 @@ function serializeCircuit({ forShare = false } = {}) {
 // Returns the post-load validation warnings. Shared by file-load and link-load.
 function applyCircuitData(data) {
   data = upgradeSave(data);   // older → current; newer is passed through
+  stopAllClocks();            // don't leave a clock/playback stepping the replaced circuit
   pushHistory();
   setComps(data.comps || []);
   setWires(data.wires || []);
@@ -5163,6 +5174,7 @@ const EXAMPLES = createExamples({
 function loadExampleNamed(name) {
   const ex = EXAMPLES[name];
   if (!ex) return;
+  stopAllClocks();   // a running clock/debugger/timing must not carry over to the new circuit
   pushHistory();
   const { comps: newComps, wires: newWires } = ex.build();
   setComps(newComps);
