@@ -26,6 +26,7 @@ import {
 import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
 import { minimizeTernary, evalMinimizedExpr, minimizedGateCount,
          canonicalGateCount, materializeMinimized } from './minimizer.js';
+import { ternarizeAbsmean, evalTernaryXorNet, trainTernaryXor } from './ternary-train.js';
 
 export function registerTests(deps) {
   const {
@@ -520,6 +521,49 @@ test('Ternary MLP runs both layers through the sign activation, sampled', () => 
     for (let j = 0; j < 3; j++)
       assertEq(scope.outVals[outSrc['h' + j]], h[j], `MLP h${j} sample ${s}:`);
     assertEq(scope.outVals[outSrc.y], y, `MLP y sample ${s}:`);
+  }
+});
+
+// ---- P1 trained ternary net (BitNet absmean → XOR) -----------------------
+test('P1 absmean ternarization matches the BitNet b1.58 rule', () => {
+  // scale = mean(|w|); round(w/scale) clamped to {-1,0,+1}.
+  assertDeepEq(ternarizeAbsmean([0.9, -0.1, 0.5]), [1, 0, 1], 'mixed magnitudes:');
+  assertDeepEq(ternarizeAbsmean([2, -2, 2, -2]), [1, -1, 1, -1], 'equal magnitudes saturate:');
+  assertDeepEq(ternarizeAbsmean([0, 0, 0]), [0, 0, 0], 'all-zero → all-zero (no divide-by-zero):');
+  // A big outlier raises the scale, zeroing the small weights.
+  assertDeepEq(ternarizeAbsmean([10, 1, -1, 1]), [1, 0, 0, 0], 'outlier dominates the scale:');
+});
+test('P1 trainTernaryXor produces ternary weights that solve XOR', () => {
+  const { W1, W2, seed } = trainTernaryXor();
+  if (seed < 0) throw new Error('no seed yielded a ternary net that solves XOR');
+  // Weights really are ternary {-1,0,+1}.
+  for (const row of [...W1, W2]) for (const v of row)
+    if (![-1, 0, 1].includes(v)) throw new Error('non-ternary weight: ' + v);
+  // The ternary net computes XOR on all four bipolar inputs.
+  for (const a of [-1, 1]) for (const b of [-1, 1])
+    assertEq(evalTernaryXorNet(W1, W2, a, b), a !== b ? 1 : -1, `xor(${a},${b}):`);
+  // Deterministic — same call, same result.
+  assertDeepEq(trainTernaryXor().W1, W1, 'training is deterministic (W1):');
+  assertDeepEq(trainTernaryXor().W2, W2, 'training is deterministic (W2):');
+});
+test('P1 ternary-xor preset circuit computes XOR end to end', () => {
+  // The built circuit (MAC3 + ACT kit, trained weights baked in) must agree with
+  // the reference net for every bipolar input — proving the logic matches the ML.
+  const { comps, wires } = EXAMPLES['ternary-xor'].build();
+  const inByName = {}, outSrc = {};
+  for (const c of comps) {
+    if (c.type === 'INPUT') inByName[c.state.name] = c;
+    if (c.type === 'OUTPUT') {
+      const wr = wires.find(w => w.toId === c.id && w.toPort === 'in');
+      outSrc[c.state.name] = wr ? `${wr.fromId}:${wr.fromPort}` : null;
+    }
+  }
+  for (const a of [-1, 1]) for (const b of [-1, 1]) {
+    inByName.a.state.value = a;
+    inByName.b.state.value = b;
+    const scope = { comps, wires, outVals: {} };
+    simulateScope(scope);
+    assertEq(scope.outVals[outSrc.y], a !== b ? 1 : -1, `preset xor(${a},${b}) y:`);
   }
 });
 

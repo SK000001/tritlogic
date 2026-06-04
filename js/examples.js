@@ -11,6 +11,10 @@
 //  A few presets seed their own subcircuits into the global `subcircuitDefs`
 //  object before referencing them by name — that's also injected.
 
+// P1 — trained ternary weights for the `ternary-xor` preset. A pure leaf module
+// (no app deps), so a direct import keeps the build cycle-free.
+import { trainTernaryXor } from './ternary-train.js';
+
 export function createExamples({
   buildExample,
   buildTmulDef, buildMac3Def, buildActDef,
@@ -1693,6 +1697,63 @@ const EXAMPLES = {
           wires.push(w('w2_' + i,   'out', 'mac2', 'w' + i));
           wires.push(w('act1_' + i, 's',   'mac2', 'x' + i));
         }
+        wires.push(w('mac2', 'lo', 'act2', 'lo'));
+        wires.push(w('mac2', 'hi', 'act2', 'hi'));
+        wires.push(w('act2', 's',  'y', 'in'));
+        return { comps, wires };
+      });
+    },
+  },
+
+  'ternary-xor': {
+    label: 'Trained ternary XOR — BitNet-style weights solve XOR',
+    build: () => {
+      subcircuitDefs['MAC3'] = buildMac3Def();
+      subcircuitDefs['ACT']  = buildActDef();
+      // Weights are NOT hand-set: a tiny float 2→2→1 net is trained on XOR, then
+      // quantized with the BitNet b1.58 absmean rule to {-1,0,+1} (see
+      // ternary-train.js). Each neuron is MAC3 (ternary dot product) over its two
+      // inputs plus a +1 bias lane, then ACT (sign). Inputs are bipolar {-1,+1};
+      // y = +1 when a ≠ b. Deterministic, so this matches the self-test exactly.
+      const { W1, W2 } = trainTernaryXor();
+      return buildExample((c, w) => {
+        const comps = [], wires = [];
+        // Inputs a, b (bipolar) + a shared +1 bias constant feeding every neuron.
+        comps.push(c('a',    'INPUT', 30, 150, { value:  1, name: 'a' }));
+        comps.push(c('b',    'INPUT', 30, 250, { value: -1, name: 'b' }));
+        comps.push(c('bias', 'CONST', 30, 350, { value:  1 }));
+        // Layer 1 — two hidden neurons: MAC3 over (a, b, bias) → ACT → h_j.
+        for (let j = 0; j < 2; j++) {
+          const yB = 40 + j * 210;
+          comps.push(c('w1_' + j + '0', 'INPUT', 150, yB + 12, { value: W1[j][0], name: 'W1_' + j + '0' }));
+          comps.push(c('w1_' + j + '1', 'INPUT', 150, yB + 34, { value: W1[j][1], name: 'W1_' + j + '1' }));
+          comps.push(c('w1_' + j + 'b', 'INPUT', 150, yB + 56, { value: W1[j][2], name: 'W1_' + j + 'b' }));
+          comps.push(c('mac1_' + j, 'SUB:MAC3', 300, yB));
+          comps.push(c('act1_' + j, 'SUB:ACT',  490, yB + 30));
+          comps.push(c('h' + j, 'OUTPUT', 620, yB + 48, { name: 'h' + j }));
+          wires.push(w('w1_' + j + '0', 'out', 'mac1_' + j, 'w0'));
+          wires.push(w('w1_' + j + '1', 'out', 'mac1_' + j, 'w1'));
+          wires.push(w('w1_' + j + 'b', 'out', 'mac1_' + j, 'w2'));
+          wires.push(w('a',    'out', 'mac1_' + j, 'x0'));
+          wires.push(w('b',    'out', 'mac1_' + j, 'x1'));
+          wires.push(w('bias', 'out', 'mac1_' + j, 'x2'));
+          wires.push(w('mac1_' + j, 'lo', 'act1_' + j, 'lo'));
+          wires.push(w('mac1_' + j, 'hi', 'act1_' + j, 'hi'));
+          wires.push(w('act1_' + j, 's',  'h' + j, 'in'));
+        }
+        // Layer 2 — output neuron: MAC3 over (h0, h1, bias) → ACT → y.
+        comps.push(c('w2_0', 'INPUT', 690, 250, { value: W2[0], name: 'W2_0' }));
+        comps.push(c('w2_1', 'INPUT', 690, 284, { value: W2[1], name: 'W2_1' }));
+        comps.push(c('w2_b', 'INPUT', 690, 318, { value: W2[2], name: 'W2_b' }));
+        comps.push(c('mac2', 'SUB:MAC3', 840, 236));
+        comps.push(c('act2', 'SUB:ACT',  1030, 266));
+        comps.push(c('y', 'OUTPUT', 1170, 284, { name: 'y' }));
+        wires.push(w('w2_0', 'out', 'mac2', 'w0'));
+        wires.push(w('w2_1', 'out', 'mac2', 'w1'));
+        wires.push(w('w2_b', 'out', 'mac2', 'w2'));
+        wires.push(w('act1_0', 's', 'mac2', 'x0'));
+        wires.push(w('act1_1', 's', 'mac2', 'x1'));
+        wires.push(w('bias',   'out', 'mac2', 'x2'));
         wires.push(w('mac2', 'lo', 'act2', 'lo'));
         wires.push(w('mac2', 'hi', 'act2', 'hi'));
         wires.push(w('act2', 's',  'y', 'in'));

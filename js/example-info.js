@@ -22,7 +22,7 @@ export const EXAMPLE_INFO_CATEGORIES = [
   ['Buses',              ['tristate-bus', 'regfile-bus', 'word-bus', 'regfile-wordbus', 'tryte-bus', 'bus-datapath', 'bus-ports']],
   ['CPU',                ['cpu', 'cpu-structural', 'cpu2']],
   ['Microcode',          ['microcode-seq', 'microcode-fields', 'microcode-dispatch', 'cpu3', 'cpu3-full']],
-  ['Neural net',         ['ternary-mac', 'ternary-layer', 'ternary-mlp']],
+  ['Neural net',         ['ternary-mac', 'ternary-layer', 'ternary-mlp', 'ternary-xor']],
 ];
 
 export const EXAMPLE_INFO = {
@@ -987,5 +987,36 @@ export const EXAMPLE_INFO = {
       is itself a small ternary function. Change an input or a weight and the
       signal propagates through both layers to the outputs. It ties the whole
       neural-net kit together: MAC → layer → MLP.</p>`,
+  },
+
+  'ternary-xor': {
+    name: 'Trained ternary XOR',
+    tagline: 'A net actually trained on XOR, then quantized to ternary weights',
+    body: `
+      <p>The other neural examples use hand-picked weights to show the
+      <i>machinery</i>. This one shows the <b>real pipeline</b>: a tiny floating-point
+      2→2→1 network is <b>trained</b> on XOR, then its weights are quantized to
+      {<span style="color:var(--t-neg)">−1</span>,
+      <span style="color:var(--t-zero)">0</span>,
+      <span style="color:var(--t-pos)">+1</span>} with the <b>BitNet b1.58 "absmean"
+      rule</b> — divide by the mean absolute weight, round, clamp. The resulting
+      ternary net still computes XOR exactly.</p>
+      <pre class="info-diagram">
+   a ─┐                    XOR truth (bipolar −1/+1)
+   b ─┤─▶[MAC3]─▶[ACT]─▶ h0 ┐     a  b │ y
+   +1─┘                     ├─▶[MAC3]─▶[ACT]─▶ y    −1 −1 │ −1
+   a ─┐                     │           −1 +1 │ +1
+   b ─┤─▶[MAC3]─▶[ACT]─▶ h1 ┘           +1 −1 │ +1
+   +1─┘   (2 hidden neurons)            +1 +1 │ −1
+      </pre>
+      <p>Each neuron is a <b>MAC3</b> (ternary dot product) over its two inputs plus
+      a constant <b>+1 bias</b> lane, followed by <b>ACT</b> (sign). XOR isn't
+      linearly separable, so it needs the hidden layer — exactly why the activation
+      matters. Inputs are bipolar: set <b>a</b> and <b>b</b> to combinations of
+      <span style="color:var(--t-neg)">−1</span> and
+      <span style="color:var(--t-pos)">+1</span> and watch <b>y</b> follow the XOR
+      truth table. This is the bridge to real photonic-AI: ternary weights are a
+      live topic (BitNet), and a ternary MAC is exactly what a photonic crossbar
+      computes — so the same trained weights could one day program the chip.</p>`,
   },
 };
