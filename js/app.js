@@ -721,15 +721,30 @@ TYPES.PC = {
 // Tool / interaction state
 
 
+// Match the canvas drawing buffers to their containers' real on-screen size.
+// Split out from resize() so it can be called right before any size-dependent
+// math (e.g. fitView) to guarantee fresh dimensions.
+function syncCanvasSize() {
+  cv.width  = Math.max(1, Math.round(cv.parentElement.clientWidth));
+  cv.height = Math.max(1, Math.round(cv.parentElement.clientHeight));
+  waveCv.width  = Math.max(1, Math.round(waveCv.parentElement.clientWidth));
+  waveCv.height = Math.max(1, Math.round(waveCv.parentElement.clientHeight - 28));
+}
 function resize() {
-  cv.width = cv.parentElement.clientWidth;
-  cv.height = cv.parentElement.clientHeight;
-  waveCv.width = waveCv.parentElement.clientWidth;
-  waveCv.height = waveCv.parentElement.clientHeight - 28;
+  syncCanvasSize();
   draw();
   drawWaves();
 }
 window.addEventListener('resize', resize);
+// `window`'s resize event is unreliable inside an `<iframe>` (the I4 embed view):
+// the host can size/resize the iframe without the iframe's window firing resize,
+// leaving the canvas buffer stale — which made Fit compute against the wrong
+// (whole-page) dimensions. A ResizeObserver on the canvas container fires
+// whenever its box actually changes, for any reason. (No layout loop: the
+// container is a fixed grid track, so resizing the canvas buffer can't resize it.)
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(() => resize()).observe(cv.parentElement);
+}
 
 // ============================================================================
 //  HIT-TESTING & COORDINATES
@@ -2375,6 +2390,7 @@ function fitView() {
     ? Array.from(selection).map(getComp).filter(Boolean)
     : comps;
   if (!items.length) { setStatus('nothing to fit'); return; }
+  syncCanvasSize();   // fit to the canvas's current real size, not a stale buffer (iframe-safe)
   const bb = boundingBox(items);
   const pad = 40;
   const sx = cv.width  / (bb.w + pad * 2);
