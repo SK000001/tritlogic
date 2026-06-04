@@ -6,6 +6,18 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<script>
+  // I4 — apply the embed layout synchronously, before the header/panels below are
+  // parsed, so a slow or complex load never flashes the full editor inside an
+  // iframe. This runs first thing in <body> (stylesheet already parsed in <head>),
+  // so body.embed is set before those elements exist and CSS hides them from the
+  // very first paint. The module's applyEmbedMode() re-applies it + wires the
+  // "Open in TritLogic" links once it finishes loading.
+  (function () {
+    var m = (location.search || '').match(/[?&]embed(?:=([^&]*))?(?:&|$)/);
+    if (m && m[1] !== '0' && m[1] !== 'false') document.body.classList.add('embed');
+  })();
+</script>
 
 <header>
   <a class="title" href="index.html" title="About TritLogic — home" style="color:inherit;text-decoration:none">TritLogic</a>
