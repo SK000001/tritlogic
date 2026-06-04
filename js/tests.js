@@ -15,7 +15,7 @@ import { intToTrits, tritsToInt, parseTryteString,
          packBus, unpackBus, isBus, busLabel } from './util.js';
 import {
   comps, wires, subcircuitDefs, customGates, outVals,
-  nextCompId, nextWireId, tick, undoStack, redoStack,
+  nextCompId, nextWireId, tick, undoStack, redoStack, selection,
   setComps, setWires, setOutVals, setTick,
   setNextCompId, setNextWireId, setCustomGates,
 } from './state.js';
@@ -37,6 +37,7 @@ export function registerTests(deps) {
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
     simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
+    duplicateSelection,
   } = deps;
 
 const TESTS = [];
@@ -2406,6 +2407,56 @@ test('Cheaper undo: comp state is deep-copied; immutable defs survive shallow sh
     setComps(savedComps); setWires(savedWires);
     setNextCompId(savedNextC); setNextWireId(savedNextW);
     syncCompMap();
+    undoStack.length = 0; redoStack.length = 0;
+    for (const s of savedUndo) undoStack.push(s);
+    for (const s of savedRedo) redoStack.push(s);
+  }
+});
+
+test('Duplicate selection clones comps + only the internal wires, remapped & offset', () => {
+  const savedComps = comps, savedWires = wires;
+  const savedNextC = nextCompId, savedNextW = nextWireId;
+  const savedUndo = undoStack.slice(), savedRedo = redoStack.slice();
+  try {
+    // INPUT(1) → STI(2) → OUTPUT(3) selected; an external INPUT(4) → STI(2) wire
+    // crosses the boundary and must NOT be duplicated.
+    setComps([
+      { id: 1, type: 'INPUT',  x: 0,   y: 0,  state: { value: 1, name: 'a' } },
+      { id: 2, type: 'STI',    x: 80,  y: 0,  state: {} },
+      { id: 3, type: 'OUTPUT', x: 160, y: 0,  state: { name: 'y' } },
+      { id: 4, type: 'INPUT',  x: 0,   y: 80, state: { value: 0, name: 'b' } },
+    ]);
+    setWires([
+      { id: 1, fromId: 1, fromPort: 'out', toId: 2, toPort: 'in' },   // internal
+      { id: 2, fromId: 2, fromPort: 'out', toId: 3, toPort: 'in' },   // internal
+      { id: 3, fromId: 4, fromPort: 'out', toId: 2, toPort: 'in' },   // boundary
+    ]);
+    setNextCompId(5); setNextWireId(4);
+    syncCompMap();
+    selection.clear(); selection.add(1); selection.add(2); selection.add(3);
+    undoStack.length = 0; redoStack.length = 0;
+
+    duplicateSelection();
+
+    assertEq(comps.length, 7, 'three of four comps duplicated:');
+    assertEq(wires.length, 5, 'two internal wires duplicated, boundary one skipped:');
+    assertEq(selection.size, 3, 'the copies become the new selection:');
+    // Both new wires must connect two duplicated (selected) comps, not originals.
+    for (const w of wires.filter(w => w.id > 3)) {
+      assertEq(selection.has(w.fromId) && selection.has(w.toId), true,
+               'new wire is remapped to the duplicated comps:');
+    }
+    // Offset applied + snapped (orig INPUT x=0 → +20).
+    const dupIn = comps.find(c => c.id > 4 && c.type === 'INPUT');
+    assertEq(dupIn.x, 20, 'clone offset by +20:');
+    // Undo removes the whole duplicate group.
+    undo();
+    assertEq(comps.length, 4, 'undo removes the duplicated comps:');
+    assertEq(wires.length, 3, 'undo removes the duplicated wires:');
+  } finally {
+    setComps(savedComps); setWires(savedWires);
+    setNextCompId(savedNextC); setNextWireId(savedNextW);
+    syncCompMap(); selection.clear();
     undoStack.length = 0; redoStack.length = 0;
     for (const s of savedUndo) undoStack.push(s);
     for (const s of savedRedo) redoStack.push(s);

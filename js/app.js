@@ -2290,6 +2290,46 @@ function deleteSelection() {
   simulate(); draw(); updateInspector();
 }
 
+// Duplicate the selected components (and any wires WHOLLY inside the selection)
+// as a fresh group offset down-right, then select the copies — handy for laying
+// out repetitive structure (a register file, a row of cells). Each clone gets a
+// new id + deep-cloned state; a SUB instance drops its subScope so it rebuilds
+// its own. Wires crossing the selection boundary are not copied (their other end
+// isn't duplicated), matching the Pack convention.
+function duplicateSelection() {
+  const src = Array.from(selection).map(getComp).filter(Boolean);
+  if (!src.length) return;
+  pushHistory();
+  const sel = new Set(src.map(c => c.id));
+  const idMap = new Map();   // old comp id → new comp id
+  const newIds = [];
+  const OFFSET = 20;
+  for (const c of src) {
+    const nid = setNextCompId(nextCompId + 1);
+    const cc = { ...c, id: nid, x: snap(c.x + OFFSET), y: snap(c.y + OFFSET), state: deepClone(c.state) };
+    delete cc.subScope;
+    comps.push(cc);
+    idMap.set(c.id, nid);
+    newIds.push(nid);
+  }
+  for (const w of wires.slice()) {   // slice: we push to `wires` while iterating
+    if (sel.has(w.fromId) && sel.has(w.toId)) {
+      const nw = { id: setNextWireId(nextWireId + 1),
+                   fromId: idMap.get(w.fromId), fromPort: w.fromPort,
+                   toId: idMap.get(w.toId), toPort: w.toPort };
+      if (w.label != null) nw.label = w.label;
+      wires.push(nw);
+    }
+  }
+  syncCompMap();
+  selection.clear();
+  for (const nid of newIds) selection.add(nid);
+  setSelectedWire(null);
+  invalidatePathCache();
+  simulate(); draw(); updateInspector();
+  setStatus(`duplicated ${newIds.length} component${newIds.length === 1 ? '' : 's'}`);
+}
+
 function addWire(fromId, fromPort, toId, toPort) {
   // Reject if from-pin is not actually an output of its component (and vice versa).
   const fc = getComp(fromId), tc = getComp(toId);
@@ -2379,6 +2419,13 @@ window.addEventListener('keydown', (e) => {
         updateInspector(); draw();
         setStatus(`selected ${comps.length} component${comps.length === 1 ? '' : 's'}`);
       }
+      return;
+    }
+    if (e.key === 'd' || e.key === 'D') {
+      // Duplicate selection (Ctrl/Cmd+D) — preventDefault to suppress the
+      // browser's bookmark dialog; no-op while typing in a field.
+      const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA');
+      if (!typing) { e.preventDefault(); duplicateSelection(); }
       return;
     }
   }
@@ -4854,6 +4901,7 @@ const { TESTS, runAllTests } = registerTests({
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
   simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
+  duplicateSelection,
 });
 
 
