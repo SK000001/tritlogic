@@ -2321,6 +2321,28 @@ cv.addEventListener('wheel', (e) => {
   draw();
 }, { passive: false });
 
+// Frame the whole circuit (or the current selection) in the viewport — handy
+// for finding your way around a large or just-loaded circuit. Bound to the `F`
+// key and the toolbar Fit button. Scale is clamped to the same [0.3, 3] range
+// as wheel zoom, so a circuit too big to fit at min zoom is at least centred.
+function fitView() {
+  const items = selection.size
+    ? Array.from(selection).map(getComp).filter(Boolean)
+    : comps;
+  if (!items.length) { setStatus('nothing to fit'); return; }
+  const bb = boundingBox(items);
+  const pad = 40;
+  const sx = cv.width  / (bb.w + pad * 2);
+  const sy = cv.height / (bb.h + pad * 2);
+  const scale = Math.max(0.3, Math.min(3, Math.min(sx, sy)));
+  view.scale = scale;
+  view.tx = cv.width  / 2 - (bb.x + bb.w / 2) * scale;
+  view.ty = cv.height / 2 - (bb.y + bb.h / 2) * scale;
+  draw();
+  setStatus(selection.size ? 'fit to selection' : 'fit to circuit');
+}
+document.getElementById('btn-fit')?.addEventListener('click', fitView);
+
 window.addEventListener('keydown', (e) => {
   // Undo / redo are bound even while focus is in a text field, but ONLY
   // when the field isn't the palette search box — typing there should
@@ -2346,6 +2368,7 @@ window.addEventListener('keydown', (e) => {
   if (ae && ae.tagName === 'SELECT') return;
   if (e.code === 'Space') { mouse.spaceDown = true; cv.style.cursor = 'grab'; }
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); }
+  if (e.key === 'f' || e.key === 'F') { fitView(); }   // frame the circuit / selection
   if (e.key === 'Escape') {
     setPendingWire(null); selection.clear(); setSelectedWire(null);
     updateInspector(); draw();
