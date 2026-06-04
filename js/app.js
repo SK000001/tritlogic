@@ -3349,9 +3349,9 @@ document.getElementById('file-input').addEventListener('change', (e) => {
 // (`#c=…`) and copy a full link to the clipboard, so a circuit travels as a
 // link. The hash fragment never hits a server, and the save-migration framework
 // (D4) keeps old links loadable as the format evolves.
-function shareCircuit() {
+async function shareCircuit() {
   try {
-    const enc = encodeShare(serializeCircuit({ forShare: true }));
+    const enc = await encodeShare(serializeCircuit({ forShare: true }));
     const url = location.origin + location.pathname + '#c=' + enc;
     history.replaceState(null, '', '#c=' + enc);   // reflect in the address bar, no nav
     const big = url.length > 8000
@@ -3367,25 +3367,26 @@ function shareCircuit() {
   } catch (err) { alert('Could not build a share link: ' + err.message); }
 }
 const shareBtn = document.getElementById('btn-share');
-if (shareBtn) shareBtn.addEventListener('click', shareCircuit);
+if (shareBtn) shareBtn.addEventListener('click', () => { shareCircuit(); });
 
 // On startup, load a circuit from the share hash if present (`#c=…`), else fall
-// back to the default example. Returns true if a shared circuit was loaded.
-function loadFromShareHash() {
+// back to the default example. Async because decodeShare gunzips the payload.
+async function bootCircuit() {
   const m = (location.hash || '').match(/[#&]c=([^&]+)/);
-  if (!m) return false;
-  try {
-    const warnings = applyCircuitData(decodeShare(m[1]));
-    setStatus('Loaded shared circuit from link' +
-              (warnings.length ? ` (${warnings.length} validation warning(s) — see console)` : ''));
-    return true;
-  } catch (err) {
-    console.warn('Could not load shared circuit from link:', err);
-    alert('This share link is invalid or corrupted, so it could not be opened. ' +
-          'The default example has been loaded instead.');
-    setStatus('Shared link could not be loaded — opened the default example instead');
-    return false;
+  if (m) {
+    try {
+      const warnings = applyCircuitData(await decodeShare(m[1]));
+      setStatus('Loaded shared circuit from link' +
+                (warnings.length ? ` (${warnings.length} validation warning(s) — see console)` : ''));
+      return;
+    } catch (err) {
+      console.warn('Could not load shared circuit from link:', err);
+      alert('This share link is invalid or corrupted, so it could not be opened. ' +
+            'The default example has been loaded instead.');
+      setStatus('Shared link could not be loaded — opened the default example instead');
+    }
   }
+  loadExample();
 }
 
 // ============================================================================
@@ -4804,8 +4805,8 @@ const { TESTS, runAllTests } = registerTests({
 });
 
 
-document.getElementById('btn-tests').addEventListener('click', () => {
-  const results = runAllTests();
+document.getElementById('btn-tests').addEventListener('click', async () => {
+  const results = await runAllTests();   // async: some tests gunzip, etc.
   const pass = results.filter(r => r.pass).length;
   const fail = results.length - pass;
   document.getElementById('tests-summary').innerHTML =
@@ -4915,12 +4916,13 @@ function validateCircuit() {
 // ============================================================================
 
 resize();
-// A share link (`#c=…`) loads its circuit; otherwise open the default example.
-if (!loadFromShareHash()) loadExample();
 setTool('select');
 registerBuiltinSubcircuits();
 refreshSubLib();
 refreshGateLib();
+// A share link (`#c=…`) loads its circuit (async — gunzips), else the default
+// example. Runs last so the rest of BOOT is set up before the circuit lands.
+bootCircuit();
 
 
 // ---- ESM shim for the headless test runner -------------------------------

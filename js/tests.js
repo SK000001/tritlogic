@@ -2103,21 +2103,29 @@ test('upgradeSave: newer-than-current save is passed through (caller decides)', 
   const out = upgradeSave(future);
   assertEq(out.version, SAVE_FORMAT_VERSION + 5, 'version preserved:');
 });
-test('I3 shareable circuits: encodeShare/decodeShare round-trips a circuit, URL-safe', () => {
+test('I3 shareable circuits: encodeShare/decodeShare round-trips a circuit, URL-safe + gzipped', async () => {
   // A real preset, wrapped as a save object, must survive the link round-trip.
   const ex = EXAMPLES['bus-ports'].build();
   const data = { version: SAVE_FORMAT_VERSION, comps: ex.comps, wires: ex.wires,
                  view: { tx: 40, ty: 40, scale: 1 }, subcircuitDefs: {}, customGates: {} };
-  const enc = encodeShare(data);
-  // base64url only — no '+', '/', '=', or whitespace, so it's safe in a URL hash.
+  const enc = await encodeShare(data);
+  // base64url + a 1-char scheme prefix — only [A-Za-z0-9_-], so URL-hash-safe.
   assertEq(/^[A-Za-z0-9_-]+$/.test(enc), true, 'encoded form is URL-safe:');
-  assertDeepEq(decodeShare(enc), data, 'decode(encode(circuit)) is identity:');
+  assertDeepEq(await decodeShare(enc), data, 'decode(encode(circuit)) is identity:');
   // A round-trip through upgradeSave (the real load path) is a no-op at current
   // version, so an encoded current circuit loads cleanly.
-  assertDeepEq(upgradeSave(decodeShare(enc)), data, 'decoded circuit migrates to a no-op:');
+  assertDeepEq(upgradeSave(await decodeShare(enc)), data, 'decoded circuit migrates to a no-op:');
   // Non-ASCII (a user-named gate with symbols) survives the UTF-8 path.
   const u = { version: SAVE_FORMAT_VERSION, note: 'trit ≡ −1/0/+1 ✓', comps: [], wires: [] };
-  assertDeepEq(decodeShare(encodeShare(u)), u, 'unicode survives the round-trip:');
+  assertDeepEq(await decodeShare(await encodeShare(u)), u, 'unicode survives the round-trip:');
+  // gzip should actually shrink a repetitive circuit (scheme '1' = gzipped).
+  assertEq(enc[0], '1', 'a real circuit encodes with the gzip scheme:');
+  // A legacy un-prefixed raw-base64 link (pre-scheme format, ASCII JSON) must
+  // still decode (back-compat). Such links begin with 'e' (base64 of '{'), never
+  // '0'/'1', so the scheme sniff treats them as legacy.
+  const ascii = { version: SAVE_FORMAT_VERSION, comps: [], wires: [] };
+  const legacy = btoa(JSON.stringify(ascii)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  assertDeepEq(await decodeShare(legacy), ascii, 'legacy un-prefixed base64 link still loads:');
 });
 
 // ---- All-structural CPU --------------------------------------------------
@@ -2613,10 +2621,13 @@ test('Minimizer materializes a subcircuit that reproduces the table (F1 Phase 2)
   }
 });
 
-function runAllTests() {
+// Async so individual tests may be async (e.g. the gzip share round-trip).
+// `await t.fn()` is transparent for the sync tests — awaiting a non-promise is a
+// no-op, and a synchronous throw still propagates into the catch.
+async function runAllTests() {
   const results = [];
   for (const t of TESTS) {
-    try { t.fn(); results.push({ name: t.name, pass: true }); }
+    try { await t.fn(); results.push({ name: t.name, pass: true }); }
     catch (e) { results.push({ name: t.name, pass: false, error: e.message }); }
   }
   return results;

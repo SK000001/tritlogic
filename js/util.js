@@ -140,13 +140,19 @@ export function upgradeSave(data) {
 // ---- Shareable-circuit encoding (I3) --------------------------------------
 //
 //  Encode a circuit's save object into a compact, URL-safe string so a circuit
-//  can travel as a link (`…/#c=<encoded>`). JSON → UTF-8 bytes → base64url
-//  (the `+ / =` of base64 swapped for `- _` and stripped, so it's safe in a URL
-//  hash). The inverse re-parses to the save object, which the normal load path
-//  (with upgradeSave migrations) then consumes — so old links keep working as
-//  the format evolves. Synchronous + dependency-free so it round-trips under the
-//  headless test runner. (Future: gzip via CompressionStream to shrink large
-//  circuits — kept out for now to stay synchronous and testable.)
+//  can travel as a link (`…/#c=<encoded>`). The body is the save JSON; we gzip
+//  it (CompressionStream — native in modern browsers + Node 18+) when that
+//  shrinks it, then base64url it (the `+ / =` of base64 swapped for `- _` and
+//  stripped, so it's safe in a URL hash). A 1-char SCHEME prefix says how to
+//  read the rest:
+//      '1' + base64url(gzip(json))  — gzipped (the usual case; a big win on the
+//                                      very repetitive circuit JSON)
+//      '0' + base64url(json)        — raw (gzip didn't help / wasn't available)
+//      <other first char>           — legacy: the whole string is raw base64url
+//                                      (pre-prefix links keep loading)
+//  The inverse re-parses to the save object, which the normal load path (with
+//  upgradeSave migrations) then consumes — so old links keep working as the
+//  format evolves. Encode/decode are async because gzip is stream-based.
 function bytesToBase64url(bytes) {
   let bin = '';
   for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
@@ -159,11 +165,46 @@ function base64urlToBytes(str) {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
-export function encodeShare(data) {
-  return bytesToBase64url(new TextEncoder().encode(JSON.stringify(data)));
+// Push `bytes` through a (De)CompressionStream and collect the result. Writing
+// without awaiting + reading to completion is the standard one-shot pattern (no
+// backpressure deadlock for our modest sizes).
+async function streamThrough(bytes, transform) {
+  const writer = transform.writable.getWriter();
+  writer.write(bytes); writer.close();
+  const reader = transform.readable.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    chunks.push(value); total += value.length;
+  }
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
+  return out;
 }
-export function decodeShare(str) {
-  return JSON.parse(new TextDecoder().decode(base64urlToBytes(str)));
+const hasGzip = typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
+
+export async function encodeShare(data) {
+  const raw = new TextEncoder().encode(JSON.stringify(data));
+  if (hasGzip) {
+    try {
+      const gz = await streamThrough(raw, new CompressionStream('gzip'));
+      if (gz.length < raw.length) return '1' + bytesToBase64url(gz);
+    } catch { /* gzip failed — fall through to raw */ }
+  }
+  return '0' + bytesToBase64url(raw);
+}
+export async function decodeShare(str) {
+  const scheme = str[0];
+  if (scheme === '1') {
+    const raw = await streamThrough(base64urlToBytes(str.slice(1)), new DecompressionStream('gzip'));
+    return JSON.parse(new TextDecoder().decode(raw));
+  }
+  // '0' (explicit raw) or a legacy pre-prefix link (the whole string is base64url).
+  const payload = scheme === '0' ? str.slice(1) : str;
+  return JSON.parse(new TextDecoder().decode(base64urlToBytes(payload)));
 }
 
 // Prefer the platform's structuredClone (faster + preserves more JS types)
