@@ -37,7 +37,7 @@ export function registerTests(deps) {
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
     simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
-    duplicateSelection,
+    duplicateSelection, nudgeSelection,
   } = deps;
 
 const TESTS = [];
@@ -2453,6 +2453,40 @@ test('Duplicate selection clones comps + only the internal wires, remapped & off
     undo();
     assertEq(comps.length, 4, 'undo removes the duplicated comps:');
     assertEq(wires.length, 3, 'undo removes the duplicated wires:');
+  } finally {
+    setComps(savedComps); setWires(savedWires);
+    setNextCompId(savedNextC); setNextWireId(savedNextW);
+    syncCompMap(); selection.clear();
+    undoStack.length = 0; redoStack.length = 0;
+    for (const s of savedUndo) undoStack.push(s);
+    for (const s of savedRedo) redoStack.push(s);
+  }
+});
+
+test('Arrow-nudge moves the selection and coalesces a run into one undo entry', () => {
+  const savedComps = comps, savedWires = wires;
+  const savedNextC = nextCompId, savedNextW = nextWireId;
+  const savedUndo = undoStack.slice(), savedRedo = redoStack.slice();
+  try {
+    setComps([{ id: 1, type: 'STI', x: 50, y: 50, state: {} },
+              { id: 2, type: 'STI', x: 100, y: 50, state: {} }]);
+    setWires([]); setNextCompId(3); setNextWireId(1); syncCompMap();
+    selection.clear(); selection.add(1); selection.add(2);
+    undoStack.length = 0; redoStack.length = 0;
+    // Three nudges in one run (no keyup between them) move both comps and add
+    // exactly ONE undo entry (the run is coalesced; _nudgeRun starts false).
+    const c1 = () => comps.find(c => c.id === 1);
+    const c2 = () => comps.find(c => c.id === 2);
+    nudgeSelection(10, 0);
+    nudgeSelection(10, 0);
+    nudgeSelection(0, 10);
+    assertEq(c1().x, 70, 'comp 1 moved +20 in x:');
+    assertEq(c1().y, 60, 'comp 1 moved +10 in y:');
+    assertEq(c2().x, 120, 'comp 2 moved with the group:');
+    assertEq(undoStack.length, 1, 'the whole nudge run is a single undo entry:');
+    undo();
+    assertEq(c1().x, 50, 'undo reverts the run (x):');
+    assertEq(c1().y, 50, 'undo reverts the run (y):');
   } finally {
     setComps(savedComps); setWires(savedWires);
     setNextCompId(savedNextC); setNextWireId(savedNextW);

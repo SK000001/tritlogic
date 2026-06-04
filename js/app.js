@@ -2388,6 +2388,21 @@ function fitView() {
 }
 document.getElementById('btn-fit')?.addEventListener('click', fitView);
 
+// Arrow-key nudge of the selected components by one grid step. A run of nudges
+// (holding/repeating an arrow) coalesces into a SINGLE undo entry: history is
+// pushed only when a run starts; the keyup handler ends the run.
+let _nudgeRun = false;
+function nudgeSelection(dx, dy) {
+  if (!selection.size) return;
+  if (!_nudgeRun) { pushHistory(); _nudgeRun = true; }
+  for (const id of selection) {
+    const c = getComp(id);
+    if (c) { c.x = snap(c.x + dx); c.y = snap(c.y + dy); }
+  }
+  invalidatePathCache();
+  simulate(); draw(); updateInspector();
+}
+
 window.addEventListener('keydown', (e) => {
   // Undo / redo are bound even while focus is in a text field, but ONLY
   // when the field isn't the palette search box — typing there should
@@ -2434,6 +2449,15 @@ window.addEventListener('keydown', (e) => {
   if (ae && ae.tagName === 'SELECT') return;
   if (e.code === 'Space') { mouse.spaceDown = true; cv.style.cursor = 'grab'; }
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); }
+  // Arrow keys nudge the selection by one grid step (Shift = ×5).
+  if (e.key.startsWith('Arrow') && selection.size) {
+    e.preventDefault();
+    const G = 10 * (e.shiftKey ? 5 : 1);
+    if (e.key === 'ArrowLeft')  nudgeSelection(-G, 0);
+    else if (e.key === 'ArrowRight') nudgeSelection(G, 0);
+    else if (e.key === 'ArrowUp')    nudgeSelection(0, -G);
+    else if (e.key === 'ArrowDown')  nudgeSelection(0, G);
+  }
   if (e.key === 'f' || e.key === 'F') { fitView(); }   // frame the circuit / selection
   // +/- zoom, anchored at the viewport centre ('=' is the unshifted '+').
   if (e.key === '+' || e.key === '=') { zoomAt(1.1, cv.width / 2, cv.height / 2); }
@@ -2446,6 +2470,9 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => {
   if (e.code === 'Space') { mouse.spaceDown = false; cv.style.cursor = ''; }
+  // Releasing an arrow ends the current nudge run, so the next press starts a
+  // fresh undo entry rather than coalescing into the previous move.
+  if (e.key && e.key.startsWith('Arrow')) _nudgeRun = false;
 });
 
 // ============================================================================
@@ -4902,7 +4929,7 @@ const { TESTS, runAllTests } = registerTests({
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
   simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
-  duplicateSelection,
+  duplicateSelection, nudgeSelection,
 });
 
 
