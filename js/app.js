@@ -2521,6 +2521,7 @@ document.getElementById('btn-step').addEventListener('click', () => { exitTiming
 // the requested state.  Used by the Play button and by example loading.
 function setAutoPlay(on) {
   if (on) exitTimingMode();   // stepping the clock leaves a timed trace stale
+  if (on) debuggerStopRun();  // one clock source at a time — don't run alongside the debugger
   const btn = document.getElementById('btn-play');
   if (on && !autoPlay) {
     assignAutoPlay(setInterval(stepSequential, 250));
@@ -3508,6 +3509,7 @@ function debuggerStopRun() {
 }
 function debuggerStartRun() {
   if (debuggerState.running) return;
+  setAutoPlay(false);   // take over the clock — don't run on top of toolbar Play (double speed)
   const maxStepsInput = document.getElementById('dbg-runmax');
   let budget = Math.max(1, Math.min(9999, Number(maxStepsInput.value) || 200));
   debuggerState.running = true;
