@@ -20,7 +20,7 @@ import {
   ASM2_OPCODES, ASM2_IMM_RANGE, ASM2_ADDR_RANGE, assembleV2, decodeImemWordV2,
   ASM_EXAMPLES, ASM2_EXAMPLES
 } from './assembler.js';
-import { minimizeReport } from './minimizer.js';
+import { minimizeReport, materializeMinimized } from './minimizer.js';
 import { createExamples } from './examples.js';
 import { registerTests } from './tests.js';
 import { createRender } from './render.js';
@@ -1569,6 +1569,38 @@ document.getElementById('gate-minimize').addEventListener('click', () => {
     `(canonical ${rep.gatesBefore}${saved > 0 ? `, −${saved} / ${pct}% fewer` : ''})` +
     `</div>`;
   el.style.display = '';
+});
+// F1 Phase 2: materialize the minimized expression as a real subcircuit of
+// MIN/MAX/STI/PTI/NTI gates (built by materializeMinimized) and arm it for
+// placement on the canvas — "compile a custom gate to gates". Works off the
+// current draft table directly; you don't have to add the behavioural gate first.
+document.getElementById('gate-compile').addEventListener('click', () => {
+  const name = document.getElementById('gate-name').value.trim();
+  const statusEl = document.getElementById('gate-status');
+  if (!name) { statusEl.textContent = 'name required'; return; }
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
+    statusEl.textContent = 'name must start with a letter, then letters/digits/_';
+    return;
+  }
+  if (isBuiltinSubcircuit(name)) {
+    statusEl.textContent = `name "${name}" is a built-in subcircuit; choose another name`;
+    return;
+  }
+  if (subcircuitDefs[name] && !confirm(`Overwrite existing subcircuit "${name}"?`)) return;
+  // Totalize the table (unfilled cells = 0) and name the inputs a, b, c…
+  const table = {};
+  for (const combo of enumerateInputs(gbDraft.numInputs)) {
+    const k = inputKey(combo);
+    table[k] = gbDraft.table[k] ?? 0;
+  }
+  const inNames = Array.from({ length: gbDraft.numInputs }, (_, i) => 'abcd'[i] || ('in' + i));
+  const def = materializeMinimized(table, gbDraft.numInputs, inNames, 'out');
+  subcircuitDefs[name] = def;
+  refreshSubLib();
+  closeModal('gate-modal');
+  setTool('place', 'SUB:' + name);
+  setStatus(`Compiled "${name}" to ${def.comps.length - def.inputs.length - def.outputs.length} ` +
+            `gate${def.comps.length - def.inputs.length - def.outputs.length === 1 ? '' : 's'} — click to place it`);
 });
 document.getElementById('gate-add').addEventListener('click', () => {
   const name = document.getElementById('gate-name').value.trim();

@@ -274,3 +274,126 @@ export function minimizeReport(table, n, inNames) {
     terms: expr.terms.length,
   };
 }
+
+// ── F1 Phase 2 — materialize ────────────────────────────────────────────────
+//
+// "Compile a custom gate to gates": turn a minimized MAX-of-MIN expression into
+// an actual placed circuit of the simulator's primitives, shaped as a
+// subcircuit definition ({ inputs, outputs, comps, wires, nextCompId,
+// nextWireId }) the app can register in subcircuitDefs and drop on the canvas.
+// Self-contained — comp state is written explicitly so this carries no
+// dependency on the app's TYPES registry.
+//
+// Each window literal compiles to the decoder derived in DECODER_COST (a unary
+// function that is +1 when the input is in the set, else T); a product term is a
+// MIN of its literals (plus a CONST 0 when the term is 0-capped); the whole
+// function is a MAX across terms. Components are laid out left-to-right by signal
+// rank (longest path from the inputs) so the wavefront reads cleanly; the app's
+// A* router handles the actual wire geometry.
+
+// The decoder recipe per subset: a list of gate steps, each [type, ...srcRefs]
+// where a srcRef is 0 (the literal's own input) or a 1-based index of an earlier
+// step in this same recipe. The last step is the decoder's output. A full set
+// {−1,0,1} is a don't-care (no decoder). Mirrors DECODER_COST exactly.
+const DECODER_RECIPE = {
+  '-1':    [['NTI', 0]],
+  '1':     [['STI', 0], ['NTI', 1]],
+  '-1,0':  [['PTI', 0]],
+  '0,1':   [['NTI', 0], ['STI', 1]],
+  '0':     [['PTI', 0], ['NTI', 0], ['STI', 2], ['MIN', 1, 3]],
+  '-1,1':  [['NTI', 0], ['STI', 0], ['NTI', 2], ['MAX', 1, 3]],
+};
+
+// Materialize a truth table's minimized form as a subcircuit definition.
+//   table   : { "a,b,..": out in {−1,0,1} }  (missing key ⇒ 0)
+//   n       : number of inputs
+//   inNames : input pin names (length n)
+//   outName : output pin name
+export function materializeMinimized(table, n, inNames, outName) {
+  const expr = minimizeTernary(table, n);
+  const comps = [];
+  const wires = [];
+  let cid = 1, wid = 1;
+  const rankOf = new Map();   // compId -> signal rank (longest path from inputs)
+  const colY = [];            // per-rank y cursor (component count in that column)
+  const COL = 180, ROW = 64;
+
+  const addComp = (type, rank, state) => {
+    const yi = colY[rank] || 0; colY[rank] = yi + 1;
+    const c = { id: cid++, type, x: 40 + rank * COL, y: 40 + yi * ROW, state };
+    comps.push(c);
+    rankOf.set(c.id, rank);
+    return c.id;
+  };
+  const connect = (fromId, fromPort, toId, toPort) =>
+    wires.push({ id: wid++, fromId, fromPort, toId, toPort });
+
+  // A gate fed by source nodes (each {id, port}); rank = max(src rank)+1.
+  const gate = (type, ins) => {
+    let r = 0;
+    for (const { node } of ins) r = Math.max(r, (rankOf.get(node.id) || 0) + 1);
+    const id = addComp(type, r, {});
+    for (const { node, toPort } of ins) connect(node.id, node.port, id, toPort);
+    return { id, port: 'out' };
+  };
+  const constNode = (value) => ({ id: addComp('CONST', 0, { value }), port: 'out' });
+  // Fold a list of operand nodes through a chain of binary MIN / MAX gates.
+  const reduceGates = (type, operands) => {
+    if (operands.length === 0) return null;
+    let acc = operands[0];
+    for (let i = 1; i < operands.length; i++) {
+      acc = gate(type, [{ node: acc, toPort: 'a' }, { node: operands[i], toPort: 'b' }]);
+    }
+    return acc;
+  };
+
+  // Input boundary (rank 0).
+  const inputNodes = [];
+  for (let i = 0; i < n; i++) {
+    const id = addComp('INPUT', 0, { value: 0, name: inNames[i] });
+    inputNodes.push({ id, port: 'out' });
+  }
+
+  // Build one literal's decoder from its recipe; returns its output node, or
+  // null for a don't-care (the literal contributes nothing to the MIN).
+  const decoder = (inNode, set) => {
+    const key = set.slice().sort((a, b) => a - b).join(',');
+    const recipe = DECODER_RECIPE[key];
+    if (!recipe) return null;   // '-1,0,1' don't-care (or empty, can't happen)
+    const steps = [];           // step index (1-based) -> output node
+    const ref = (r) => (r === 0 ? inNode : steps[r - 1]);
+    for (const [type, ...srcs] of recipe) {
+      const ports = type === 'MIN' || type === 'MAX' ? ['a', 'b'] : ['in'];
+      const ins = srcs.map((s, i) => ({ node: ref(s), toPort: ports[i] }));
+      steps.push(gate(type, ins));
+    }
+    return steps[steps.length - 1];
+  };
+
+  // Each product term: MIN of its non-don't-care literals (+ CONST 0 if 0-capped).
+  const termNodes = [];
+  for (const t of expr.terms) {
+    const operands = [];
+    for (let i = 0; i < n; i++) {
+      const d = decoder(inputNodes[i], t.sets[i]);
+      if (d) operands.push(d);
+    }
+    if (t.cap === 0) operands.push(constNode(0));
+    // A +1-capped term with only don't-cares is the constant +1.
+    termNodes.push(operands.length ? reduceGates('MIN', operands) : constNode(1));
+  }
+
+  // The function is the MAX across terms; an empty cover is the constant T (−1).
+  const outNode = termNodes.length ? reduceGates('MAX', termNodes) : constNode(-1);
+  const outRank = (rankOf.get(outNode.id) || 0) + 1;
+  const outId = addComp('OUTPUT', outRank, { name: outName });
+  connect(outNode.id, outNode.port, outId, 'in');
+
+  return {
+    inputs: inNames.map(name => ({ name })),
+    outputs: [{ name: outName }],
+    comps, wires,
+    nextCompId: cid,
+    nextWireId: wid,
+  };
+}

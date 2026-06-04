@@ -253,7 +253,8 @@
       <span style="color: var(--t-pos)">+1</span>.
       The resulting gate is a <em>behavioural</em> component — the simulator evaluates it by table
       lookup, not by an internal circuit of MIN/MAX/STI primitives.
-      Press <b>Minimize</b> to see the smallest equivalent MAX-of-MIN circuit (and how many gates it saves).
+      Press <b>Minimize</b> to see the smallest equivalent MAX-of-MIN circuit (and how many gates it saves),
+      or <b>Compile to gates</b> to build that circuit as a real subcircuit of MIN/MAX/STI/PTI/NTI primitives and place it on the canvas.
     </p>
     <div class="inspector-form" style="display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px 10px; align-items: center;">
       <label style="margin: 0;">Name</label>
@@ -270,6 +271,7 @@
       <button class="btn" id="gate-add" style="border-color: var(--accent-2); color: var(--accent-2);">Add to library</button>
       <button class="btn" id="gate-clear-table" style="margin-left: 6px;">Clear table</button>
       <button class="btn" id="gate-minimize" style="margin-left: 6px;" title="Two-level (MAX-of-MIN) minimization of the current table into MIN/MAX/STI/PTI/NTI primitives">Minimize</button>
+      <button class="btn" id="gate-compile" style="margin-left: 6px;" title="Materialize the minimized circuit as a real subcircuit of MIN/MAX/STI/PTI/NTI gates and place it on the canvas">Compile to gates</button>
       <span id="gate-status" style="color: var(--muted); margin-left: 12px; font-size: 11px;"></span>
     </div>
     <div id="gate-min-result" style="margin-top: 10px; display: none;

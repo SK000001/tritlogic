@@ -25,7 +25,7 @@ import {
 } from './assembler.js';
 import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
 import { minimizeTernary, evalMinimizedExpr, minimizedGateCount,
-         canonicalGateCount } from './minimizer.js';
+         canonicalGateCount, materializeMinimized } from './minimizer.js';
 
 export function registerTests(deps) {
   const {
@@ -2507,6 +2507,42 @@ test('Minimizer shrinks a mergeable function and trivialises constants', () => {
   // Constant T (all −1) ⇒ no terms at all.
   const cT = minimizeTernary(tableFromFn(2, () => -1), 2);
   assertEq(cT.terms.length, 0, 'constant T ⇒ empty expression:');
+});
+
+test('Minimizer materializes a subcircuit that reproduces the table (F1 Phase 2)', () => {
+  // "Compile a custom gate to gates": materializeMinimized builds a real
+  // subcircuit of MIN/MAX/STI/PTI/NTI primitives; simulated as a SUB instance it
+  // must reproduce the source table on every input — the same invariant the
+  // algebraic minimizer satisfies, now through actual placed-and-wired gates.
+  const sumTrit = (s) => { const r = ((s % 3) + 3) % 3; return r === 2 ? -1 : r; };
+  const cases = [
+    { n: 1, fn: ([a]) => -a || 0,                     label: 'STI' },
+    { n: 2, fn: ([a, b]) => Math.min(a, b),           label: 'MIN' },
+    { n: 2, fn: ([a, b]) => Math.max(a, b),           label: 'MAX' },
+    { n: 2, fn: ([a, b]) => (a === b ? 1 : -1),       label: 'equals' },
+    { n: 2, fn: ([a, b]) => (a === 1 ? 1 : (b === -1 ? 0 : -1)), label: 'mixed-cap' },
+    { n: 3, fn: ([a, b, c]) => sumTrit(a + b + c),    label: 'adderSum' },
+    { n: 2, fn: () => 1,  label: 'const+1' },
+    { n: 2, fn: () => 0,  label: 'const0'  },
+    { n: 2, fn: () => -1, label: 'constT'  },
+  ];
+  for (const { n, fn, label } of cases) {
+    const table = tableFromFn(n, fn);
+    const inNames = Array.from({ length: n }, (_, i) => 'abc'[i]);
+    const def = materializeMinimized(table, n, inNames, 'out');
+    assertEq(def.inputs.length, n, `${label}: ${n} input pins:`);
+    assertEq(def.outputs.length, 1, `${label}: one output pin:`);
+    subcircuitDefs['_MatTest'] = def;
+    eachCombo(n, (combo) => {
+      const vIn = {};
+      inNames.forEach((name, i) => { vIn[name] = combo[i]; });
+      // Fresh instance per combo so a cached subScope never carries state over.
+      const out = simulateSubInstance({ type: 'SUB:_MatTest', state: {} }, vIn);
+      const want = table[combo.join(',')] ?? 0;
+      assertEq(out.out, want, `${label} f(${combo.join(',')}):`);
+    });
+    delete subcircuitDefs['_MatTest'];
+  }
 });
 
 function runAllTests() {

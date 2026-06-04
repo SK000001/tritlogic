@@ -1,8 +1,9 @@
 # MINIMIZER.md — ternary logic minimizer (roadmap F1)
 
 > Design note for the two-level ternary logic minimizer. The engine lives in
-> `js/minimizer.js`; it's surfaced as a **Minimize** button in the gate-builder
-> modal. This is the balanced-ternary analogue of binary Quine–McCluskey / K-map
+> `js/minimizer.js`; it's surfaced as a **Minimize** button (the report) and a
+> **Compile to gates** button (Phase 2 — materialize) in the gate-builder modal.
+> This is the balanced-ternary analogue of binary Quine–McCluskey / K-map
 > sum-of-products reduction.
 
 ## What it does
@@ -82,15 +83,43 @@ produces, the greedy result is at or near optimal.
 - `evalMinimizedExpr(expr, combo)` → trit (verification / re-sim)
 - `minimizedGateCount(expr)` / `canonicalGateCount(table, n)`
 - `formatMinimizedExpr(expr, inNames)` → e.g. `out = MAX(MIN(0, a∈{T,0}), b=+1)`
-- `minimizeReport(table, n, inNames)` → everything the UI shows
+- `minimizeReport(table, n, inNames)` → everything the report UI shows
+- `materializeMinimized(table, n, inNames, outName)` → a subcircuit definition
+  (`{ inputs, outputs, comps, wires, nextCompId, nextWireId }`) realising the
+  minimized expression as placed gates (Phase 2)
+
+## Phase 2 — materialize ("compile to gates")
+
+`materializeMinimized` turns the `expr` into a real circuit, shaped as a
+**subcircuit definition** the app registers in `subcircuitDefs` and drops on the
+canvas. It is self-contained (component `state` is written explicitly, so no
+dependency on the app's `TYPES`). The synthesis is mechanical:
+
+- one **INPUT** per input (the boundary pins), one **OUTPUT** for the result;
+- each window literal → its decoder from `DECODER_RECIPE` (the gate-step form of
+  the `DECODER_COST` table above — e.g. `{0}` → `MIN(PTI(a), STI(NTI(a)))`);
+- each product term → a **MIN** chain over its literals, plus a **CONST 0** when
+  the term is 0-capped (a +1-capped term with only don't-cares is a **CONST +1**);
+- the function → a **MAX** chain across terms (an empty cover is **CONST −1**).
+
+Components are laid out left-to-right by **signal rank** (longest path from the
+inputs) with a per-column y cursor, so the wavefront reads cleanly; the app's A*
+router draws the actual wire geometry. The **Compile to gates** button reads the
+current draft table, names the block from the Name field (refusing to clobber a
+built-in subcircuit; confirming over a user one), registers the def, and arms
+place mode. Because it's an ordinary subcircuit it rides save/load, middle-click
+**edit-on-canvas**, the A2 `subLumpDelay` timing model, and re-packing for free.
+
+Correctness is asserted end-to-end: the materialized block, simulated as a SUB
+instance, reproduces the source table on every input (named functions, a
+mixed +1/0-cap function, a 3-input adder-sum, and all three constants).
 
 ## Status / future
 
 - **Phase 1 — engine + report.** ✅ Done. The Minimize button reports the
   expression + gate saving; no canvas changes.
-- **Phase 2 — materialize.** 📋 Build the minimized network as a placed
-  subcircuit of MIN/MAX/STI/PTI/NTI on the canvas (a "compile to gates" for a
-  custom gate). Deferred — the synthesis is mechanical from `expr` (decoders per
-  literal → MIN per product → MAX across terms), the work is placement/wiring.
+- **Phase 2 — materialize.** ✅ Done (2026-06-04). `materializeMinimized` +
+  the **Compile to gates** button build the minimized network as a placed
+  subcircuit of MIN/MAX/STI/PTI/NTI on the canvas.
 - **Beyond.** Exact (branch-and-bound) cover for small n; multi-output sharing;
   this is also the substrate F3 (AI-assisted optimisation) would build on.
