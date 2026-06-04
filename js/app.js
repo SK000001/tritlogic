@@ -2951,12 +2951,15 @@ function enterTutorialStep(i) {
   checkTutorialStep();   // a step may already be satisfied (e.g. onEnter set it up)
 }
 
-// Poll: has the current step been accomplished? Updates the panel's Next button.
+// Poll: has the current step been accomplished? Completion LATCHES — once a
+// step's check passes it stays done, so transient conditions (e.g. "the Assemble
+// dialog is open", which the user must then close to reach Next) don't undo it.
+// _tutDone is reset per step in enterTutorialStep.
 function checkTutorialStep() {
-  if (!_tutorial) return;
+  if (!_tutorial || _tutDone) return;
   const step = _tutorial.steps[_tutStep];
   const done = step.check ? !!safeCheck(step.check) : true;
-  if (done !== _tutDone) { _tutDone = done; renderTutorialPanel(); }
+  if (done) { _tutDone = true; renderTutorialPanel(); }
 }
 function safeCheck(fn) { try { return fn(tutorialApi()); } catch (e) { return false; } }
 
