@@ -37,7 +37,7 @@ export function registerTests(deps) {
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
     simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
-    duplicateSelection, nudgeSelection,
+    duplicateSelection, nudgeSelection, pickBootExample,
   } = deps;
 
 const TESTS = [];
@@ -2127,6 +2127,30 @@ test('I3 shareable circuits: encodeShare/decodeShare round-trips a circuit, URL-
   const ascii = { version: SAVE_FORMAT_VERSION, comps: [], wires: [] };
   const legacy = btoa(JSON.stringify(ascii)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   assertDeepEq(await decodeShare(legacy), ascii, 'legacy un-prefixed base64 link still loads:');
+});
+
+// ---- I1 front door — landing-page deep links -----------------------------
+//
+// The landing page (index.html) is the public front door; its "try this" cards
+// deep-link into the app as `app.html?example=<name>`, resolved at boot by
+// pickBootExample. Two contracts: the resolver only accepts known examples, and
+// every example the landing page names actually exists.
+test('I1 pickBootExample resolves only known ?example= names', () => {
+  assertEq(pickBootExample('?example=min-max'), 'min-max', 'a real example resolves:');
+  assertEq(pickBootExample('?foo=1&example=cpu2&bar=2'), 'cpu2', 'mid-query param resolves:');
+  assertEq(pickBootExample('?example=min%2Dmax'), 'min-max', 'percent-encoding is decoded:');
+  assertEq(pickBootExample(''), null, 'empty search → null:');
+  assertEq(pickBootExample('?example='), null, 'blank value → null:');
+  assertEq(pickBootExample('?example=does-not-exist'), null, 'unknown name → null:');
+  assertEq(pickBootExample('?other=min-max'), null, 'a non-example param → null:');
+});
+test('I1 every landing-page "try this" example exists', () => {
+  // Mirrors the entry points wired in index.html; keep in sync if the cards change.
+  const entryPoints = ['min-max', 'half-adder', 'cpu2', 'ternary-mlp'];
+  for (const name of entryPoints) {
+    if (!EXAMPLES[name]) throw new Error(`landing page links a missing example: ${name}`);
+    assertEq(pickBootExample('?example=' + name), name, `${name} resolves at boot:`);
+  }
 });
 
 // ---- All-structural CPU --------------------------------------------------

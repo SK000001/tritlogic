@@ -74,16 +74,22 @@ await build({
   outfile: `${OUT}/styles.css`,
 });
 
-// 4) Emit index.html pointing at the bundle instead of the raw module.
-let html = readFileSync('index.html', 'utf8');
+// 4) Emit the app page (app.html) pointing at the bundle instead of the raw
+//    module. The simulator lives at /app since the I1 front door took over "/".
+let html = readFileSync('app.html', 'utf8');
 const before = html;
 html = html.replace(
   /<script\s+type="module"\s+src="js\/app\.js"><\/script>/,
   '<script src="app.min.js"></script>',
 );
 if (html === before) {
-  throw new Error('build: could not find the js/app.js module tag to rewrite in index.html');
+  throw new Error('build: could not find the js/app.js module tag to rewrite in app.html');
 }
-writeFileSync(`${OUT}/index.html`, html);
+writeFileSync(`${OUT}/app.html`, html);
 
-console.log(`Built dist/ → index.html + app.min.js (${OBFUSCATE ? 'obfuscated' : 'minify-only'}) + styles.css`);
+// 5) Copy the landing page (index.html) verbatim — it's self-contained (inline
+//    CSS + a tiny vanilla-JS demo + the share-link redirect shim), so it needs
+//    no bundling, just to be served at "/".
+writeFileSync(`${OUT}/index.html`, readFileSync('index.html', 'utf8'));
+
+console.log(`Built dist/ → index.html (landing) + app.html + app.min.js (${OBFUSCATE ? 'obfuscated' : 'minify-only'}) + styles.css`);

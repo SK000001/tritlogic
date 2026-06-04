@@ -3,7 +3,7 @@
   "outputDirectory": "dist",
   "headers": [
     {
-      "source": "/index.html",
+      "source": "/(index|app).html",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
       ]

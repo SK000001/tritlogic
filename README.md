@@ -71,8 +71,10 @@ the way you'd expect.
 
 ## Running locally
 
-The app source is ES modules in `js/`, loaded by `index.html`. Because ES
-modules don't load over `file://`, serve the folder:
+The site has two pages: a static **landing page** (`index.html`, served at `/`)
+and the **simulator** itself (`app.html`, served at `/app`). The app source is ES
+modules in `js/`, loaded by `app.html`. Because ES modules don't load over
+`file://`, serve the folder:
 
 ```bash
 # Python 3
@@ -81,19 +83,22 @@ python -m http.server 8000
 npx serve .
 ```
 
-Then visit `http://localhost:8000`. Edit `js/*.js` and refresh — no build step
-needed for development.
+Then visit `http://localhost:8000` for the landing page, or
+`http://localhost:8000/app.html` for the simulator directly. Edit `js/*.js` and
+refresh — no build step needed for development. (Old share links of the form
+`/#c=…` still work: the landing page bounces any `#c=` hash to `/app`.)
 
 ## Building / deploying
 
 The deployed site is a **minified + obfuscated bundle**, not the raw modules.
 `npm run build` (see `build.mjs`) bundles everything reachable from `js/app.js`
 into one IIFE with esbuild, runs it through `javascript-obfuscator`, minifies the
-stylesheet, and writes a `dist/index.html` that points at the bundle:
+stylesheet, emits a `dist/app.html` that points at the bundle, and copies the
+self-contained landing page to `dist/index.html`:
 
 ```bash
 npm install            # one-time: pulls esbuild + javascript-obfuscator (dev only)
-npm run build          # → dist/{index.html, app.min.js, styles.css}  (obfuscated)
+npm run build          # → dist/{index.html (landing), app.html, app.min.js, styles.css}  (obfuscated)
 OBFUSCATE=0 npm run build   # minify only — faster + readable stack traces, for debugging
 ```
 
@@ -101,14 +106,14 @@ OBFUSCATE=0 npm run build   # minify only — faster + readable stack traces, fo
 serves `dist/` (`buildCommand` + `outputDirectory` in `vercel.json`), so the
 readable `js/` source and the internal `*.md` design docs never reach the
 server — only the bundle does. The bundle is a plain (non-module) IIFE, so
-unlike the source you *can* open `dist/index.html` directly over `file://` to
-smoke-test a build.
+unlike the source you *can* open `dist/app.html` directly over `file://` to
+smoke-test a build (the landing page `dist/index.html` opens over `file://` too).
 
 > **Obfuscation is a deterrent, not a lock.** Client-side JS can always be
 > recovered (Network tab → de-minifier). The obfuscator profile is deliberately
 > moderate (no `debugProtection`/`selfDefending` devtools traps, no
 > object-key transforms) to avoid wrecking the simulator's hot loop or subtly
-> breaking it. **Always smoke-test `dist/index.html` before deploying** — open
+> breaking it. **Always smoke-test `dist/app.html` before deploying** — open
 > it and hit **Tests**; all checks should pass against the obfuscated bundle.
 > If anything misbehaves, `OBFUSCATE=0` reverts to a plain minified build and
 > you can dial `controlFlowFlatteningThreshold` in `build.mjs`.

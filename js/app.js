@@ -3496,8 +3496,21 @@ async function shareCircuit() {
 const shareBtn = document.getElementById('btn-share');
 if (shareBtn) shareBtn.addEventListener('click', () => { shareCircuit(); });
 
-// On startup, load a circuit from the share hash if present (`#c=…`), else fall
-// back to the default example. Async because decodeShare gunzips the payload.
+// I1 front door — the landing page's "try this" buttons deep-link into the app
+// as `app.html?example=<name>`. Resolve that query string to a known example
+// name (or null if absent/unknown). Pure + exported so the landing page's entry
+// points can be checked headlessly (every button must name a real example).
+function pickBootExample(search) {
+  const m = (search || '').match(/[?&]example=([^&]+)/);
+  if (!m) return null;
+  let name;
+  try { name = decodeURIComponent(m[1]); } catch (e) { name = m[1]; }
+  return EXAMPLES[name] ? name : null;
+}
+
+// On startup, load a circuit from the share hash if present (`#c=…`), else a
+// landing-page deep link (`?example=…`), else the default example. Async because
+// decodeShare gunzips the payload.
 async function bootCircuit() {
   const m = (location.hash || '').match(/[#&]c=([^&]+)/);
   if (m) {
@@ -3512,6 +3525,14 @@ async function bootCircuit() {
             'The default example has been loaded instead.');
       setStatus('Shared link could not be loaded — opened the default example instead');
     }
+  }
+  const ex = pickBootExample(location.search);
+  if (ex) {
+    loadExampleNamed(ex);
+    // Clock-driven examples start running so their behaviour is visible at once.
+    setAutoPlay(comps.some(c => c.type === 'CLOCK'));
+    setStatus('Opened example: ' + EXAMPLES[ex].label);
+    return;
   }
   loadExample();
 }
@@ -4929,7 +4950,7 @@ const { TESTS, runAllTests } = registerTests({
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
   simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
-  duplicateSelection, nudgeSelection,
+  duplicateSelection, nudgeSelection, pickBootExample,
 });
 
 

@@ -2,454 +2,275 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>TritLogic v2 — Balanced Ternary Circuit Simulator</title>
-<link rel="stylesheet" href="styles.css">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TritLogic — a balanced-ternary circuit simulator in your browser</title>
+<meta name="description" content="TritLogic is a free, zero-install simulator for balanced-ternary (base-3, {−1, 0, +1}) logic — build gates, arithmetic, memory, and even a working ternary CPU, all in the browser." />
+<meta property="og:title" content="TritLogic — balanced-ternary circuit simulator" />
+<meta property="og:description" content="Build and run balanced-ternary logic, arithmetic, and CPUs in your browser. Free, no install." />
+<meta property="og:type" content="website" />
+<script>
+  // Back-compat + future-proofing. The simulator used to live at "/", so old
+  // share links (`/#c=…`) and any future `?embed=1` view must still land in the
+  // app, which is now at /app (app.html). Bounce them on first paint, preserving
+  // the query + hash so the shared circuit / embed flags survive the hop.
+  (function () {
+    var h = location.hash || '', s = location.search || '';
+    if (/[#&]c=/.test(h) || /[?&](embed|c)=/.test(s)) {
+      location.replace('app.html' + s + h);
+    }
+  })();
+</script>
+<style>
+  :root {
+    --bg: #14171c; --panel: #1d2026; --panel-2: #262a32; --panel-3: #2e333d;
+    --border: #3a3f4a; --border-strong: #4a5060; --text: #d8dde6; --muted: #8a92a1;
+    --accent: #6ea8ff; --accent-2: #8effb0; --warn: #ffba6e;
+    --t-neg: #e35555; --t-zero: #888c95; --t-pos: #54c060;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    background:
+      radial-gradient(1100px 600px at 80% -10%, #1b2330 0%, transparent 60%),
+      radial-gradient(900px 500px at -10% 10%, #1a2620 0%, transparent 55%),
+      var(--bg);
+    color: var(--text); line-height: 1.55; font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 22px; }
+
+  /* top bar */
+  header.nav {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 22px; max-width: 960px; margin: 0 auto;
+  }
+  header.nav .brand { font-weight: 700; font-size: 18px; letter-spacing: .3px; }
+  header.nav .brand .tri { color: var(--accent); }
+  header.nav .grow { flex: 1; }
+  header.nav a.gh { color: var(--muted); font-size: 14px; }
+
+  /* hero */
+  .hero { padding: 40px 0 26px; text-align: center; }
+  .hero h1 {
+    font-size: clamp(30px, 6vw, 52px); line-height: 1.08; margin: 0 0 14px;
+    letter-spacing: -.5px;
+  }
+  .hero h1 .grad {
+    background: linear-gradient(92deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p.lede { font-size: clamp(16px, 2.4vw, 20px); color: var(--muted); max-width: 680px; margin: 0 auto 26px; }
+  .cta { display: inline-flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .btn {
+    display: inline-block; padding: 13px 26px; border-radius: 9px; font-size: 16px;
+    font-weight: 600; cursor: pointer; border: 1px solid var(--border-strong);
+    background: var(--panel-2); color: var(--text); transition: transform .12s, background .12s, border-color .12s;
+  }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); }
+  .btn.primary { background: linear-gradient(92deg, var(--accent), #5b96f0); color: #0c1018; border-color: transparent; }
+  .btn.primary:hover { background: linear-gradient(92deg, #82b6ff, #6ea8ff); }
+
+  /* trit demo strip */
+  .demo {
+    margin: 34px auto 8px; max-width: 560px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 22px;
+  }
+  .demo .row { display: flex; align-items: center; justify-content: center; gap: 16px; }
+  .trit {
+    width: 64px; height: 64px; border-radius: 12px; display: grid; place-items: center;
+    font-size: 30px; font-weight: 700; font-family: ui-monospace, monospace;
+    border: 1px solid var(--border-strong); background: #1a1d23;
+    transition: background .35s, color .35s, box-shadow .35s, transform .35s;
+  }
+  .trit.neg  { color: var(--t-neg);  box-shadow: 0 0 0 0 transparent; }
+  .trit.zero { color: var(--t-zero); }
+  .trit.pos  { color: var(--t-pos); }
+  .trit.on.neg  { background: #2a181a; box-shadow: 0 0 22px -4px var(--t-neg);  transform: translateY(-3px); }
+  .trit.on.zero { background: #23262c; box-shadow: 0 0 22px -6px var(--t-zero); transform: translateY(-3px); }
+  .trit.on.pos  { background: #182a1c; box-shadow: 0 0 22px -4px var(--t-pos);  transform: translateY(-3px); }
+  .demo .read {
+    margin-top: 16px; text-align: center; font-family: ui-monospace, monospace; color: var(--muted);
+    font-size: 15px;
+  }
+  .demo .read b { color: var(--text); }
+  .demo .caption { text-align: center; color: var(--muted); font-size: 13px; margin-top: 10px; }
+
+  /* sections */
+  section { padding: 30px 0; }
+  section h2 { font-size: 22px; margin: 0 0 14px; }
+  .lead { color: var(--muted); max-width: 720px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-top: 6px; }
+  a.card {
+    display: block; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 11px; padding: 16px 16px 15px; color: var(--text);
+    transition: border-color .12s, transform .12s, background .12s;
+  }
+  a.card:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-2px); background: var(--panel-2); }
+  a.card .tag { font-size: 12px; letter-spacing: .4px; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  a.card h3 { margin: 6px 0 5px; font-size: 16px; }
+  a.card p { margin: 0; font-size: 13.5px; color: var(--muted); }
+
+  .why ul { color: var(--muted); padding-left: 20px; max-width: 720px; }
+  .why li { margin: 6px 0; }
+  .why b { color: var(--text); }
+
+  .models {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 11px;
+    padding: 16px 18px; color: var(--muted); font-size: 14px; max-width: 760px;
+  }
+  .models b { color: var(--text); }
+
+  footer { padding: 30px 0 50px; color: var(--muted); font-size: 13px; text-align: center; }
+  footer a { color: var(--muted); }
+  .pill { display:inline-block; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--muted); margin: 0 3px; }
+  @media (prefers-reduced-motion: reduce) { .trit { transition: none; } }
+</style>
 </head>
 <body>
 
-<header>
-  <span class="title">TritLogic</span>
-  <span class="sub">v2 · balanced ternary</span>
-  <span class="sep"></span>
-  <button id="btn-step" title="Advance one clock cycle">⏭ Step</button>
-  <button id="btn-play" title="Auto-step at 4 Hz">▶ Play</button>
-  <button id="btn-reset" title="Reset sequential state (flip-flops, clocks, waveform)">⟲ Reset</button>
-  <span class="sep"></span>
-  <button id="btn-tt" title="Generate truth table from selected inputs/outputs">Truth Table</button>
-  <button id="btn-pack" title="Pack selected components into a new subcircuit">Pack ▢</button>
-  <button id="btn-gate" title="Define a new gate from a truth table">Build Gate</button>
-  <button id="btn-asm" title="Assemble a ternary-assembly program into the CPU's IMEM">Assemble</button>
-  <button id="btn-debug" title="Open the CPU debugger — step the program, set breakpoints, watch ACC/PC">Debug</button>
-  <button id="btn-wave" title="Toggle waveform panel">Wave</button>
-  <button id="btn-timing" title="Timing mode — watch signals propagate with per-gate delays, and spot glitches">Timing</button>
-  <button id="btn-tests" title="Run the built-in self-test suite">Tests</button>
-  <button id="btn-info" title="Component reference — select a component first to jump to its page">Info</button>
-  <button id="btn-crt" title="Toggle retro CRT theme">CRT</button>
-  <span class="spacer"></span>
-  <select id="example-select" title="Load a preset circuit"
-          style="background: var(--panel-2); color: var(--text);
-                 border: 1px solid var(--border); border-radius: 5px;
-                 padding: 4px 8px; font-size: 12px;">
-    <option value="">— Examples —</option>
-  </select>
-  <button id="btn-fit" title="Frame the whole circuit (or selection) in view — shortcut: F">Fit</button>
-  <button id="btn-clear">Clear</button>
-  <button id="btn-save">Save</button>
-  <button id="btn-load">Load</button>
-  <button id="btn-share" title="Copy a link that opens this exact circuit">Share</button>
-  <input type="file" id="file-input" accept="application/json" style="display:none" />
+<header class="nav">
+  <span class="brand"><span class="tri">▲</span> TritLogic</span>
+  <span class="pill">balanced ternary</span>
+  <span class="grow"></span>
+  <a class="gh" href="app.html">Open the simulator →</a>
 </header>
 
-<aside class="palette">
-  <div class="pal-search">
-    <input type="text" id="pal-search" placeholder="Search components…  (Ctrl+F)" autocomplete="off" />
-  </div>
-  <div id="pal-empty" class="pal-empty" style="display:none">No matches.</div>
+<main class="wrap">
 
-  <h3>Tool</h3>
-  <div class="pal-item active" data-tool="select">
-    <div class="icon">↖</div><div>Select</div><div class="desc">drag / wire</div>
-  </div>
-  <div class="pal-item" data-tool="delete">
-    <div class="icon">✕</div><div>Delete</div>
-  </div>
-  <div class="switch-row">
-    <span class="txt">Right-click delete</span>
-    <label class="switch" title="When on, right-clicking a component or wire deletes it">
-      <input type="checkbox" id="rmb-delete-toggle" />
-      <span class="slider"></span>
-    </label>
-  </div>
+  <div class="hero">
+    <h1>Computing in <span class="grad">three states</span>, not two.</h1>
+    <p class="lede">
+      TritLogic is a free, zero-install simulator for <b>balanced ternary</b> —
+      logic built on <b>−1, 0, +1</b> instead of bits. Wire up gates, arithmetic,
+      memory, even a working ternary CPU, and watch the signals flow. Runs entirely
+      in your browser.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="app.html">Open the simulator</a>
+      <a class="btn" href="app.html?example=min-max">Try a gate in 10 seconds</a>
+    </div>
 
-  <h3>Sources</h3>
-  <div class="pal-item" data-tool="place" data-type="INPUT">
-    <div class="icon">IN</div><div>Input</div><div class="desc">click to cycle</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="CONST">
-    <div class="icon">K</div><div>Constant</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="TRYTE_IN">
-    <div class="icon">TR</div><div>Tryte input</div><div class="desc">6 trits</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="CLOCK">
-    <div class="icon">⏲</div><div>Clock</div>
+    <div class="demo" id="demo" aria-hidden="true">
+      <div class="row">
+        <div class="trit neg"  data-v="-1">T</div>
+        <div class="trit zero" data-v="0">0</div>
+        <div class="trit pos"  data-v="+1">1</div>
+      </div>
+      <div class="read">decimal <b id="dec">0</b> &nbsp;=&nbsp; balanced ternary <b id="bt">0</b></div>
+      <div class="caption">Each digit is a <b style="color:var(--t-neg)">T</b> (−1), <b style="color:var(--t-zero)">0</b>, or <b style="color:var(--t-pos)">1</b> (+1) — and negation is just flipping every digit.</div>
+    </div>
   </div>
 
-  <h3>Sinks</h3>
-  <div class="pal-item" data-tool="place" data-type="OUTPUT">
-    <div class="icon">●</div><div>Probe</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="TRYTE_OUT">
-    <div class="icon">#</div><div>Tryte probe</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="WAVE">
-    <div class="icon">∿</div><div>Waveform</div><div class="desc">records</div>
-  </div>
+  <section class="why">
+    <h2>Why a third state?</h2>
+    <ul>
+      <li><b>Symmetry.</b> {−1, 0, +1} is symmetric around zero, so negative numbers need no sign bit and no two's-complement — you negate a number by flipping each digit.</li>
+      <li><b>Density.</b> Base 3 is the integer base closest to <i>e</i>, the theoretical optimum — a trit carries ~1.58 bits, so fewer digits represent the same range.</li>
+      <li><b>History &amp; future.</b> The Soviet <b>Setun</b> (1958) was a real, working ternary computer; Knuth called balanced ternary &ldquo;perhaps the prettiest number system of all.&rdquo; And today, <b>ternary weights {−1, 0, +1}</b> are a live topic in efficient AI (BitNet&nbsp;b1.58).</li>
+    </ul>
+  </section>
 
-  <h3>Inverters</h3>
-  <div class="pal-item" data-tool="place" data-type="STI">
-    <div class="icon">STI</div><div>NEG</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="PTI">
-    <div class="icon">PTI</div><div>+inv</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="NTI">
-    <div class="icon">NTI</div><div>−inv</div>
-  </div>
+  <section>
+    <h2>Try it now</h2>
+    <p class="lead">Each opens a live, editable circuit in the simulator. Press <b>▶ Play</b> to run it.</p>
+    <div class="cards">
+      <a class="card" href="app.html?example=min-max">
+        <div class="tag">Logic</div>
+        <h3>MIN / MAX gate</h3>
+        <p>The ternary cousins of AND and OR — the building blocks everything else is made from.</p>
+      </a>
+      <a class="card" href="app.html?example=half-adder">
+        <div class="tag">Arithmetic</div>
+        <h3>Half-trit adder</h3>
+        <p>Add two trits and carry — ternary arithmetic from logic gates up.</p>
+      </a>
+      <a class="card" href="app.html?example=cpu2">
+        <div class="tag">A whole CPU</div>
+        <h3>9-op ternary processor</h3>
+        <p>A real accumulator CPU with an assembler and debugger. Write ternary assembly and run it.</p>
+      </a>
+      <a class="card" href="app.html?example=ternary-mlp">
+        <div class="tag">AI</div>
+        <h3>Ternary neural net</h3>
+        <p>A 2-layer MLP with {−1,0,+1} weights — the same idea behind BitNet-style efficient models.</p>
+      </a>
+    </div>
+  </section>
 
-  <h3>Gates</h3>
-  <div class="pal-item" data-tool="place" data-type="MIN">
-    <div class="icon">MIN</div><div>Tern. AND</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="MAX">
-    <div class="icon">MAX</div><div>Tern. OR</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="ADDER">
-    <div class="icon">+</div><div>Full adder</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="MUX">
-    <div class="icon">MUX</div><div>3:1 multiplexer</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="TRIBUF">
-    <div class="icon">▷</div><div>Tri-state buffer</div><div class="desc">en→drive / Z</div>
-  </div>
+  <section>
+    <h2>What you can build</h2>
+    <p class="lead">
+      Native components for sources, gates (STI / PTI / NTI, MIN, MAX), a full-trit
+      adder, MUX, registers, RAM/ROM, and an ALU — plus kits of gate-level subcircuits
+      for arithmetic, sequencing, control, and neural nets. Define your own gates from a
+      truth table, let the built-in <b>minimizer</b> reduce them, pack circuits into
+      reusable blocks, watch timing &amp; glitches, and share any circuit as a link.
+    </p>
+  </section>
 
-  <h3>Buses</h3>
-  <div class="pal-item" data-tool="place" data-type="MERGE3">
-    <div class="icon">⇥</div><div>Merge 3→bus</div><div class="desc">3 trits → 1 word wire</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="SPLIT3">
-    <div class="icon">⇤</div><div>Split bus→3</div><div class="desc">1 word wire → 3 trits</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="TRIBUF3">
-    <div class="icon">▷3</div><div>Bus tri-state</div><div class="desc">word bus: en→drive / Z</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="MERGE6">
-    <div class="icon">⇶</div><div>Merge 6→bus</div><div class="desc">6 trits → 1 tryte wire</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="SPLIT6">
-    <div class="icon">⇷</div><div>Split bus→6</div><div class="desc">1 tryte wire → 6 trits</div>
-  </div>
+  <section>
+    <h2>How it works &amp; what it models</h2>
+    <div class="models">
+      TritLogic simulates logic at the <b>idealised-trit</b> level: every wire carries
+      one of <b>−1, 0, +1</b> (plus high-impedance <b>Z</b> and contention <b>X</b> for
+      buses). It models gate behaviour, propagation delay, and dynamic hazards — but
+      <b>not</b> continuous voltages, optical power, or analog noise. It's a tool for
+      reasoning about ternary <i>logic and architecture</i>, in the spirit of Logisim for
+      binary. An honest niche: it targets the ternary / multi-valued-logic curious —
+      students, educators, and hobbyists — rather than claiming to be production EDA.
+    </div>
+  </section>
 
-  <h3>Sequential</h3>
-  <div class="pal-item" data-tool="place" data-type="DFF">
-    <div class="icon">DFF</div><div>D flip-flop</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="REG3">
-    <div class="icon">REG</div><div>3-trit register</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="RAM">
-    <div class="icon">RAM</div><div>9×3-trit RAM</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="ROM">
-    <div class="icon">ROM</div><div>9×6-trit ROM</div><div class="desc">read-only, combinational</div>
-  </div>
-
-  <h3>CPU</h3>
-  <div class="pal-item" data-tool="place" data-type="ALU">
-    <div class="icon">ALU</div><div>arithmetic / logic unit</div>
-  </div>
-  <div class="pal-item" data-tool="place" data-type="PC">
-    <div class="icon">PC</div><div>program counter</div>
-  </div>
-
-  <h3>Custom gates</h3>
-  <div class="sub-lib" id="gate-lib"></div>
-
-  <h3>Subcircuits</h3>
-  <div class="sub-lib" id="sub-lib"></div>
-</aside>
-
-<main class="canvas-wrap">
-  <canvas id="cv"></canvas>
-  <div class="status" id="status">ready</div>
-  <canvas id="minimap" width="200" height="150"
-          title="Mini-map — click or drag to jump to a location"></canvas>
-  <div id="timing-bar">
-    <button class="btn" id="timing-play" title="Play / pause propagation">▶</button>
-    <input type="range" id="timing-slider" min="0" max="0" value="0"
-           title="Scrub simulation time" />
-    <span id="timing-readout">t = 0</span>
-    <button class="btn" id="timing-close" title="Exit timing mode">✕</button>
-  </div>
 </main>
 
-<aside class="inspector">
-  <h3>Legend</h3>
-  <div class="legend">
-    <span class="swatch" style="background: var(--t-neg)"></span>T = −1<br>
-    <span class="swatch" style="background: var(--t-zero)"></span>0<br>
-    <span class="swatch" style="background: var(--t-pos)"></span>+1<br>
-    <span class="swatch" style="background: var(--t-undef)"></span>undefined<br>
-    <span class="swatch" style="background: #3fb6c8"></span>Z = high-impedance<br>
-    <span class="swatch" style="background: #d957c8"></span>X = contention
+<footer>
+  <div class="wrap">
+    Open-source · runs in any modern browser · nothing is uploaded — circuits live in your URL.<br>
+    <a href="app.html">Open the simulator</a>
   </div>
+</footer>
 
-  <h3>Selection</h3>
-  <div id="sel-info" style="color: var(--muted);">nothing selected</div>
+<script>
+  // Tiny ambient demo: count up in decimal and show the balanced-ternary form,
+  // lighting the matching trit colour. Pure illustration — no app code loaded.
+  (function () {
+    var cells = Array.prototype.slice.call(document.querySelectorAll('#demo .trit'));
+    var decEl = document.getElementById('dec'), btEl = document.getElementById('bt');
+    if (!cells.length) return;
+    var GLYPH = { '-1': 'T', '0': '0', '1': '1' };
+    function toBT(n) {
+      if (n === 0) return [0];
+      var out = [], v = n;
+      while (v !== 0) {
+        var r = ((v % 3) + 3) % 3;   // 0,1,2
+        var d = r === 2 ? -1 : r;     // map 2 -> -1 (carry up)
+        out.unshift(d);
+        v = (v - d) / 3;
+      }
+      return out;
+    }
+    var n = 0, dir = 1;
+    function tick() {
+      var digits = toBT(n);
+      decEl.textContent = String(n);
+      btEl.textContent = digits.map(function (d) { return GLYPH[String(d)]; }).join('');
+      // pulse the three legend cells in sequence by the digits present
+      cells.forEach(function (c) { c.classList.remove('on'); });
+      var last = digits[digits.length - 1];
+      var target = last < 0 ? '.neg' : last > 0 ? '.pos' : '.zero';
+      var el = document.querySelector('#demo ' + target);
+      if (el) el.classList.add('on');
+      n += dir;
+      if (n > 13) dir = -1; else if (n < -13) dir = 1;
+    }
+    tick();
+    setInterval(tick, 900);
+  })();
+</script>
 
-  <h3>Controls</h3>
-  <ul class="help">
-    <li>Drag components to move. Click an <b>Input</b> to cycle T → 0 → +1.</li>
-    <li>To wire, click an output pin then an input pin.</li>
-    <li>Drag on empty space to <b>pan the canvas</b>. <kbd>Shift</kbd>+drag rect-selects.</li>
-    <li><kbd>Del</kbd> deletes. <kbd>Esc</kbd> cancels wiring. <kbd>Space</kbd>+drag also pans. Wheel zooms.</li>
-    <li><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> (or <kbd>Ctrl+Shift+Z</kbd>) undo / redo. <kbd>Ctrl+F</kbd> focuses the palette search.</li>
-    <li>Right-click deletes the component/wire under the cursor — toggle it with <b>Right-click delete</b> in the palette.</li>
-    <li><b>Step</b> advances one clock tick (latches flip-flops, ticks clocks).</li>
-    <li><b>Info</b> opens the component reference — select a component first to jump straight to its page.</li>
-  </ul>
-
-  <h3>Simulator</h3>
-  <div class="kv"><span>Components</span><b id="stat-comp">0</b></div>
-  <div class="kv"><span>Wires</span><b id="stat-wires">0</b></div>
-  <div class="kv"><span>Tick</span><b id="stat-tick">0</b></div>
-  <div class="kv" title="Component evaluations to settle the circuit (event-driven solver)."><span>Evals</span><b id="stat-iter">0</b></div>
-  <div class="kv"><span>Stable</span><b id="stat-stable">yes</b></div>
-  <div class="kv" title="Input pins with no incoming wire. Highlighted with an amber ring on the canvas.">
-    <span>Floating inputs</span><b id="stat-floating">0</b></div>
-  <div class="kv" title="Exceptions caught during component evaluation. Check the browser console for details.">
-    <span>Eval errors</span><b id="stat-errors">0</b></div>
-</aside>
-
-<section class="wave-panel" id="wave-panel">
-  <div class="wave-header">
-    <span>Waveforms</span>
-    <span class="spacer" style="flex:1"></span>
-    <button class="btn" id="btn-wave-clear">Clear history</button>
-    <button class="btn" id="btn-wave-close">×</button>
-  </div>
-  <canvas id="wave-cv"></canvas>
-</section>
-
-<!-- Truth table modal -->
-<div class="modal-bg" id="tt-modal">
-  <div class="modal">
-    <h2>Truth Table <button class="btn close" id="tt-close">close</button></h2>
-    <div class="sweep-list">
-      <div class="group">
-        <h4>Sweep these inputs (3^n rows)</h4>
-        <div id="tt-inputs"></div>
-      </div>
-      <div class="group">
-        <h4>Show these outputs</h4>
-        <div id="tt-outputs"></div>
-      </div>
-    </div>
-    <button class="btn" id="tt-generate">Generate table</button>
-    <span style="color: var(--muted); margin-left: 8px; font-size: 11px;">
-      Limit: 7 inputs (2,187 rows max).
-    </span>
-    <div class="tt-result" id="tt-result" style="margin-top: 12px;"></div>
-  </div>
-</div>
-
-<!-- Gate Builder modal -->
-<div class="modal-bg" id="gate-modal">
-  <div class="modal" style="min-width: 540px;">
-    <h2>Build a gate <button class="btn close" id="gate-close">close</button></h2>
-    <p style="color: var(--muted); font-size: 12px;">
-      Define a new ternary gate by filling in its truth table. Click cells to cycle
-      <span style="color: var(--t-neg)">T</span> →
-      <span style="color: var(--t-zero)">0</span> →
-      <span style="color: var(--t-pos)">+1</span>.
-      The resulting gate is a <em>behavioural</em> component — the simulator evaluates it by table
-      lookup, not by an internal circuit of MIN/MAX/STI primitives.
-      Press <b>Minimize</b> to see the smallest equivalent MAX-of-MIN circuit (and how many gates it saves),
-      or <b>Compile to gates</b> to build that circuit as a real subcircuit of MIN/MAX/STI/PTI/NTI primitives and place it on the canvas.
-    </p>
-    <div class="inspector-form" style="display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px 10px; align-items: center;">
-      <label style="margin: 0;">Name</label>
-      <input id="gate-name" type="text" value="MyGate" />
-      <label style="margin: 0;">Inputs</label>
-      <select id="gate-inputs">
-        <option value="1">1</option>
-        <option value="2" selected>2</option>
-        <option value="3">3</option>
-      </select>
-    </div>
-    <div id="gate-table" style="margin: 14px 0;"></div>
-    <div>
-      <button class="btn" id="gate-add" style="border-color: var(--accent-2); color: var(--accent-2);">Add to library</button>
-      <button class="btn" id="gate-clear-table" style="margin-left: 6px;">Clear table</button>
-      <button class="btn" id="gate-minimize" style="margin-left: 6px;" title="Two-level (MAX-of-MIN) minimization of the current table into MIN/MAX/STI/PTI/NTI primitives">Minimize</button>
-      <button class="btn" id="gate-compile" style="margin-left: 6px;" title="Materialize the minimized circuit as a real subcircuit of MIN/MAX/STI/PTI/NTI gates and place it on the canvas">Compile to gates</button>
-      <span id="gate-status" style="color: var(--muted); margin-left: 12px; font-size: 11px;"></span>
-    </div>
-    <div id="gate-min-result" style="margin-top: 10px; display: none;
-         font-family: monospace; font-size: 12px; background: var(--panel-2);
-         border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px;"></div>
-  </div>
-</div>
-
-<!-- Tests modal -->
-<div class="modal-bg" id="tests-modal">
-  <div class="modal">
-    <h2>Self-tests <button class="btn close" id="tests-close">close</button></h2>
-    <p style="color: var(--muted); font-size: 12px;">
-      Pure-function checks on the simulator's data path. These verify the
-      math, not the UI. A failure means the simulator is producing wrong
-      values somewhere — fix it before trusting any circuit you draw.
-    </p>
-    <div style="margin: 8px 0;">
-      <button class="btn" id="tests-run" style="border-color: var(--accent);">Run all tests</button>
-      <span id="tests-summary" style="margin-left: 12px; color: var(--muted); font-size: 12px;"></span>
-    </div>
-    <div id="tests-result" style="margin-top: 8px; font-family: monospace; font-size: 12px;"></div>
-  </div>
-</div>
-
-<!-- Pack subcircuit modal -->
-<div class="modal-bg" id="pack-modal">
-  <div class="modal">
-    <h2>Pack into subcircuit <button class="btn close" id="pack-close">close</button></h2>
-    <p style="color: var(--muted); font-size: 12px;">
-      Selected components become a reusable block.
-      INPUTs in the selection become input pins; OUTPUTs become output pins.
-      Set a name (and optionally rename pins below) before packing.
-    </p>
-    <div class="inspector-form" id="pack-form"></div>
-    <div style="margin-top: 10px;">
-      <button class="btn" id="pack-confirm" style="border-color: var(--accent);">Pack</button>
-    </div>
-  </div>
-</div>
-
-<!-- Assembler modal -->
-<div class="modal-bg" id="asm-modal">
-  <div class="modal" style="min-width: 640px;">
-    <h2>Assemble a program <button class="btn close" id="asm-close">close</button></h2>
-    <p style="color: var(--muted); font-size: 12px; margin: 0 0 8px 0;">
-      Write a ternary-assembly program — three mnemonics, at most 9 instructions.
-      Assemble &amp; Load fills the CPU preset's <b>IMEM</b> (the RAM block) with
-      the resulting word image. Load the <em>CPU</em> example first if it isn't
-      open. Words after the last instruction are padded with 0.
-    </p>
-    <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start;">
-      <textarea id="asm-source" spellcheck="false"
-        style="width: 100%; height: 220px; box-sizing: border-box;
-               font-family: monospace; font-size: 12px;
-               background: var(--panel-2); color: var(--text);
-               border: 1px solid var(--border); border-radius: 4px; padding: 8px;
-               resize: vertical; outline: none;"></textarea>
-      <div style="min-width: 180px; font-size: 11px; color: var(--muted);">
-        <b style="color: var(--text); display: block; margin-bottom: 4px;">Mnemonics</b>
-        <code>ADDI &lt;n&gt;</code> ACC += n<br>
-        <code>MAXI &lt;n&gt;</code> ACC = max(ACC, n)<br>
-        <code>JMP  &lt;addr&gt;</code> PC ← addr<br>
-        <div style="margin-top: 8px;">
-          n: −4..+4 &nbsp; addr: 0..8 or label<br>
-          Labels: <code>LOOP:</code> at the start of a line.<br>
-          Comments: <code>;</code> to end of line.
-        </div>
-        <div style="margin-top: 8px;">
-          <b style="color: var(--text); display: block;">Examples</b>
-          <select id="asm-example" style="width: 100%; margin-top: 3px;
-            background: var(--panel-2); color: var(--text);
-            border: 1px solid var(--border); border-radius: 4px; padding: 3px;
-            font-size: 11px;">
-            <option value="">— pick one —</option>
-          </select>
-        </div>
-      </div>
-    </div>
-    <div style="margin-top: 10px;">
-      <button class="btn" id="asm-load" style="border-color: var(--accent);">Assemble &amp; Load into IMEM</button>
-      <button class="btn" id="asm-check" style="margin-left: 6px;">Assemble (check only)</button>
-      <span id="asm-status" style="margin-left: 12px; color: var(--muted); font-size: 11px;"></span>
-    </div>
-    <div id="asm-result" style="margin-top: 10px; font-family: monospace; font-size: 11px;"></div>
-  </div>
-</div>
-
-<!-- Microcode editor modal — field-decoded view of a control-store ROM. Opened
-     from the inspector when a ROM is wired as a UFIELDS control store. -->
-<div class="modal-bg" id="micro-modal">
-  <div class="modal" style="min-width: 720px;">
-    <h2>Edit microcode <button class="btn close" id="micro-close">close</button></h2>
-    <p style="color: var(--muted); font-size: 12px; margin: 0 0 8px 0;">
-      Each row is one microinstruction word (µ0…µ8) in this control-store ROM,
-      decoded into its named fields. Changes apply live to the running circuit.
-      The raw column shows the underlying trits in pin order <code>q0→q5</code>.
-    </p>
-    <div id="micro-grid"></div>
-  </div>
-</div>
-
-<!-- Debugger panel — non-modal, floats over the canvas so the user can keep
-     stepping while watching the live CPU. Toggled by the Debug toolbar
-     button. Drag-to-move not provided; fixed bottom-right. -->
-<div id="dbg-panel" style="display: none; position: fixed; right: 16px; bottom: 16px;
-     width: 460px; max-height: 78vh; background: var(--panel); color: var(--text);
-     border: 1px solid var(--border-strong); border-radius: 6px;
-     box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-size: 12px; z-index: 50;
-     flex-direction: column;">
-  <div style="display: flex; align-items: center; padding: 6px 10px;
-       border-bottom: 1px solid var(--border); background: var(--panel-2);
-       border-radius: 6px 6px 0 0;">
-    <b style="color: var(--accent);">CPU Debugger</b>
-    <span id="dbg-status" style="margin-left: 10px; color: var(--muted); font-size: 11px;"></span>
-    <span style="flex: 1;"></span>
-    <button class="btn close" id="dbg-close" style="padding: 2px 8px;">close</button>
-  </div>
-  <div style="padding: 8px 10px; display: flex; gap: 6px; align-items: center;
-       border-bottom: 1px solid var(--border); flex-wrap: wrap;">
-    <button class="btn" id="dbg-step"      title="One stepSequential — half a clock period">Step</button>
-    <button class="btn" id="dbg-step-cyc"  title="Two steps — a full rising+falling clock period">Step Cycle</button>
-    <button class="btn" id="dbg-run"       title="Auto-step until a breakpoint or Pause" style="border-color: var(--accent-2); color: var(--accent-2);">Run</button>
-    <button class="btn" id="dbg-pause"     title="Stop auto-step">Pause</button>
-    <button class="btn" id="dbg-reset"     title="Reset PC and ACC to zero (does not wipe IMEM)">Reset PC</button>
-    <span style="flex:1;"></span>
-    <label style="font-size: 11px; color: var(--muted);">
-      max steps: <input id="dbg-runmax" type="number" min="1" max="9999" value="200"
-        style="width: 50px; background: var(--panel-2); color: var(--text);
-               border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px;" />
-    </label>
-  </div>
-  <div style="padding: 8px 10px; display: grid; grid-template-columns: 70px 1fr 60px 1fr; gap: 4px 8px;
-       font-family: monospace; border-bottom: 1px solid var(--border);">
-    <span style="color: var(--muted);">PC</span>      <span id="dbg-pc">—</span>
-    <span style="color: var(--muted);">ACC</span>     <span id="dbg-acc">—</span>
-    <span style="color: var(--muted);">instr</span>   <span id="dbg-instr" style="grid-column: span 3;">—</span>
-    <span style="color: var(--muted);" title="Microcode: µPC address + the decoded current microinstruction (CPU3)">µcode</span>   <span id="dbg-micro" style="grid-column: span 3;">—</span>
-    <span style="color: var(--muted);">tick</span>    <span id="dbg-tick">0</span>
-    <span style="color: var(--muted);">brks</span>    <span id="dbg-brks">—</span>
-  </div>
-  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;
-       overflow: hidden; flex: 1; min-height: 220px;">
-    <div style="overflow: auto; border-right: 1px solid var(--border);">
-      <div style="padding: 4px 8px; color: var(--muted); font-size: 11px;
-           background: var(--panel-2); border-bottom: 1px solid var(--border);">
-        Source <span style="color: var(--muted);">— click ● to set breakpoint</span>
-      </div>
-      <div id="dbg-src" style="font-family: monospace; font-size: 11px;
-           padding: 4px 0; white-space: pre;"></div>
-    </div>
-    <div style="overflow: auto;">
-      <div style="padding: 4px 8px; color: var(--muted); font-size: 11px;
-           background: var(--panel-2); border-bottom: 1px solid var(--border);">
-        IMEM (9 words) <span style="color: var(--muted);">— current word highlighted</span>
-      </div>
-      <div id="dbg-mem" style="font-family: monospace; font-size: 11px; padding: 4px 0;"></div>
-    </div>
-  </div>
-</div>
-
-<!-- Component reference / encyclopedia modal -->
-<div class="modal-bg" id="info-modal">
-  <div class="modal" style="min-width: 700px;">
-    <h2>Reference <button class="btn close" id="info-close">close</button></h2>
-    <div class="info-tabs">
-      <button class="info-tab active" id="info-tab-components">Components</button>
-      <button class="info-tab" id="info-tab-examples">Example walkthroughs</button>
-    </div>
-    <div class="info-layout">
-      <div class="info-list" id="info-list"></div>
-      <div class="info-detail" id="info-detail"></div>
-    </div>
-  </div>
-</div>
-
-<script type="module" src="js/app.js"></script>
 </body>
 </html>
