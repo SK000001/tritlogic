@@ -10,7 +10,7 @@
 //  preserve live-binding semantics for state's mutable globals.
 
 import { intToTrits, tritsToInt, parseTryteString,
-         SAVE_FORMAT_VERSION, upgradeSave,
+         SAVE_FORMAT_VERSION, upgradeSave, encodeShare, decodeShare,
          resolveDrivers, coerceForLogic,
          packBus, unpackBus, isBus, busLabel } from './util.js';
 import {
@@ -2102,6 +2102,22 @@ test('upgradeSave: newer-than-current save is passed through (caller decides)', 
   const future = { version: SAVE_FORMAT_VERSION + 5, comps: [], wires: [] };
   const out = upgradeSave(future);
   assertEq(out.version, SAVE_FORMAT_VERSION + 5, 'version preserved:');
+});
+test('I3 shareable circuits: encodeShare/decodeShare round-trips a circuit, URL-safe', () => {
+  // A real preset, wrapped as a save object, must survive the link round-trip.
+  const ex = EXAMPLES['bus-ports'].build();
+  const data = { version: SAVE_FORMAT_VERSION, comps: ex.comps, wires: ex.wires,
+                 view: { tx: 40, ty: 40, scale: 1 }, subcircuitDefs: {}, customGates: {} };
+  const enc = encodeShare(data);
+  // base64url only — no '+', '/', '=', or whitespace, so it's safe in a URL hash.
+  assertEq(/^[A-Za-z0-9_-]+$/.test(enc), true, 'encoded form is URL-safe:');
+  assertDeepEq(decodeShare(enc), data, 'decode(encode(circuit)) is identity:');
+  // A round-trip through upgradeSave (the real load path) is a no-op at current
+  // version, so an encoded current circuit loads cleanly.
+  assertDeepEq(upgradeSave(decodeShare(enc)), data, 'decoded circuit migrates to a no-op:');
+  // Non-ASCII (a user-named gate with symbols) survives the UTF-8 path.
+  const u = { version: SAVE_FORMAT_VERSION, note: 'trit ≡ −1/0/+1 ✓', comps: [], wires: [] };
+  assertDeepEq(decodeShare(encodeShare(u)), u, 'unicode survives the round-trip:');
 });
 
 // ---- All-structural CPU --------------------------------------------------

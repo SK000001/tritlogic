@@ -137,6 +137,35 @@ export function upgradeSave(data) {
   return data;
 }
 
+// ---- Shareable-circuit encoding (I3) --------------------------------------
+//
+//  Encode a circuit's save object into a compact, URL-safe string so a circuit
+//  can travel as a link (`…/#c=<encoded>`). JSON → UTF-8 bytes → base64url
+//  (the `+ / =` of base64 swapped for `- _` and stripped, so it's safe in a URL
+//  hash). The inverse re-parses to the save object, which the normal load path
+//  (with upgradeSave migrations) then consumes — so old links keep working as
+//  the format evolves. Synchronous + dependency-free so it round-trips under the
+//  headless test runner. (Future: gzip via CompressionStream to shrink large
+//  circuits — kept out for now to stay synchronous and testable.)
+function bytesToBase64url(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function base64urlToBytes(str) {
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+export function encodeShare(data) {
+  return bytesToBase64url(new TextEncoder().encode(JSON.stringify(data)));
+}
+export function decodeShare(str) {
+  return JSON.parse(new TextDecoder().decode(base64urlToBytes(str)));
+}
+
 // Prefer the platform's structuredClone (faster + preserves more JS types)
 // and fall back to the JSON round-trip when it isn't available.  This
 // shows up in cleanComps() and cloneSubScope() in particular.
