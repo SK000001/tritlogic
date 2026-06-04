@@ -2002,12 +2002,19 @@ function snapshotState() {
     delete cc.subScope;
     return cc;
   });
+  // comps/wires must be deep-cloned — their `state` (REG3.q, RAM.mem, …) and
+  // `w.label` are mutated in place as the circuit runs/edits. But a subcircuit
+  // def and a custom-gate def are *immutable once created* (packSelection /
+  // the gate builder replace the whole entry; nothing edits a def's internals),
+  // so a SHALLOW container copy is safe and far cheaper — it avoids deep-cloning
+  // all the built-in kit subcircuits (TMUL/MAC3/…/the microcode subs) on every
+  // single edit, which was the dominant per-edit cost on a large circuit.
   return {
     comps: cleanComps,
     wires: deepClone(wires),
     nextCompId, nextWireId,
-    subcircuitDefs: deepClone(subcircuitDefs),
-    customGates: deepClone(customGates),
+    subcircuitDefs: { ...subcircuitDefs },
+    customGates: { ...customGates },
   };
 }
 

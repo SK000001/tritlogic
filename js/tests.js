@@ -2377,6 +2377,41 @@ test('Undo / redo round-trips component add, wire add, delete', () => {
   }
 });
 
+test('Cheaper undo: comp state is deep-copied; immutable defs survive shallow share', () => {
+  // The cheaper-undo change shallow-copies the subcircuitDefs/customGates
+  // containers (defs are immutable) but must still deep-copy mutable comp state.
+  registerBuiltinSubcircuits();
+  const savedComps = comps, savedWires = wires;
+  const savedNextC = nextCompId, savedNextW = nextWireId;
+  const savedUndo = undoStack.slice(), savedRedo = redoStack.slice();
+  try {
+    setComps([{ id: 1, type: 'RAM', x: 0, y: 0, state: { mem: [[0, 0, 0]], clkPrev: 0 } }]);
+    setWires([]); setNextCompId(2); setNextWireId(1);
+    syncCompMap(); undoStack.length = 0; redoStack.length = 0;
+    // Snapshot, then mutate the RAM's stored word IN PLACE.
+    pushHistory();
+    comps[0].state.mem[0] = [1, 1, 1];
+    // Undo must restore the pre-mutation word — proving state was deep-copied
+    // into the snapshot, not shared by reference.
+    undo();
+    assertDeepEq(comps[0].state.mem[0], [0, 0, 0],
+                 'in-place state mutation reverted by undo (state deep-copied):');
+    // Built-in subcircuit defs survive undo/redo even though the snapshot only
+    // shallow-copies the defs container (immutable, so safe to share).
+    assertEq(!!subcircuitDefs['MAC3'], true, 'built-in def intact after undo:');
+    redo();
+    assertEq(comps[0].state.mem[0][0], 1, 'redo re-applies the mutation:');
+    assertEq(!!subcircuitDefs['MAC3'], true, 'built-in def intact after redo:');
+  } finally {
+    setComps(savedComps); setWires(savedWires);
+    setNextCompId(savedNextC); setNextWireId(savedNextW);
+    syncCompMap();
+    undoStack.length = 0; redoStack.length = 0;
+    for (const s of savedUndo) undoStack.push(s);
+    for (const s of savedRedo) redoStack.push(s);
+  }
+});
+
 // ---- B4: wire labels ------------------------------------------------------
 //
 // A wire can carry an optional `label` (a user-typed net name set in the

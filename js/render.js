@@ -50,27 +50,54 @@ function draw() {
   ctx.translate(view.tx, view.ty);
   ctx.scale(view.scale, view.scale);
 
+  // Viewport culling: skip DRAWING components / wires fully off-screen. Routing
+  // is still done for every wire above (so `_wireOccupied` stays complete and
+  // on-screen routes don't shift), and an off-screen item produces no visible
+  // pixels — so this is purely a per-frame draw saving with no visual change.
+  // The visible world rect (world = (screen − t) / scale), padded so an item
+  // straddling the edge still draws.
+  const _m = 80 / view.scale;
+  const vx0 = (0 - view.tx) / view.scale - _m;
+  const vy0 = (0 - view.ty) / view.scale - _m;
+  const vx1 = (cv.width  - view.tx) / view.scale + _m;
+  const vy1 = (cv.height - view.ty) / view.scale + _m;
+  const compVisible = (c) => {
+    const d = compDef(c);
+    return c.x <= vx1 && c.x + d.w >= vx0 && c.y <= vy1 && c.y + d.h >= vy0;
+  };
+  // A wire is visible if the bbox spanning its two endpoint components overlaps
+  // the view (the orthogonal route stays within a corridor of that span).
+  const wireVisible = (w) => {
+    const a = getComp(w.fromId), b = getComp(w.toId);
+    if (!a || !b) return true;
+    const da = compDef(a), db = compDef(b);
+    const minx = Math.min(a.x, b.x), miny = Math.min(a.y, b.y);
+    const maxx = Math.max(a.x + da.w, b.x + db.w), maxy = Math.max(a.y + da.h, b.y + db.h);
+    return maxx >= vx0 && minx <= vx1 && maxy >= vy0 && miny <= vy1;
+  };
+
   drawGrid();
   // Pre-compute wire crossings so drawWire() can render arc jumps where
   // perpendicular wires meet without connecting.
   computeWireCrossings();
   // Wires go UNDER components in the normal case so a wire passing
   // alongside a gate doesn't visibly overlap the gate's labels.
-  for (const w of wires) drawWire(w);
+  for (const w of wires) if (wireVisible(w)) drawWire(w);
   if (pendingWire) drawPendingWire();
-  for (const c of comps) drawComp(c);
+  for (const c of comps) if (compVisible(c)) drawComp(c);
   // X-ray pass: for any wire segment that the obstacle-aware router
   // couldn't avoid (i.e. it actually does pass through a non-endpoint
   // component), redraw just that segment as a thin overlay on top.  This
   // keeps the wire visible in fallback-routing cases without making every
   // wire sit on top of every component.
-  for (const w of wires) drawWireGhost(w);
+  for (const w of wires) if (wireVisible(w)) drawWireGhost(w);
   // Junction dots
   ctx.fillStyle = '#d8dde6';
   for (const key of fanoutPins()) {
     const [id, port] = key.split(':');
     const c = getComp(parseInt(id, 10));
     if (!c) continue;
+    if (!compVisible(c)) continue;
     const p = pinAbsPos(c, port);
     ctx.beginPath();
     ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
@@ -716,6 +743,10 @@ function computeWireCrossings() {
   if (rev === _crossingsRev) return;
   _crossingsRev = rev;
   _wireCrossings = new Map();
+  // The crossing scan is O(W²); on a very large circuit (and recomputed on every
+  // geometry edit) that dominates. The arc-jumps it feeds are a minor visual
+  // nicety, so above a cap we skip them entirely — wires just cross flat.
+  if (wires.length > 1200) return;
   // Cache paths so we don't recompute wirePath() for each pair.
   const paths = wires.map(w => wirePath(w));
   for (let i = 0; i < wires.length; i++) {
