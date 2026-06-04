@@ -3632,6 +3632,18 @@ function applyCircuitData(data) {
   setSubcircuitDefs(data.subcircuitDefs || {});
   registerBuiltinSubcircuits();   // keep the built-ins present after a load
   setCustomGates(data.customGates || {});
+  // Drop any wire that can't be rendered/simulated — an endpoint comp missing or
+  // a pin that doesn't exist on it. Otherwise wirePath()/pinAbsPos() throw on
+  // every draw and hard-crash the app. This matters most for untrusted input:
+  // a crafted or stale `#c=` share link / `?c=` embed (I3/I4) could otherwise
+  // brick the page. validateCircuit() (returned below) still reports them.
+  const renderable = (w) => {
+    try {
+      const fc = getComp(w.fromId), tc = getComp(w.toId);
+      return !!fc && !!tc && !!compDef(fc).pins[w.fromPort] && !!compDef(tc).pins[w.toPort];
+    } catch (e) { return false; }
+  };
+  if (wires.some(w => !renderable(w))) setWires(wires.filter(renderable));
   selection.clear(); setSelectedWire(null);
   setOutVals({});
   invalidatePathCache();
