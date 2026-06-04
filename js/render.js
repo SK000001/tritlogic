@@ -842,11 +842,28 @@ function drawWire(w) {
     ctx.restore();
   }
 
+  // Selection highlight: a bright-yellow glow underlay so the picked wire stands
+  // out from its neighbours regardless of the value colour it carries.
+  const selected = selectedWire === w.id;
+  if (selected) {
+    ctx.save();
+    ctx.strokeStyle = '#ffe600';
+    ctx.globalAlpha = 0.45;
+    ctx.lineWidth = 9 / view.scale;
+    ctx.lineCap = 'round';
+    ctx.setLineDash([]);
+    tracePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Bus wire: violet when carrying a word; a floating (Z) / contended (X) /
   // undefined bus falls back to the normal cyan / magenta / undef colour so
-  // those states still read.
-  ctx.strokeStyle = busWire ? (isBus(v) ? BUS_COLOR : tritColor(v)) : tritColor(v);
-  ctx.lineWidth = ((selectedWire === w.id ? 3 : 2) + (busWire ? 1.5 : 0)) / view.scale;
+  // those states still read. A selected wire is drawn bright yellow on top of
+  // its glow so it reads unmistakably as highlighted.
+  ctx.strokeStyle = selected ? '#ffe600'
+                  : busWire ? (isBus(v) ? BUS_COLOR : tritColor(v)) : tritColor(v);
+  ctx.lineWidth = ((selected ? 3 : 2) + (busWire ? 1.5 : 0)) / view.scale;
   // Live wires get a dashed pattern whose offset advances each animation
   // tick, producing a slow "marching ants" toward the destination.
   // Floating wires stay solid — visually flagging the dead segment. A
