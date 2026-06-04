@@ -59,15 +59,105 @@ function inputValueFromWires(scope, compId, portName) {
 const DEFAULT_DELAY = 1;
 
 // Propagation delay (abstract integer time units) for a component in the timed
-// solver (A2). Per-instance `c.state.delay` overrides a per-type
-// `TYPES[type].delay`, which overrides the default. Always a positive integer
-// so the timed event wheel strictly advances.
+// solver (A2). Resolution order:
+//   1. an explicit per-instance `c.state.delay` (the user set it) — always wins;
+//   2. for a SUB: instance with no override, its *structural* lump delay — the
+//      critical path through the subcircuit's own internal gates (subLumpDelay),
+//      so the timed wheel doesn't treat a deep subcircuit as a flat 1;
+//   3. otherwise a per-type `TYPES[type].delay`, then the default.
+// Always a positive integer so the timed event wheel strictly advances.
 function delayOf(c) {
   const d = c.state && c.state.delay;
   if (Number.isInteger(d) && d >= 1) return d;
+  if (c.type.startsWith('SUB:')) return subLumpDelay(c.type.slice(4));
   const t = TYPES[c.type] && TYPES[c.type].delay;
   if (Number.isInteger(t) && t >= 1) return t;
   return DEFAULT_DELAY;
+}
+
+// Lump-sum propagation delay for a SUB: subcircuit (A2 follow-on). The timed
+// solver evaluates a subcircuit instance as one black-box component (it doesn't
+// step the event wheel through the sub's internals), so a flat unit delay makes
+// a 6-gate-deep ALU look as fast as a single inverter. Instead we charge the
+// instance its internal **critical path**: the longest chain of internal
+// component delays from any sub INPUT boundary to any sub OUTPUT.
+//
+// Rules along the path:
+//   • A source component (no input pins — INPUT / CLOCK / a constant) is a
+//     boundary; it contributes 0 and starts a chain.
+//   • A sequential element (flip-flop / register / latch) breaks the chain: its
+//     output is stored state, not a function of *this* settle's inputs, so a
+//     downstream gate restarts accumulation at 0.
+//   • A nested SUB: recurses into its own lump delay (descend into the timing).
+//   • Combinational feedback loops (cross-coupled MIN/MAX latches) are broken by
+//     an in-progress guard returning 0 on the back-edge — a heuristic that can
+//     slightly under-count a loop, acceptable for a lump estimate.
+// Result is clamped to ≥1 so the wheel still advances, and cached per def keyed
+// by a cheap structural signature so editing/repacking the sub invalidates it.
+const _subDelayCache = new Map();
+function subLumpDelay(name, _stack) {
+  const def = subcircuitDefs[name];
+  if (!def || !def.comps) return DEFAULT_DELAY;
+  const sig = `${def.comps.length}:${def.wires.length}`;
+  const cached = _subDelayCache.get(name);
+  if (cached && cached.sig === sig) return cached.delay;
+
+  // Guard against subcircuit-type recursion (A contains B contains A).
+  const stack = _stack || new Set();
+  if (stack.has(name)) return DEFAULT_DELAY;
+  stack.add(name);
+
+  const byId = new Map();
+  for (const c of def.comps) byId.set(c.id, c);
+  const driversOf = new Map();   // toId -> [fromId, ...]
+  for (const w of def.wires) {
+    const a = driversOf.get(w.toId);
+    if (a) a.push(w.fromId); else driversOf.set(w.toId, [w.fromId]);
+  }
+
+  // Own delay of an internal component (recurses for nested subs).
+  const intDelay = (c) => {
+    const d = c.state && c.state.delay;
+    if (Number.isInteger(d) && d >= 1) return d;
+    if (c.type.startsWith('SUB:')) return subLumpDelay(c.type.slice(4), stack);
+    const t = TYPES[c.type] && TYPES[c.type].delay;
+    if (Number.isInteger(t) && t >= 1) return t;
+    return DEFAULT_DELAY;
+  };
+
+  // acc(id) = longest combinational delay from a sub-input boundary to the
+  // output of component id, inclusive. Memoized; in-progress set breaks loops.
+  const memo = new Map();
+  const inProgress = new Set();
+  const acc = (id) => {
+    const c = byId.get(id);
+    if (!c) return 0;
+    if (memo.has(id)) return memo.get(id);
+    const d2 = compDef(c);
+    const hasIn = d2 && d2.pins && Object.values(d2.pins).some(p => p.kind === 'in');
+    if (!hasIn) return 0;             // source boundary
+    if (d2.isSequential) return 0;    // register output restarts the chain
+    if (inProgress.has(id)) return 0; // feedback back-edge
+    inProgress.add(id);
+    let up = 0;
+    const drv = driversOf.get(id);
+    if (drv) for (const did of drv) { const a = acc(did); if (a > up) up = a; }
+    inProgress.delete(id);
+    const total = up + intDelay(c);
+    memo.set(id, total);
+    return total;
+  };
+
+  let lump = 0;
+  for (const c of def.comps) {
+    if (c.type !== 'OUTPUT') continue;
+    const drv = driversOf.get(c.id);
+    if (drv) for (const did of drv) { const a = acc(did); if (a > lump) lump = a; }
+  }
+  stack.delete(name);
+  lump = Math.max(1, lump);
+  _subDelayCache.set(name, { sig, delay: lump });
+  return lump;
 }
 
 // Wiring indices shared by both solvers, built once per call:
@@ -521,5 +611,5 @@ function cloneSubScope(def) {
   return scope;
 }
 
-  return { simulate, simulateScope, simulateTimed, switchingKeysAt, stepSequential, subInstanceDef, simulateSubInstance, cloneSubScope, inputValueFromWires };
+  return { simulate, simulateScope, simulateTimed, switchingKeysAt, delayOf, subLumpDelay, stepSequential, subInstanceDef, simulateSubInstance, cloneSubScope, inputValueFromWires };
 }

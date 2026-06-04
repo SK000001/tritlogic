@@ -36,7 +36,7 @@ export function registerTests(deps) {
     findMicrocodeTargets, microcodeStoreUf, decodeMicroWord,
     infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
-    simulateTimed, switchingKeysAt, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
+    simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
   } = deps;
 
 const TESTS = [];
@@ -606,6 +606,57 @@ test('A2 switchingKeysAt isolates the nets transitioning at exactly time t', () 
   assertEq(at2.size, 0, 't=2 ⇒ nothing switching (quiet step):');
   const at3 = switchingKeysAt(changes, 3);
   assertEq(at3.size === 1 && at3.has('g:out'), true, 't=3 ⇒ the glitch net flips back:');
+});
+
+test('A2 subLumpDelay charges a subcircuit its internal critical path', () => {
+  // The timed solver runs a SUB: instance as one black box, so its delay should
+  // be the longest internal gate chain — not a flat 1 (A2 follow-on). Build a
+  // throwaway def: INPUT → STI → STI → OUTPUT plus a shortcut INPUT → OUTPUT.
+  // Critical path = two unit-delay STIs = 2 (the shortcut doesn't shorten it).
+  subcircuitDefs['ChainTest'] = {
+    inputs: [{ name: 'x' }], outputs: [{ name: 'y' }],
+    comps: [
+      { id: 1, type: 'INPUT',  x: 0, y: 0, state: { name: 'x' } },
+      { id: 2, type: 'STI',    x: 0, y: 0, state: {} },
+      { id: 3, type: 'STI',    x: 0, y: 0, state: {} },
+      { id: 4, type: 'OUTPUT', x: 0, y: 0, state: { name: 'y' } },
+    ],
+    wires: [
+      { id: 1, fromId: 1, fromPort: 'out', toId: 2, toPort: 'in' },
+      { id: 2, fromId: 2, fromPort: 'out', toId: 3, toPort: 'in' },
+      { id: 3, fromId: 3, fromPort: 'out', toId: 4, toPort: 'in' },
+      { id: 4, fromId: 1, fromPort: 'out', toId: 4, toPort: 'in' },   // shortcut
+    ],
+  };
+  assertEq(subLumpDelay('ChainTest'), 2, 'two STIs deep ⇒ delay 2:');
+
+  // A sequential element breaks the combinational chain: its output is stored
+  // state, not a function of this settle's inputs. INPUT → STI → DFF → STI →
+  // OUTPUT — the DFF resets accumulation, so only the post-DFF STI counts ⇒ 1.
+  subcircuitDefs['SeqBreakTest'] = {
+    inputs: [{ name: 'd' }], outputs: [{ name: 'q' }],
+    comps: [
+      { id: 1, type: 'INPUT',  x: 0, y: 0, state: { name: 'd' } },
+      { id: 2, type: 'STI',    x: 0, y: 0, state: {} },
+      { id: 3, type: 'DFF',    x: 0, y: 0, state: {} },
+      { id: 4, type: 'STI',    x: 0, y: 0, state: {} },
+      { id: 5, type: 'OUTPUT', x: 0, y: 0, state: { name: 'q' } },
+    ],
+    wires: [
+      { id: 1, fromId: 1, fromPort: 'out', toId: 2, toPort: 'in' },
+      { id: 2, fromId: 2, fromPort: 'out', toId: 3, toPort: 'd' },
+      { id: 3, fromId: 3, fromPort: 'q',   toId: 4, toPort: 'in' },
+      { id: 4, fromId: 4, fromPort: 'out', toId: 5, toPort: 'in' },
+    ],
+  };
+  assertEq(subLumpDelay('SeqBreakTest'), 1, 'sequential breaks the chain ⇒ delay 1:');
+
+  delete subcircuitDefs['ChainTest'];
+  delete subcircuitDefs['SeqBreakTest'];
+
+  // A real multi-gate kit subcircuit is deeper than the flat unit default.
+  registerBuiltinSubcircuits();
+  assertEq(subLumpDelay('FADD') > 1, true, 'a full-adder kit sub is deeper than 1:');
 });
 
 // ---- A3 high-impedance (Z) + tri-state buses ----

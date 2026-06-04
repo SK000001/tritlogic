@@ -1079,7 +1079,7 @@ const engineDeps = { TYPES, compDef };
 const {
   simulate, simulateScope, simulateTimed, switchingKeysAt, stepSequential,
   subInstanceDef, simulateSubInstance, cloneSubScope,
-  inputValueFromWires,
+  inputValueFromWires, delayOf, subLumpDelay,
 } = createEngine(engineDeps);
 
 const renderDeps = {
@@ -1733,11 +1733,18 @@ function updateInspector() {
       form.appendChild(inputEl);
     }
     if (propagates) {
-      const typeDelay = Number.isInteger(tdef && tdef.delay) ? tdef.delay : 1;
+      // Effective default when no per-instance override: a SUB: instance gets
+      // its structural critical-path delay (A2 follow-on); a native type gets
+      // its per-type default (or 1).
+      const typeDelay = c.type.startsWith('SUB:') ? subLumpDelay(c.type.slice(4))
+        : (Number.isInteger(tdef && tdef.delay) ? tdef.delay : 1);
+      const isSub = c.type.startsWith('SUB:');
       const labelEl = document.createElement('label');
       labelEl.textContent = 'Delay (timing)';
       labelEl.title = `Propagation delay in abstract time units for Timing mode (≥1). ` +
-        `Blank uses this type's default (${typeDelay}).`;
+        (isSub
+          ? `Blank uses this subcircuit's internal critical path (${typeDelay}).`
+          : `Blank uses this type's default (${typeDelay}).`);
       form.appendChild(labelEl);
       const inputEl = document.createElement('input');
       inputEl.type = 'number'; inputEl.min = '1'; inputEl.step = '1';
@@ -2352,7 +2359,9 @@ document.getElementById('btn-wave-clear').addEventListener('click', () => {
 //  gate-delay per step) and glitching nets flip and flip back as you scrub.
 //  Non-invasive: it temporarily drives `outVals` to the timed snapshot and
 //  restores the live steady state on exit. Give a gate a larger delay via the
-//  inspector's Delay field to create skew (and hazards).
+//  inspector's Delay field to create skew (and hazards). A SUB: instance is
+//  charged its internal critical-path delay by default (subLumpDelay), so a
+//  deep kit block (ALU3, FADD) settles later than a single gate.
 const timing = { active: false, run: null, t: 0, playTimer: null };
 
 function timingValsAt(t) {
@@ -4669,7 +4678,7 @@ const { TESTS, runAllTests } = registerTests({
   findMicrocodeTargets, microcodeStoreUf, decodeMicroWord,
   infoSubTruthTable, isBuiltinSubcircuit, pushHistory, ramAddr,
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
-  simulateTimed, switchingKeysAt, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
+  simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
 });
 
 
