@@ -566,6 +566,30 @@ test('P1 ternary-xor preset circuit computes XOR end to end', () => {
     assertEq(scope.outVals[outSrc.y], a !== b ? 1 : -1, `preset xor(${a},${b}) y:`);
   }
 });
+test('P1 slice 2 — time-multiplexed MAC computes a 3-neuron layer with ONE MAC3', () => {
+  const ex = EXAMPLES['ternary-mac-seq'].build();
+  // The whole point: a single shared MAC3, not one per neuron.
+  assertEq(ex.comps.filter(c => c.type === 'SUB:MAC3').length, 1, 'exactly one MAC3:');
+  const sr = ex.comps.find(c => c.type === 'REG3');
+  // Reference: the same 3-neuron layer computed in parallel — h_j = sign(W[j]·x).
+  const sgn = v => (v < 0 ? -1 : v > 0 ? 1 : 0);
+  const W = [[1, 0, -1], [-1, 1, 1], [0, -1, 1]], x = [1, 1, -1];
+  const h = W.map(row => sgn(row[0] * x[0] + row[1] * x[1] + row[2] * x[2]));
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    // bi clock → a rising edge every 2 steps; 6 steps = 3 edges = 3 neurons swept.
+    for (let i = 0; i < 6; i++) stepSequential();
+    // After the sweep the shift register holds [h2, h1, h0] (newest in q0).
+    assertEq(sr.state.q[0], h[2], 'sr.q0 = h2 (last neuron):');
+    assertEq(sr.state.q[1], h[1], 'sr.q1 = h1:');
+    assertEq(sr.state.q[2], h[0], 'sr.q2 = h0 (first neuron):');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
 
 // ---- A2 timed simulation (propagation delays) ----
 test('A2 timed sim settles to the same values as the instant solver', () => {

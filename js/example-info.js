@@ -22,7 +22,7 @@ export const EXAMPLE_INFO_CATEGORIES = [
   ['Buses',              ['tristate-bus', 'regfile-bus', 'word-bus', 'regfile-wordbus', 'tryte-bus', 'bus-datapath', 'bus-ports']],
   ['CPU',                ['cpu', 'cpu-structural', 'cpu2']],
   ['Microcode',          ['microcode-seq', 'microcode-fields', 'microcode-dispatch', 'cpu3', 'cpu3-full']],
-  ['Neural net',         ['ternary-mac', 'ternary-layer', 'ternary-mlp', 'ternary-xor']],
+  ['Neural net',         ['ternary-mac', 'ternary-layer', 'ternary-mlp', 'ternary-xor', 'ternary-mac-seq']],
 ];
 
 export const EXAMPLE_INFO = {
@@ -1018,5 +1018,29 @@ export const EXAMPLE_INFO = {
       truth table. This is the bridge to real photonic-AI: ternary weights are a
       live topic (BitNet), and a ternary MAC is exactly what a photonic crossbar
       computes — so the same trained weights could one day program the chip.</p>`,
+  },
+
+  'ternary-mac-seq': {
+    name: 'Time-multiplexed MAC',
+    tagline: 'One shared MAC3 computes a whole layer, one neuron per clock',
+    body: `
+      <p>The parallel examples spend one MAC block per neuron. Real hardware can't
+      afford that, so it <b>time-shares</b> a single multiply-accumulate unit across
+      many neurons. This circuit does exactly that: <b>one MAC3</b> computes a
+      3-neuron ternary layer over three clock cycles.</p>
+      <pre class="info-diagram">
+  PC(counter) ─addr─▶ weight ROM ─w0..w2─▶ MAC3 ─lo,hi─▶ ACT ─s─▶ shift reg
+        ▲                                    ▲                        │
+        └──── +1 per clock                   x0..x2 (fixed input)     ▼
+                                                              [ h2 , h1 , h0 ]
+      </pre>
+      <p>Each rising edge the <b>PC</b> steps to the next weight row in the
+      <b>ROM</b>, the shared <b>MAC3</b> dots it with the fixed input vector,
+      <b>ACT</b> takes the sign, and that activation shifts into a <b>REG3</b>. After
+      three edges the register holds the whole layer <code>[h2, h1, h0]</code> — same
+      result as the parallel <i>ternary-layer</i> example, but from a single MAC unit
+      swept over time. Press <b>▶ Play</b> and watch <code>sr0/sr1/sr2</code> fill in
+      one neuron at a time. This is the architecture a photonic accelerator uses: a
+      small number of physical MAC lanes, reused cycle after cycle.</p>`,
   },
 };

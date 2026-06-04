@@ -1761,6 +1761,76 @@ const EXAMPLES = {
       });
     },
   },
+
+  'ternary-mac-seq': {
+    label: 'Time-multiplexed MAC — one MAC3 swept over cycles',
+    build: () => {
+      subcircuitDefs['MAC3'] = buildMac3Def();
+      subcircuitDefs['ACT']  = buildActDef();
+      // The hardware-reuse datapath: a 3-neuron ternary layer computed by ONE
+      // shared MAC3 over three clock cycles, exactly how a real neural
+      // accelerator time-shares a multiply-accumulate unit.
+      //
+      //   PC (counter) ─addr─▶ weight ROM ─w0..w2─▶ MAC3 ─lo,hi─▶ ACT ─s─▶ shift reg
+      //         ▲                                     ▲                         │
+      //         └──── one tick per neuron             x0..x2 (fixed input) ─────┘
+      //
+      // Each rising edge: the PC steps to the next weight row, the MAC3 dots it
+      // with the fixed input vector, ACT takes the sign, and that activation is
+      // shifted into a REG3. After 3 edges the REG3 holds [h2, h1, h0] — the
+      // whole layer, from a single MAC3. (bi-mode clock: one edge per 2 steps.)
+      //
+      // Weights (rows 0..2) and input chosen to match the parallel `ternary-layer`
+      // reference: x=(+1,+1,T) → h=(+1,T,T).
+      const W = [[1, 0, -1], [-1, 1, 1], [0, -1, 1]];
+      const mem = [];
+      for (let j = 0; j < 9; j++) mem.push([(W[j] || [0, 0, 0])[0] || 0, (W[j] || [0, 0, 0])[1] || 0, (W[j] || [0, 0, 0])[2] || 0, 0, 0, 0]);
+      return buildExample((c, w) => ({
+        comps: [
+          c('clk',  'CLOCK', 30, 40,  { value: -1, mode: 'bi' }),
+          c('pc',   'PC',    30, 120),
+          c('wrom', 'ROM',   210, 96, { mem }),
+          c('x0',   'INPUT', 30, 320, { value:  1, name: 'x0' }),
+          c('x1',   'INPUT', 30, 372, { value:  1, name: 'x1' }),
+          c('x2',   'INPUT', 30, 424, { value: -1, name: 'x2' }),
+          c('mac',  'SUB:MAC3', 430, 150),
+          c('act',  'SUB:ACT',  650, 250),
+          c('one',  'CONST', 650, 430, { value: 1 }),
+          c('sr',   'REG3',  820, 250),
+          c('cur',  'OUTPUT', 800, 180, { name: 'h_now' }),
+          c('o0',   'OUTPUT', 1000, 270, { name: 'sr0' }),
+          c('o1',   'OUTPUT', 1000, 312, { name: 'sr1' }),
+          c('o2',   'OUTPUT', 1000, 354, { name: 'sr2' }),
+        ],
+        wires: [
+          // sequence: counter addresses the weight ROM
+          w('clk', 'out', 'pc', 'clk'),
+          w('pc',  'p0',  'wrom', 'a0'),
+          w('pc',  'p1',  'wrom', 'a1'),
+          // shared MAC3: this cycle's weight row · the fixed input vector
+          w('wrom', 'q0', 'mac', 'w0'),
+          w('wrom', 'q1', 'mac', 'w1'),
+          w('wrom', 'q2', 'mac', 'w2'),
+          w('x0', 'out', 'mac', 'x0'),
+          w('x1', 'out', 'mac', 'x1'),
+          w('x2', 'out', 'mac', 'x2'),
+          // activation
+          w('mac', 'lo', 'act', 'lo'),
+          w('mac', 'hi', 'act', 'hi'),
+          w('act', 's',  'cur', 'in'),
+          // shift register: new activation in at d0, old values shift down
+          w('act', 's',  'sr', 'd0'),
+          w('sr',  'q0', 'sr', 'd1'),
+          w('sr',  'q1', 'sr', 'd2'),
+          w('clk', 'out', 'sr', 'clk'),
+          w('one', 'out', 'sr', 'ld'),
+          w('sr',  'q0', 'o0', 'in'),
+          w('sr',  'q1', 'o1', 'in'),
+          w('sr',  'q2', 'o2', 'in'),
+        ],
+      }));
+    },
+  },
 };
 
 
