@@ -3381,6 +3381,8 @@ function loadFromShareHash() {
     return true;
   } catch (err) {
     console.warn('Could not load shared circuit from link:', err);
+    alert('This share link is invalid or corrupted, so it could not be opened. ' +
+          'The default example has been loaded instead.');
     setStatus('Shared link could not be loaded — opened the default example instead');
     return false;
   }
