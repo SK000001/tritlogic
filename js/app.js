@@ -2367,6 +2367,20 @@ window.addEventListener('keydown', (e) => {
       if (s) { e.preventDefault(); s.focus(); s.select(); }
       return;
     }
+    if (e.key === 'a' || e.key === 'A') {
+      // Select every component — but only on the canvas, never while a text
+      // field (inspector, gate name, …) has focus, where Ctrl+A selects text.
+      const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA');
+      if (!typing) {
+        e.preventDefault();
+        selection.clear();
+        for (const c of comps) selection.add(c.id);
+        setSelectedWire(null);
+        updateInspector(); draw();
+        setStatus(`selected ${comps.length} component${comps.length === 1 ? '' : 's'}`);
+      }
+      return;
+    }
   }
   // Don't hijack other keys when typing in an input field.
   if (ae && ae.tagName === 'INPUT') return;
