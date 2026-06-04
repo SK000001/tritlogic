@@ -25,6 +25,26 @@
   }
   body.wave-open { grid-template-rows: 44px 1fr 160px; }
 
+  /* I4 — embed mode (?embed=1): a chrome-light, run-only view for iframes.
+     Drop the side panels to a single canvas column and hide the editing
+     toolbar, leaving just Step / Play / Reset / Fit + an "Open in TritLogic"
+     link. Interactions (pan / zoom / toggling inputs) stay live. */
+  body.embed { grid-template-columns: 1fr; }
+  body.embed aside.palette, body.embed aside.inspector { display: none; }
+  body.embed.wave-open { grid-template-rows: 44px 1fr 160px; }
+  body.embed header .sub, body.embed header .sep, body.embed header .spacer,
+  body.embed header #example-select,
+  body.embed header button:not(#btn-step):not(#btn-play):not(#btn-reset):not(#btn-fit) {
+    display: none;
+  }
+  #embed-open { display: none; }
+  body.embed #embed-open {
+    display: inline-block; margin-left: auto; color: var(--accent);
+    text-decoration: none; font-size: 12px; padding: 5px 10px;
+    border: 1px solid var(--border); border-radius: 5px;
+  }
+  body.embed #embed-open:hover { border-color: var(--accent); }
+
   header {
     grid-column: 1 / -1;
     display: flex; align-items: center; padding: 0 12px; gap: 8px;

@@ -38,6 +38,7 @@ export function registerTests(deps) {
     registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
     simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
     duplicateSelection, nudgeSelection, pickBootExample,
+    isEmbed, shareParamFrom, fullAppUrlFromEmbed, buildEmbedCode,
   } = deps;
 
 const TESTS = [];
@@ -2151,6 +2152,47 @@ test('I1 every landing-page "try this" example exists', () => {
     if (!EXAMPLES[name]) throw new Error(`landing page links a missing example: ${name}`);
     assertEq(pickBootExample('?example=' + name), name, `${name} resolves at boot:`);
   }
+});
+
+// ---- I4 embed mode -------------------------------------------------------
+//
+// `?embed=1` strips the editor chrome to a run-only iframe view; the circuit
+// rides in the hash (`#c=…`) or query (`?c=…`), and the embed snippet / "Open in
+// TritLogic" link are built from pure helpers.
+test('I4 isEmbed recognises the embed flag', () => {
+  assertEq(isEmbed('?embed=1'), true, 'embed=1:');
+  assertEq(isEmbed('?embed'), true, 'bare embed:');
+  assertEq(isEmbed('?a=1&embed=1&b=2'), true, 'mid-query embed:');
+  assertEq(isEmbed('?embed=0'), false, 'embed=0 opts out:');
+  assertEq(isEmbed('?embed=false'), false, 'embed=false opts out:');
+  assertEq(isEmbed(''), false, 'no query:');
+  assertEq(isEmbed('?example=cpu2'), false, 'unrelated param:');
+  assertEq(isEmbed('?embedded=1'), false, 'a different param is not embed:');
+});
+test('I4 shareParamFrom reads the circuit from hash or query, hash wins', () => {
+  assertEq(shareParamFrom('#c=ABC', ''), 'ABC', 'hash form:');
+  assertEq(shareParamFrom('', '?c=XYZ'), 'XYZ', 'query form (embed snippet):');
+  assertEq(shareParamFrom('#c=H', '?c=Q'), 'H', 'hash wins over query:');
+  assertEq(shareParamFrom('#other=1', '?embed=1'), null, 'no circuit present:');
+  assertEq(shareParamFrom('', ''), null, 'empty:');
+});
+test('I4 fullAppUrlFromEmbed points back at the full editor with the same circuit', () => {
+  assertEq(fullAppUrlFromEmbed('?embed=1', '#c=ABC'), 'app.html#c=ABC', 'carries the shared circuit:');
+  assertEq(fullAppUrlFromEmbed('?embed=1&c=QQ', ''), 'app.html#c=QQ', 'query-c becomes a hash link:');
+  assertEq(fullAppUrlFromEmbed('?embed=1&example=min-max', ''), 'app.html?example=min-max', 'carries the example:');
+  assertEq(fullAppUrlFromEmbed('?embed=1', ''), 'app.html', 'bare app when no circuit:');
+});
+test('I4 buildEmbedCode emits a valid iframe snippet that re-loads in embed mode', () => {
+  const code = buildEmbedCode('https://tern-pi.vercel.app/app', '1ENC');
+  assertEq(/^<iframe /.test(code) && /<\/iframe>$/.test(code), true, 'is an <iframe> element:');
+  assertEq(code.includes('src="https://tern-pi.vercel.app/app?embed=1#c=1ENC"'), true, 'src loads embed + circuit:');
+  // The src round-trips through the boot helpers: embed view + the same circuit.
+  const m = code.match(/src="([^"]+)"/);
+  const url = new URL(m[1]);
+  assertEq(isEmbed(url.search), true, 'snippet URL is an embed view:');
+  assertEq(shareParamFrom(url.hash, url.search), '1ENC', 'snippet URL carries the circuit:');
+  // Custom dimensions are honoured.
+  assertEq(buildEmbedCode('x', 'e', { width: 800, height: 300 }).includes('width="800" height="300"'), true, 'custom size:');
 });
 
 // ---- All-structural CPU --------------------------------------------------

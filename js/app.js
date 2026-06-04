@@ -3496,6 +3496,33 @@ async function shareCircuit() {
 const shareBtn = document.getElementById('btn-share');
 if (shareBtn) shareBtn.addEventListener('click', () => { shareCircuit(); });
 
+// I4 — Embed mode. Build a paste-ready <iframe> snippet that loads this exact
+// circuit in the chrome-light embed view (`?embed=1#c=…`). `baseUrl` is the app's
+// own URL (origin + path); the circuit rides in the hash, the embed flag in the
+// query, so it reuses I3's serialisation untouched. Pure + exported for tests.
+function buildEmbedCode(baseUrl, enc, opts = {}) {
+  const w = opts.width || 640, h = opts.height || 440;
+  const src = baseUrl + '?embed=1#c=' + enc;
+  return `<iframe src="${src}" width="${w}" height="${h}" ` +
+         `style="border:1px solid #3a3f4a;border-radius:8px" ` +
+         `title="TritLogic circuit" loading="lazy"></iframe>`;
+}
+async function copyEmbedCode() {
+  try {
+    const enc = await encodeShare(serializeCircuit({ forShare: true }));
+    const code = buildEmbedCode(location.origin + location.pathname, enc);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code)
+        .then(() => setStatus('Embed code (<iframe>) copied to clipboard'))
+        .catch(() => { window.prompt('Copy this embed code:', code); });
+    } else {
+      window.prompt('Copy this embed code:', code);
+    }
+  } catch (err) { alert('Could not build embed code: ' + err.message); }
+}
+const embedBtn = document.getElementById('btn-embed');
+if (embedBtn) embedBtn.addEventListener('click', () => { copyEmbedCode(); });
+
 // I1 front door — the landing page's "try this" buttons deep-link into the app
 // as `app.html?example=<name>`. Resolve that query string to a known example
 // name (or null if absent/unknown). Pure + exported so the landing page's entry
@@ -3508,16 +3535,60 @@ function pickBootExample(search) {
   return EXAMPLES[name] ? name : null;
 }
 
-// On startup, load a circuit from the share hash if present (`#c=…`), else a
-// landing-page deep link (`?example=…`), else the default example. Async because
-// decodeShare gunzips the payload.
+// The encoded circuit may ride in the hash (`#c=…`, how Share writes it) or the
+// query (`?c=…`, how an embed snippet carries it). Hash wins if both are present.
+// Pure + exported for tests.
+function shareParamFrom(hash, search) {
+  const mh = (hash || '').match(/[#&]c=([^&]+)/);
+  if (mh) return mh[1];
+  const ms = (search || '').match(/[?&]c=([^&]+)/);
+  return ms ? ms[1] : null;
+}
+
+// I4 — is this an embed view? `?embed` / `?embed=1` → yes; `?embed=0|false` → no.
+// Pure + exported for tests.
+function isEmbed(search) {
+  const m = (search || '').match(/[?&]embed(?:=([^&]*))?(?:&|$)/);
+  if (!m) return false;
+  return m[1] === undefined || (m[1] !== '0' && m[1] !== 'false');
+}
+
+// The full-editor URL for an embed's "Open in TritLogic" link — same circuit, no
+// embed chrome. Carries the encoded circuit in the hash, else the example name,
+// else just the bare app. Pure + exported for tests.
+function fullAppUrlFromEmbed(search, hash) {
+  const enc = shareParamFrom(hash, search);
+  if (enc) return 'app.html#c=' + enc;
+  const ex = pickBootExample(search);
+  if (ex) return 'app.html?example=' + ex;
+  return 'app.html';
+}
+
+// I4 — strip the editor chrome for an `?embed=1` view: hide the palette,
+// inspector, and editing toolbar (CSS does the work via `body.embed`), and point
+// the brand + "Open" link at the full editor (new tab) carrying the same circuit.
+function applyEmbedMode() {
+  if (!isEmbed(location.search)) return;
+  document.body.classList.add('embed');
+  const url = fullAppUrlFromEmbed(location.search, location.hash);
+  const open = document.getElementById('embed-open');
+  if (open) open.href = url;
+  const title = document.querySelector('header a.title');
+  if (title) { title.href = url; title.target = '_blank'; title.rel = 'noopener'; }
+}
+
+// On startup, load a circuit from a share param if present (hash `#c=…` or, for
+// embeds, query `?c=…`), else a landing-page deep link (`?example=…`), else the
+// default example. Async because decodeShare gunzips the payload.
 async function bootCircuit() {
-  const m = (location.hash || '').match(/[#&]c=([^&]+)/);
-  if (m) {
+  const enc = shareParamFrom(location.hash, location.search);
+  if (enc) {
     try {
-      const warnings = applyCircuitData(await decodeShare(m[1]));
+      const warnings = applyCircuitData(await decodeShare(enc));
       setStatus('Loaded shared circuit from link' +
                 (warnings.length ? ` (${warnings.length} validation warning(s) — see console)` : ''));
+      // A clock-driven shared circuit auto-runs so an embed shows it live at once.
+      if (isEmbed(location.search) && comps.some(c => c.type === 'CLOCK')) setAutoPlay(true);
       return;
     } catch (err) {
       console.warn('Could not load shared circuit from link:', err);
@@ -4951,6 +5022,7 @@ const { TESTS, runAllTests } = registerTests({
   registerBuiltinSubcircuits, showInfoEntry, simulate, simulateScope,
   simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
   duplicateSelection, nudgeSelection, pickBootExample,
+  isEmbed, shareParamFrom, fullAppUrlFromEmbed, buildEmbedCode,
 });
 
 
@@ -5064,6 +5136,7 @@ function validateCircuit() {
 //  BOOT
 // ============================================================================
 
+applyEmbedMode();   // I4 — must precede resize() so the canvas sizes to the embed layout
 resize();
 setTool('select');
 registerBuiltinSubcircuits();
