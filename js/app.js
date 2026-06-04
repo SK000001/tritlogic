@@ -2310,15 +2310,20 @@ function addWire(fromId, fromPort, toId, toPort) {
   simulate(); draw();
 }
 
+// Zoom by `factor` while keeping the world point under (ax, ay) screen-fixed.
+// Shared by wheel zoom (anchored at the cursor) and the +/- keys (anchored at
+// the viewport centre). Scale clamped to [0.3, 3].
+function zoomAt(factor, ax, ay) {
+  const wx = (ax - view.tx) / view.scale;
+  const wy = (ay - view.ty) / view.scale;
+  view.scale = Math.max(0.3, Math.min(3, view.scale * factor));
+  view.tx = ax - wx * view.scale;
+  view.ty = ay - wy * view.scale;
+  draw();
+}
 cv.addEventListener('wheel', (e) => {
   e.preventDefault();
-  const dz = e.deltaY > 0 ? 1/1.1 : 1.1;
-  const wx = (mouse.x - view.tx) / view.scale;
-  const wy = (mouse.y - view.ty) / view.scale;
-  view.scale = Math.max(0.3, Math.min(3, view.scale * dz));
-  view.tx = mouse.x - wx * view.scale;
-  view.ty = mouse.y - wy * view.scale;
-  draw();
+  zoomAt(e.deltaY > 0 ? 1/1.1 : 1.1, mouse.x, mouse.y);
 }, { passive: false });
 
 // Frame the whole circuit (or the current selection) in the viewport — handy
@@ -2369,6 +2374,9 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { mouse.spaceDown = true; cv.style.cursor = 'grab'; }
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); }
   if (e.key === 'f' || e.key === 'F') { fitView(); }   // frame the circuit / selection
+  // +/- zoom, anchored at the viewport centre ('=' is the unshifted '+').
+  if (e.key === '+' || e.key === '=') { zoomAt(1.1, cv.width / 2, cv.height / 2); }
+  if (e.key === '-' || e.key === '_') { zoomAt(1/1.1, cv.width / 2, cv.height / 2); }
   if (e.key === 'Escape') {
     setPendingWire(null); selection.clear(); setSelectedWire(null);
     updateInspector(); draw();
