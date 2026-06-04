@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How TritLogic works &amp; what it models</title>
+<meta name="description" content="The model behind TritLogic: the idealised balanced-ternary trit, the switch/gate level it simulates, what it does and does not model, the logic-minimizer algorithm, and how to cite it." />
+<style>
+  :root {
+    --bg: #14171c; --panel: #1d2026; --panel-2: #262a32; --panel-3: #2e333d;
+    --border: #3a3f4a; --border-strong: #4a5060; --text: #d8dde6; --muted: #8a92a1;
+    --accent: #6ea8ff; --accent-2: #8effb0; --warn: #ffba6e;
+    --t-neg: #e35555; --t-zero: #888c95; --t-pos: #54c060;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    background:
+      radial-gradient(1100px 600px at 80% -10%, #1b2330 0%, transparent 60%),
+      var(--bg);
+    color: var(--text); line-height: 1.6; font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 0 22px; }
+  header.nav {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 22px; max-width: 820px; margin: 0 auto;
+  }
+  header.nav .brand { font-weight: 700; font-size: 18px; }
+  header.nav .brand .tri { color: var(--accent); }
+  header.nav .grow { flex: 1; }
+  h1 { font-size: clamp(26px, 5vw, 38px); line-height: 1.15; margin: 26px 0 6px; }
+  .sub { color: var(--muted); font-size: 17px; margin: 0 0 8px; }
+  h2 { font-size: 21px; margin: 34px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 16px; margin: 20px 0 6px; }
+  p, li { color: #cdd3dd; }
+  .muted { color: var(--muted); }
+  code { background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+  .trit-neg { color: var(--t-neg); font-weight: 600; }
+  .trit-zero { color: var(--t-zero); font-weight: 600; }
+  .trit-pos { color: var(--t-pos); font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 620px) { .two { grid-template-columns: 1fr; } }
+  .does { border-left: 3px solid var(--t-pos); }
+  .doesnt { border-left: 3px solid var(--t-neg); }
+  .panel h3 { margin-top: 0; }
+  ul { padding-left: 20px; }
+  li { margin: 5px 0; }
+  pre {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto; font-size: 13px; line-height: 1.5;
+  }
+  .btn {
+    display: inline-block; padding: 8px 16px; border-radius: 7px; font-size: 14px;
+    font-weight: 600; cursor: pointer; border: 1px solid var(--border-strong);
+    background: var(--panel-2); color: var(--text);
+  }
+  .btn:hover { text-decoration: none; border-color: var(--accent); }
+  .btn.primary { background: linear-gradient(92deg, var(--accent), #5b96f0); color: #0c1018; border-color: transparent; }
+  .cta { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0 6px; }
+  .citebar { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
+  footer { color: var(--muted); font-size: 13px; padding: 30px 0 50px; border-top: 1px solid var(--border); margin-top: 36px; }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="index.html" style="color:inherit"><span class="tri">▲</span> TritLogic</a>
+  <span class="grow"></span>
+  <a href="app.html">Open the simulator →</a>
+</header>
+
+<main class="wrap">
+
+  <h1>How it works &amp; what it models</h1>
+  <p class="sub">An honest description of the abstraction behind TritLogic — for anyone who wants to trust, teach with, or cite it.</p>
+
+  <p>
+    <b>TritLogic</b> is an in-browser simulator for <b>balanced-ternary</b> digital
+    logic. It's an unusually complete tool in a near-empty niche — a Logisim-style
+    environment for the three-valued world rather than the binary one — aimed at the
+    ternary / multi-valued-logic (MVL) curious: students, CS educators, and
+    hobbyists. It is <i>not</i> a claimed world-first, and it is not production EDA.
+  </p>
+
+  <h2>The trit</h2>
+  <p>
+    Every signal is a <b>balanced trit</b> — one of three values:
+    <span class="trit-neg">T = −1</span>, <span class="trit-zero">0</span>, and
+    <span class="trit-pos">+1</span>. Balanced ternary is symmetric about zero, so
+    negative numbers need no sign bit and no two's-complement: you negate a number
+    by flipping every digit. Base 3 is also the integer base closest to <i>e</i>,
+    the radix-economy optimum, so a trit carries ≈1.58 bits. Two extra signal
+    levels ride alongside the trits for buses: <b>Z</b> (high-impedance — a
+    tri-state driver not driving) and <b>X</b> (contention — strong drivers
+    disagree).
+  </p>
+
+  <h2>The model: switch / gate level</h2>
+  <p>
+    TritLogic simulates at the <b>idealised-trit, gate level</b> — the ternary
+    analogue of a binary logic simulator. Values are discrete; there are no
+    continuous voltages. The core pieces:
+  </p>
+  <ul>
+    <li><b>Combinational solver.</b> An event-driven engine settles the network to
+      a steady state: each component is evaluated, and a change on its output wakes
+      only its downstream consumers (with an oscillation-guard budget for
+      ill-formed feedback). On a well-formed acyclic circuit it settles in one
+      evaluation per component.</li>
+    <li><b>Sequential engine.</b> Clocked elements (flip-flops, registers, RAM,
+      program counters) advance with a 4-phase step: tick the clock → settle →
+      latch on the edge → settle. One instruction or state transition per step.</li>
+    <li><b>Hierarchy.</b> Any selection can be packed into a reusable subcircuit;
+      subcircuits nest and are simulated structurally, all the way down to MIN/MAX
+      and the unary inverters — so a CPU can be opened down to gates.</li>
+    <li><b>Timing &amp; hazards (optional).</b> A timing mode gives each component
+      an <i>integer</i> propagation delay and replays the settle on an event wheel,
+      so reconvergent paths with unequal delay surface real <b>dynamic and static
+      hazards</b> (glitches). Delays are abstract units, not nanoseconds; a
+      subcircuit is charged its internal critical-path delay.</li>
+  </ul>
+
+  <div class="two">
+    <div class="panel does">
+      <h3>What it models</h3>
+      <ul>
+        <li>Three-valued logic over {−1, 0, +1}</li>
+        <li>Gate behaviour (STI/PTI/NTI, MIN, MAX) &amp; truth tables</li>
+        <li>Ternary arithmetic, registers, RAM/ROM, an ALU, a microcoded CPU</li>
+        <li>Tri-state buses with Z / X resolution</li>
+        <li>Propagation delay &amp; glitch (hazard) behaviour, in abstract time</li>
+      </ul>
+    </div>
+    <div class="panel doesnt">
+      <h3>What it does <i>not</i> model</h3>
+      <ul>
+        <li>Continuous voltages, thresholds, or noise margins</li>
+        <li>Analog noise, drift, or device physics</li>
+        <li>Real-world timing in seconds (delays are unit-less)</li>
+        <li>Optical / photonic power or loss</li>
+        <li>Power, area, or fabrication effects</li>
+      </ul>
+      <p class="muted" style="font-size:13px;margin:8px 0 0">
+        Continuous-voltage / analog behaviour is a separate, future direction
+        (an analog mode); the physical photonic side lives in its own workspace.
+      </p>
+    </div>
+  </div>
+
+  <h2>The logic minimizer</h2>
+  <p>
+    The built-in minimizer is the balanced-ternary analogue of binary
+    Quine–McCluskey / K-map SOP reduction. Given a truth table it produces a
+    compact <b>MAX-of-MIN</b> expression over MIN / MAX / STI / PTI / NTI: it covers
+    the <code>f = +1</code> and <code>f = 0</code> onsets independently (decoder
+    literals act as value-subset boxes), enumerates prime implicants, greedy-covers
+    by lowest cost-per-new-minterm, and returns whichever of {minimized, canonical}
+    is cheaper — so the result is <b>never worse than the naive form</b>. It can also
+    materialise the minimized expression as a real placed subcircuit of gates.
+  </p>
+
+  <h2>Correctness</h2>
+  <p>
+    The simulator ships with a self-test suite (130+ pure-function checks) covering
+    conversions, every gate's truth table, the full adder and ripple addition,
+    flip-flop / register / RAM semantics, each kit subcircuit's gate-level
+    equivalence to its native twin, the assemblers, live CPU programs, and the
+    minimizer. They verify the math, not the UI — you can run them yourself from the
+    <b>Tests</b> button in the app. The source is viewable on GitHub.
+  </p>
+
+  <h2>How to cite</h2>
+  <p>
+    If TritLogic is useful in a paper, course, or write-up, a citation is
+    appreciated. The repository carries a
+    <a href="https://github.com/SK000001/tritlogic/blob/main/CITATION.cff">CITATION.cff</a>
+    (GitHub shows a “Cite this repository” button). A plain-text software citation:
+  </p>
+  <pre id="cite">SK000001. (2026). TritLogic — a balanced-ternary logic &amp; circuit simulator (Version 1.0.0) [Software]. https://tern-pi.vercel.app</pre>
+  <div class="citebar">
+    <button class="btn" id="copy-cite">Copy citation</button>
+    <span id="copy-msg" class="muted" style="font-size:13px"></span>
+  </div>
+  <p class="muted" style="font-size:13px">
+    A versioned, archival <b>DOI</b> (e.g. via Zenodo) can be minted when a release
+    is tagged and added to the citation. Author attribution in the citation above is
+    a GitHub-handle placeholder pending a real name.
+  </p>
+
+  <div class="cta">
+    <a class="btn primary" href="app.html">Open the simulator</a>
+    <a class="btn" href="app.html?tutorial=first-gate">Take the guided tour</a>
+    <a class="btn" href="index.html">Home</a>
+  </div>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    TritLogic · idealised-trit logic simulator ·
+    <a href="https://github.com/SK000001/tritlogic">source on GitHub</a> ·
+    distributed as personal / educational — ask first for commercial use.
+  </div>
+</footer>
+
+<script>
+  // Copy the plain-text citation to the clipboard (no app code loaded).
+  (function () {
+    var btn = document.getElementById('copy-cite');
+    var msg = document.getElementById('copy-msg');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var text = document.getElementById('cite').textContent;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function () { msg.textContent = 'Copied to clipboard'; },
+          function () { msg.textContent = 'Press Ctrl/Cmd+C to copy'; }
+        );
+      } else { msg.textContent = 'Press Ctrl/Cmd+C to copy'; }
+    });
+  })();
+</script>
+
+</body>
+</html>

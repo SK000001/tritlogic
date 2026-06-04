@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use TritLogic in your work, please cite it as below."
+title: "TritLogic — a balanced-ternary logic & circuit simulator"
+abstract: >-
+  An in-browser simulator for balanced-ternary ({-1, 0, +1}) digital logic:
+  gates, arithmetic, memory, a microcoded CPU, tri-state buses, a two-level
+  (MAX-of-MIN) logic minimizer, and timing/hazard analysis — all at the
+  idealised-trit (switch/gate) level.
+type: software
+authors:
+  # TODO: replace with your real name (given-names / family-names) for proper
+  # academic attribution; "SK000001" is the GitHub handle placeholder.
+  - name: "SK000001"
+version: "1.0.0"
+date-released: "2026-06-05"
+url: "https://tern-pi.vercel.app"
+repository-code: "https://github.com/SK000001/tritlogic"
+# NOTE: no SPDX license is asserted — the project is currently distributed as
+# "personal / educational; ask first" (see README). A Zenodo DOI can be minted
+# and added here (doi: ...) when a release is archived.
+keywords:
+  - balanced ternary
+  - multi-valued logic
+  - ternary computing
+  - logic simulator
+  - digital logic
+  - educational tool

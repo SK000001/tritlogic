@@ -87,9 +87,11 @@ if (html === before) {
 }
 writeFileSync(`${OUT}/app.html`, html);
 
-// 5) Copy the landing page (index.html) verbatim — it's self-contained (inline
-//    CSS + a tiny vanilla-JS demo + the share-link redirect shim), so it needs
-//    no bundling, just to be served at "/".
+// 5) Copy the self-contained static pages verbatim — the landing page (served at
+//    "/") and the I5 "how it works & what it models" / cite page (served at
+//    "/about"). Both are inline CSS + a tiny vanilla-JS helper, so they need no
+//    bundling.
 writeFileSync(`${OUT}/index.html`, readFileSync('index.html', 'utf8'));
+writeFileSync(`${OUT}/about.html`, readFileSync('about.html', 'utf8'));
 
-console.log(`Built dist/ → index.html (landing) + app.html + app.min.js (${OBFUSCATE ? 'obfuscated' : 'minify-only'}) + styles.css`);
+console.log(`Built dist/ → index.html (landing) + about.html + app.html + app.min.js (${OBFUSCATE ? 'obfuscated' : 'minify-only'}) + styles.css`);
