@@ -1276,7 +1276,7 @@ function packSelection(name, pinRenames) {
   setStatus(`Packed ${inSelComps.length} components into subcircuit "${name}"`);
 }
 
-function boundingBox(items) {
+function boundingBox(items, wireList) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const c of items) {
     const def = compDef(c);
@@ -1284,6 +1284,18 @@ function boundingBox(items) {
     minY = Math.min(minY, c.y);
     maxX = Math.max(maxX, c.x + def.w);
     maxY = Math.max(maxY, c.y + def.h);
+  }
+  // Optionally expand to enclose wire routes too, so orthogonal detours / bends
+  // that bow outside the component cluster aren't clipped (e.g. by Fit).
+  if (wireList) {
+    for (const w of wireList) {
+      for (const p of wirePath(w)) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+    }
   }
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
@@ -2386,12 +2398,19 @@ cv.addEventListener('wheel', (e) => {
 // key and the toolbar Fit button. Scale is clamped to the same [0.3, 3] range
 // as wheel zoom, so a circuit too big to fit at min zoom is at least centred.
 function fitView() {
-  const items = selection.size
+  const sel = selection.size;
+  const items = sel
     ? Array.from(selection).map(getComp).filter(Boolean)
     : comps;
   if (!items.length) { setStatus('nothing to fit'); return; }
   syncCanvasSize();   // fit to the canvas's current real size, not a stale buffer (iframe-safe)
-  const bb = boundingBox(items);
+  // Frame the wires too, not just the components. For a selection, only wires
+  // wholly inside it; for the whole circuit, all of them. Route in id order so
+  // the paths match what draw() produces.
+  const idset = sel ? new Set(items.map(c => c.id)) : null;
+  const fitWires = [...wires].sort((a, b) => a.id - b.id)
+    .filter(w => !idset || (idset.has(w.fromId) && idset.has(w.toId)));
+  const bb = boundingBox(items, fitWires);
   const pad = 40;
   const sx = cv.width  / (bb.w + pad * 2);
   const sy = cv.height / (bb.h + pad * 2);
@@ -2400,7 +2419,7 @@ function fitView() {
   view.tx = cv.width  / 2 - (bb.x + bb.w / 2) * scale;
   view.ty = cv.height / 2 - (bb.y + bb.h / 2) * scale;
   draw();
-  setStatus(selection.size ? 'fit to selection' : 'fit to circuit');
+  setStatus(sel ? 'fit to selection' : 'fit to circuit');
 }
 document.getElementById('btn-fit')?.addEventListener('click', fitView);
 
