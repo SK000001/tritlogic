@@ -246,6 +246,43 @@ const EXAMPLES = {
       ],
     })),
   },
+  'bus-ports': {
+    label: 'Bus-native ports — accumulator loop with no MERGE/SPLIT',
+    build: () => buildExample((c, w) => ({
+      // The same accumulator loop as "Bus datapath", but the REG3 and ALU use
+      // their bus-native word ports (C1 follow-on) directly — the accumulator's
+      // word rides out of acc.Qw straight into alu.Aw, and the ALU's sum rides
+      // out of alu.Rw straight back into acc.Dw. Two single bus wires carry the
+      // whole loop; no MERGE3 / SPLIT3 blocks at all. Operand B is still wired as
+      // plain per-trit constants into the ALU's b pins, showing the bus and
+      // per-trit ports coexisting on one block. Press Play: acc counts 0,1,2,3…
+      comps: [
+        c('clk', 'CLOCK', 60, 360, { value: -1, mode: 'bi' }),
+        c('ld',  'CONST', 60, 150, { value: 1 }),       // load-enable held high
+        c('acc', 'REG3',  200, 120, { q: [0, 0, 0] }),
+        c('cb0', 'CONST', 420, 300, { value: 1 }),      // operand B = +1 word
+        c('cb1', 'CONST', 420, 350, { value: 0 }),
+        c('cb2', 'CONST', 420, 400, { value: 0 }),
+        c('op',  'CONST', 420, 450, { value: 0 }),       // op 0 = ADD
+        c('alu', 'ALU',   560, 200),
+        c('o0',  'OUTPUT', 200, 320, { name: 'acc0' }),
+        c('o1',  'OUTPUT', 270, 320, { name: 'acc1' }),
+        c('o2',  'OUTPUT', 340, 320, { name: 'acc2' }),
+      ],
+      wires: [
+        w('ld', 'out', 'acc', 'ld'), w('clk', 'out', 'acc', 'clk'),
+        // Accumulator word → ALU operand A on a SINGLE bus wire (qbus → abus).
+        w('acc', 'qbus', 'alu', 'abus'),
+        // Operand B = constant +1 word, on plain per-trit pins (coexists w/ bus).
+        w('cb0', 'out', 'alu', 'b0'), w('cb1', 'out', 'alu', 'b1'), w('cb2', 'out', 'alu', 'b2'),
+        w('op', 'out', 'alu', 'op'),
+        // ALU sum word → accumulator data on a SINGLE bus wire (rbus → dbus).
+        w('alu', 'rbus', 'acc', 'dbus'),
+        // Readout taps the live accumulator's per-trit outputs.
+        w('acc', 'q0', 'o0', 'in'), w('acc', 'q1', 'o1', 'in'), w('acc', 'q2', 'o2', 'in'),
+      ],
+    })),
+  },
   'microcode-seq': {
     label: 'Microcode sequencer (µPC walks a control store)',
     build: () => {

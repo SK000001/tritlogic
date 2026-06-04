@@ -390,6 +390,20 @@ TYPES.DFF = {
   isSequential: true,
 };
 
+// ---- bus-native word ports (C1 follow-on) ---------------------------------
+//
+//  REG3 / RAM / ALU carry a 3-trit data WORD. Besides the per-trit pins they
+//  expose a single bus pin (`bus:true`) so a packed word can travel on one wire
+//  with no explicit MERGE3 / SPLIT3. `wordIn` resolves the effective word from
+//  both: an individually-wired per-trit pin wins for its slot, otherwise the
+//  matching slot of the unpacked bus is used (a fully unwired slot is null, so
+//  the existing hold / null-result semantics are unchanged). This is purely
+//  additive — circuits that wire only the per-trit pins behave exactly as before.
+function wordIn(v, names, busName) {
+  const bus = unpackBus(v[busName], names.length);   // all-null if not a bus value
+  return names.map((nm, i) => v[nm] ?? bus[i]);
+}
+
 // ---- 3-trit register ------------------------------------------------------
 //
 //  Three D flip-flops sharing one clock, plus a load-enable line.  On the
@@ -402,29 +416,34 @@ TYPES.DFF = {
 //  ternary RAM block and the CPU register file are built from it.
 
 TYPES.REG3 = {
-  w: 104, h: 120,
+  w: 104, h: 138,
   pins: {
     d0:  { side: 'left',  dx: 0,   dy: 24,  kind: 'in' },
     d1:  { side: 'left',  dx: 0,   dy: 42,  kind: 'in' },
     d2:  { side: 'left',  dx: 0,   dy: 60,  kind: 'in' },
     clk: { side: 'left',  dx: 0,   dy: 84,  kind: 'in' },
     ld:  { side: 'left',  dx: 0,   dy: 102, kind: 'in' },
+    // bus-native data word: wire a packed word straight in / out (C1 follow-on).
+    dbus: { side: 'left',  dx: 0,   dy: 122, kind: 'in',  bus: true },
     q0:  { side: 'right', dx: 104, dy: 24,  kind: 'out' },
     q1:  { side: 'right', dx: 104, dy: 42,  kind: 'out' },
     q2:  { side: 'right', dx: 104, dy: 60,  kind: 'out' },
+    qbus: { side: 'right', dx: 104, dy: 122, kind: 'out', bus: true },
   },
   defaults: () => ({ q: [0, 0, 0], clkPrev: 0 }),
-  eval: (c) => ({ q0: c.state.q[0], q1: c.state.q[1], q2: c.state.q[2] }),
+  eval: (c) => ({ q0: c.state.q[0], q1: c.state.q[1], q2: c.state.q[2],
+                  qbus: packBus(c.state.q) }),
   latch: (c, vIn) => {
     const clk = vIn.clk ?? 0;
     if (c.state.clkPrev !== 1 && clk === 1) {
       // Rising edge.  Load only when the enable line is asserted (+1);
       // hold the stored trits on 0, T, or a floating ld.
       if ((vIn.ld ?? 0) === 1) {
+        const d = wordIn(vIn, ['d0', 'd1', 'd2'], 'dbus');
         c.state.q = [
-          vIn.d0 ?? c.state.q[0],
-          vIn.d1 ?? c.state.q[1],
-          vIn.d2 ?? c.state.q[2],
+          d[0] ?? c.state.q[0],
+          d[1] ?? c.state.q[1],
+          d[2] ?? c.state.q[2],
         ];
       }
     }
@@ -496,7 +515,7 @@ function ramAddr(a0, a1) {
 }
 
 TYPES.RAM = {
-  w: 132, h: 162,
+  w: 132, h: 180,
   // Per-type default delay (A2): address decode + read-mux ≈ two gate levels.
   delay: 2,
   pins: {
@@ -507,9 +526,12 @@ TYPES.RAM = {
     d2:  { side: 'left',  dx: 0,   dy: 100, kind: 'in' },
     we:  { side: 'left',  dx: 0,   dy: 124, kind: 'in' },
     clk: { side: 'left',  dx: 0,   dy: 142, kind: 'in' },
+    // bus-native data word in / out (C1 follow-on); address stays per-trit.
+    dbus: { side: 'left',  dx: 0,   dy: 162, kind: 'in',  bus: true },
     q0:  { side: 'right', dx: 132, dy: 22,  kind: 'out' },
     q1:  { side: 'right', dx: 132, dy: 40,  kind: 'out' },
     q2:  { side: 'right', dx: 132, dy: 58,  kind: 'out' },
+    qbus: { side: 'right', dx: 132, dy: 80,  kind: 'out', bus: true },
   },
   defaults: () => ({
     mem: Array.from({ length: RAM_WORDS }, () => [0, 0, 0]),
@@ -517,9 +539,9 @@ TYPES.RAM = {
   }),
   eval: (c, v) => {
     const idx = ramAddr(v.a0, v.a1);
-    if (idx == null) return { q0: null, q1: null, q2: null };
+    if (idx == null) return { q0: null, q1: null, q2: null, qbus: null };
     const w = c.state.mem[idx];
-    return { q0: w[0], q1: w[1], q2: w[2] };
+    return { q0: w[0], q1: w[1], q2: w[2], qbus: packBus(w) };
   },
   inspector: (c) => memInspectorFields(c, 3),
   latch: (c, vIn) => {
@@ -531,10 +553,11 @@ TYPES.RAM = {
         const idx = ramAddr(vIn.a0, vIn.a1);
         if (idx != null) {
           const w = c.state.mem[idx];
+          const d = wordIn(vIn, ['d0', 'd1', 'd2'], 'dbus');
           c.state.mem[idx] = [
-            vIn.d0 ?? w[0],
-            vIn.d1 ?? w[1],
-            vIn.d2 ?? w[2],
+            d[0] ?? w[0],
+            d[1] ?? w[1],
+            d[2] ?? w[2],
           ];
         }
       }
@@ -603,7 +626,7 @@ TYPES.ROM = {
 //  A null on op or on any operand trit yields an all-null result.
 
 TYPES.ALU = {
-  w: 120, h: 162,
+  w: 120, h: 200,
   // Per-type default delay (A2): the deepest native block — ADD ripples three
   // full-trit stages internally, so it settles ~three gate-delays after its
   // inputs. Gives a mixed datapath a visibly staged wavefront in Timing mode.
@@ -616,15 +639,20 @@ TYPES.ALU = {
     b1: { side: 'left',  dx: 0,   dy: 100, kind: 'in' },
     b2: { side: 'left',  dx: 0,   dy: 118, kind: 'in' },
     op: { side: 'left',  dx: 0,   dy: 142, kind: 'in' },
+    // bus-native operand words: wire two packed words in, one result word out.
+    abus: { side: 'left',  dx: 0,   dy: 164, kind: 'in',  bus: true },
+    bbus: { side: 'left',  dx: 0,   dy: 182, kind: 'in',  bus: true },
     r0: { side: 'right', dx: 120, dy: 22,  kind: 'out' },
     r1: { side: 'right', dx: 120, dy: 40,  kind: 'out' },
     r2: { side: 'right', dx: 120, dy: 58,  kind: 'out' },
     cout: { side: 'right', dx: 120, dy: 82, kind: 'out' },
+    rbus: { side: 'right', dx: 120, dy: 110, kind: 'out', bus: true },
   },
   defaults: () => ({}),
   eval: (_, v) => {
-    const NULL = { r0: null, r1: null, r2: null, cout: null };
-    const a = [v.a0, v.a1, v.a2], b = [v.b0, v.b1, v.b2];
+    const NULL = { r0: null, r1: null, r2: null, cout: null, rbus: null };
+    const a = wordIn(v, ['a0', 'a1', 'a2'], 'abus');
+    const b = wordIn(v, ['b0', 'b1', 'b2'], 'bbus');
     if (v.op == null || a.some(t => t == null) || b.some(t => t == null)) return NULL;
     if (v.op === 0) {
       // ADD — ripple a full-trit add from the low trit to the high.
@@ -633,11 +661,12 @@ TYPES.ALU = {
         const s = ADDER_TABLE[String(a[i] + b[i] + cin)];
         r.push(s.sum); cin = s.cout;
       }
-      return { r0: r[0], r1: r[1], r2: r[2], cout: cin };
+      return { r0: r[0], r1: r[1], r2: r[2], cout: cin, rbus: packBus(r) };
     }
     // op = T → MIN, op = +1 → MAX.  No carry for the logic ops.
     const f = v.op === -1 ? Math.min : Math.max;
-    return { r0: f(a[0], b[0]), r1: f(a[1], b[1]), r2: f(a[2], b[2]), cout: 0 };
+    const r = [f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2])];
+    return { r0: r[0], r1: r[1], r2: r[2], cout: 0, rbus: packBus(r) };
   },
 };
 

@@ -228,7 +228,8 @@ test('REG3 holds its contents through an edge when ld is 0, T, or floating', () 
 });
 test('REG3 eval mirrors the stored trits to q0..q2', () => {
   const reg = { type: 'REG3', state: { q: [-1, 0, 1], clkPrev: 0 } };
-  assertDeepEq(TYPES.REG3.eval(reg), { q0: -1, q1: 0, q2: 1 });
+  // The bus-native port (C1 follow-on) also mirrors the word as a packed bus.
+  assertDeepEq(TYPES.REG3.eval(reg), { q0: -1, q1: 0, q2: 1, qbus: packBus([-1, 0, 1]) });
 });
 
 // ---- ternary RAM ----------------------------------------------------------
@@ -248,10 +249,12 @@ test('RAM eval shows the addressed word; a floating address reads null', () => {
   const def = TYPES.RAM;
   const ram = { type: 'RAM', state: def.defaults() };
   ram.state.mem[ramAddr(1, -1)] = [1, 0, -1];
-  assertDeepEq(def.eval(ram, { a0: 1, a1: -1 }), { q0: 1, q1: 0, q2: -1 }, 'written word:');
-  assertDeepEq(def.eval(ram, { a0: 0, a1: 0 }),  { q0: 0, q1: 0, q2: 0 },  'untouched word:');
+  assertDeepEq(def.eval(ram, { a0: 1, a1: -1 }),
+               { q0: 1, q1: 0, q2: -1, qbus: packBus([1, 0, -1]) }, 'written word:');
+  assertDeepEq(def.eval(ram, { a0: 0, a1: 0 }),
+               { q0: 0, q1: 0, q2: 0, qbus: packBus([0, 0, 0]) }, 'untouched word:');
   assertDeepEq(def.eval(ram, { a0: null, a1: 0 }),
-               { q0: null, q1: null, q2: null }, 'floating address:');
+               { q0: null, q1: null, q2: null, qbus: null }, 'floating address:');
 });
 test('RAM writes the addressed word on a rising edge when we = +1', () => {
   const def = TYPES.RAM;
@@ -262,7 +265,7 @@ test('RAM writes the addressed word on a rising edge when we = +1', () => {
   def.latch(ram, { a0: -1, a1: 1, d0: 1, d1: -1, d2: 1, we: 1, clk:  1 });
   assertDeepEq(ram.state.mem[idx], [1, -1, 1], 'addressed word written:');
   assertDeepEq(def.eval(ram, { a0: 0, a1: 0 }),
-               { q0: 0, q1: 0, q2: 0 }, 'other words untouched:');
+               { q0: 0, q1: 0, q2: 0, qbus: packBus([0, 0, 0]) }, 'other words untouched:');
 });
 test('RAM holds every word through an edge when we is 0, T, or floating', () => {
   const def = TYPES.RAM;
@@ -322,10 +325,36 @@ test('ALU MIN / MAX apply min / max per trit, with no carry', () => {
 test('ALU outputs all-null when op or any operand trit is floating', () => {
   const def = TYPES.ALU;
   const full = { a0: 1, a1: 1, a2: 1, b0: 1, b1: 1, b2: 1, op: 0 };
-  const NULL = { r0: null, r1: null, r2: null, cout: null };
+  const NULL = { r0: null, r1: null, r2: null, cout: null, rbus: null };
   assertDeepEq(def.eval(null, { ...full, op: null }), NULL, 'op floating:');
   assertDeepEq(def.eval(null, { ...full, a1: null }), NULL, 'operand a1 floating:');
   assertDeepEq(def.eval(null, { ...full, b2: null }), NULL, 'operand b2 floating:');
+});
+test('Bus-native ports (C1): REG3 / RAM / ALU accept and emit a packed word', () => {
+  // REG3 loads its whole word from the dbus pin (no per-trit pins wired).
+  const reg = { type: 'REG3', state: TYPES.REG3.defaults() };
+  TYPES.REG3.latch(reg, { clk: -1, ld: 1, dbus: packBus([1, -1, 0]) });
+  TYPES.REG3.latch(reg, { clk:  1, ld: 1, dbus: packBus([1, -1, 0]) });
+  assertDeepEq(reg.state.q, [1, -1, 0], 'REG3 loaded word from dbus:');
+  assertEq(TYPES.REG3.eval(reg).qbus, packBus([1, -1, 0]), 'REG3 emits qbus:');
+
+  // A per-trit pin wins for its own slot; the rest come from the bus.
+  TYPES.REG3.latch(reg, { clk: -1, ld: 1, dbus: packBus([1, 1, 1]), d1: -1 });
+  TYPES.REG3.latch(reg, { clk:  1, ld: 1, dbus: packBus([1, 1, 1]), d1: -1 });
+  assertDeepEq(reg.state.q, [1, -1, 1], 'per-trit d1 overrides bus slot 1:');
+
+  // ALU adds two words delivered on abus / bbus and emits the sum on rbus.
+  const r = TYPES.ALU.eval(null, { op: 0, abus: packBus(intToTrits(5, 3)),
+                                          bbus: packBus(intToTrits(7, 3)) });
+  assertEq(tritsToInt([r.r0, r.r1, r.r2]) + r.cout * 27, 12, 'ALU bus operands add:');
+  assertEq(r.rbus, packBus([r.r0, r.r1, r.r2]), 'ALU emits rbus matching r0..r2:');
+
+  // RAM writes from dbus and reads the word back on qbus.
+  const ram = { type: 'RAM', state: TYPES.RAM.defaults() };
+  TYPES.RAM.latch(ram, { a0: 0, a1: 0, we: 1, clk: -1, dbus: packBus([1, 0, -1]) });
+  TYPES.RAM.latch(ram, { a0: 0, a1: 0, we: 1, clk:  1, dbus: packBus([1, 0, -1]) });
+  assertEq(TYPES.RAM.eval(ram, { a0: 0, a1: 0 }).qbus, packBus([1, 0, -1]),
+           'RAM round-trips a word via dbus → qbus:');
 });
 
 // ---- program counter ------------------------------------------------------
@@ -951,6 +980,29 @@ test('C1 bus datapath: an accumulator loops its word through bus wires', () => {
              'acc increments once per rising edge (bi clock latches every 2 ticks):');
     // The bus still carries the live accumulator word after stepping.
     assertEq(outVals[`${ma.id}:bus`], packBus(acc.state.q), 'bus tracks acc after stepping:');
+  } finally {
+    setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
+    syncCompMap();
+  }
+});
+
+test('C1 bus-native ports: accumulator loops on Qw→Aw / Rw→Dw with no MERGE/SPLIT', () => {
+  const ex = EXAMPLES['bus-ports'].build();
+  // No MERGE/SPLIT blocks at all — the whole word loop is on the native ports.
+  assertEq(ex.comps.some(c => c.type === 'MERGE3' || c.type === 'SPLIT3'), false,
+           'example uses no MERGE3/SPLIT3:');
+  const acc = ex.comps.find(c => c.type === 'REG3');
+  const savedComps = comps, savedWires = wires, savedOutVals = outVals, savedTick = tick;
+  try {
+    setComps(ex.comps); setWires(ex.wires); setOutVals({}); setTick(0);
+    syncCompMap(); simulate();
+    // The accumulator's word is on its bus-native output port before any step.
+    assertEq(outVals[`${acc.id}:qbus`], packBus(acc.state.q), 'acc word is on the Qw port:');
+    const seen = [];
+    for (let i = 0; i < 8; i++) { stepSequential(); seen.push(tritsToInt(acc.state.q)); }
+    assertEq(JSON.stringify(seen), JSON.stringify([1, 1, 2, 2, 3, 3, 4, 4]),
+             'acc increments once per rising edge through the bus ports:');
+    assertEq(outVals[`${acc.id}:qbus`], packBus(acc.state.q), 'Qw tracks acc after stepping:');
   } finally {
     setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     syncCompMap();

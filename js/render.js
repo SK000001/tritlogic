@@ -473,8 +473,11 @@ function drawReg(c) {
   ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
   ctx.fillText('D0', 4, 24); ctx.fillText('D1', 4, 42); ctx.fillText('D2', 4, 60);
   ctx.fillText('CLK', 4, 84); ctx.fillText('LD', 4, 102);
-  ctx.textAlign = 'right';
+  ctx.fillStyle = BUS_COLOR; ctx.fillText('Dw', 4, 122);
+  ctx.fillStyle = '#8a92a1'; ctx.textAlign = 'right';
   ctx.fillText('Q0', t.w-4, 24); ctx.fillText('Q1', t.w-4, 42); ctx.fillText('Q2', t.w-4, 60);
+  ctx.fillStyle = BUS_COLOR; ctx.fillText('Qw', t.w-4, 122);
+  ctx.fillStyle = '#8a92a1';
   // clock-edge triangle marker next to the CLK pin
   ctx.beginPath();
   ctx.moveTo(2, 80); ctx.lineTo(10, 84); ctx.lineTo(2, 88); ctx.closePath();
@@ -506,8 +509,11 @@ function drawRAM(c) {
   ctx.fillText('A0', 4, 22); ctx.fillText('A1', 4, 40);
   ctx.fillText('D0', 4, 64); ctx.fillText('D1', 4, 82); ctx.fillText('D2', 4, 100);
   ctx.fillText('WE', 4, 124); ctx.fillText('CLK', 4, 142);
-  ctx.textAlign = 'right';
+  ctx.fillStyle = BUS_COLOR; ctx.fillText('Dw', 4, 162);
+  ctx.fillStyle = '#8a92a1'; ctx.textAlign = 'right';
   ctx.fillText('Q0', t.w-4, 22); ctx.fillText('Q1', t.w-4, 40); ctx.fillText('Q2', t.w-4, 58);
+  ctx.fillStyle = BUS_COLOR; ctx.fillText('Qw', t.w-4, 80);
+  ctx.fillStyle = '#8a92a1';
   // clock-edge triangle marker next to the CLK pin
   ctx.beginPath();
   ctx.moveTo(2, 138); ctx.lineTo(10, 142); ctx.lineTo(2, 146); ctx.closePath();
@@ -553,12 +559,15 @@ function drawALU(c) {
   ctx.fillText('0:ADD +:MAX', t.w/2, t.h/2 + 18);
   // Pin labels
   ctx.font = '9px monospace'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillStyle = '#8a92a1';
   ctx.fillText('A0', 4, 22); ctx.fillText('A1', 4, 40); ctx.fillText('A2', 4, 58);
   ctx.fillText('B0', 4, 82); ctx.fillText('B1', 4, 100); ctx.fillText('B2', 4, 118);
   ctx.fillText('OP', 4, 142);
-  ctx.textAlign = 'right';
+  ctx.fillStyle = BUS_COLOR; ctx.fillText('Aw', 4, 164); ctx.fillText('Bw', 4, 182);
+  ctx.fillStyle = '#8a92a1'; ctx.textAlign = 'right';
   ctx.fillText('R0', t.w-4, 22); ctx.fillText('R1', t.w-4, 40); ctx.fillText('R2', t.w-4, 58);
   ctx.fillText('C', t.w-4, 82);
+  ctx.fillStyle = BUS_COLOR; ctx.fillText('Rw', t.w-4, 110);
 }
 function drawMUX(c) {
   const t = TYPES.MUX;

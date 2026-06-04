@@ -700,6 +700,14 @@ LOOP:
       <p>The load-enable is what lets many registers share one clock yet
       update independently — only the ones whose <code>ld</code> is asserted
       change.</p>
+      <h4>Bus-native word port (C1)</h4>
+      <p>Besides the per-trit pins, REG3 has a violet
+      <code>Dw</code> input and <code>Qw</code> output that carry the whole
+      3-trit word as one <b>bus</b> wire — so a packed word loads in / reads out
+      without an explicit MERGE3 / SPLIT3. The ports coexist: for any data slot a
+      wired per-trit <code>d<i>n</i></code> pin overrides that slot of
+      <code>Dw</code>, otherwise the bus slot is used. See the <i>Bus-native
+      ports</i> example.</p>
       <h4>Internal state</h4>
       <ul>
         <li><code>q</code> — an array of three stored trits,
@@ -753,6 +761,12 @@ LOOP:
       <code>d0..d2</code> — but only when the write-enable <code>we</code> is
       <code>+1</code>. With <code>we</code> at <code>0</code>, <code>T</code>,
       or floating the memory holds every word through the edge.</p>
+      <h4>Bus-native word port (C1)</h4>
+      <p>The data word has a violet <code>Dw</code> input and <code>Qw</code>
+      output that carry the whole 3-trit word on one <b>bus</b> wire (the address
+      stays per-trit). Write a packed word straight from <code>Dw</code> and read
+      the addressed word back on <code>Qw</code> — no MERGE3 / SPLIT3. A wired
+      per-trit <code>d<i>n</i></code> still overrides its slot of <code>Dw</code>.</p>
       <h4>Editing the contents</h4>
       <p>Besides clock-driven writes, you can hand-author the memory: select the
       RAM and the inspector shows <b>one text field per word</b>. Type each word
@@ -850,6 +864,14 @@ LOOP:
       <p>If <code>op</code> or any operand trit is <code>null</code> the
       whole result reads <code>null</code> — a floating input yields a
       floating output, as everywhere else in the simulator.</p>
+      <h4>Bus-native word ports (C1)</h4>
+      <p>The ALU also has violet bus ports: two operand inputs <code>Aw</code> /
+      <code>Bw</code> and a result output <code>Rw</code>, each carrying a whole
+      3-trit word on one <b>bus</b> wire — so two packed words go in and the sum
+      comes out without any MERGE3 / SPLIT3. The bus and per-trit ports coexist
+      (a wired per-trit <code>a<i>n</i></code>/<code>b<i>n</i></code> overrides its
+      slot of the bus), so you can mix a bus operand with per-trit constants — see
+      the <i>Bus-native ports</i> example. <code>cout</code> stays a single trit.</p>
       <h4>Role in the CPU</h4>
       <p>In the Phase 7 datapath the ALU's <code>a</code> input is the
       accumulator (ACC) and <code>b</code> is the instruction's operand;

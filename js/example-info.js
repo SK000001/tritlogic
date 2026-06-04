@@ -19,7 +19,7 @@ export const EXAMPLE_INFO_CATEGORIES = [
   ['Logic & inverters',  ['sti-inverter', 'sti-chain', 'min-max', 'three-way-branch']],
   ['Arithmetic',         ['half-adder', 'full-adder', 'ripple-3', 'alu-demo']],
   ['Routing & memory',   ['mux-demo', 'd-storage', 't-flop', 'ram-store', 'rom-lookup', 'pc-demo', 'tryte-io']],
-  ['Buses',              ['tristate-bus', 'regfile-bus', 'word-bus', 'regfile-wordbus', 'tryte-bus', 'bus-datapath']],
+  ['Buses',              ['tristate-bus', 'regfile-bus', 'word-bus', 'regfile-wordbus', 'tryte-bus', 'bus-datapath', 'bus-ports']],
   ['CPU',                ['cpu', 'cpu-structural', 'cpu2']],
   ['Microcode',          ['microcode-seq', 'microcode-fields', 'microcode-dispatch', 'cpu3', 'cpu3-full']],
   ['Neural net',         ['ternary-mac', 'ternary-layer', 'ternary-mlp']],
@@ -553,6 +553,33 @@ export const EXAMPLE_INFO = {
       operand" inner loop, but shown with the data travelling as words on buses.
       Open the <b>Wave</b> panel to watch the accumulator climb. It is the bridge
       between the plumbing examples (buses) and the full CPUs.</p>`,
+  },
+
+  'bus-ports': {
+    name: 'Bus-native ports (no MERGE/SPLIT)',
+    tagline: 'The accumulator loop again — but the word ports are built into REG3 and ALU',
+    body: `
+      <p>The very same accumulator loop as <b>Bus datapath</b>, with the MERGE3 /
+      SPLIT3 plumbing removed. REG3 and the ALU each carry a built-in
+      <span style="color:#a98eff">bus word port</span> (the violet
+      <code>Dw</code> / <code>Qw</code> / <code>Aw</code> / <code>Rw</code> pins),
+      so a packed word travels straight from one block into the next on a single
+      wire — no explicit merge/split needed.</p>
+      <pre class="info-diagram">
+        ┌──────────────── word bus ◀───────────────┐
+        ▼                                           │
+   ┌────────┐  Qw ═══bus═══▶ Aw ┌─────┐             │
+   │  ACC   │───────────────────│ ALU │ Rw ═══bus═══┘ (back to ACC.Dw)
+   │ (REG3) │           b0..b2 ▶│     │
+   └───▲────┘        (constants)└─────┘
+       │ clk           (each rising edge: ACC ← ALU(ACC, +1))
+      </pre>
+      <p>Notice operand B is still wired as three plain per-trit constants into the
+      ALU's <code>b0..b2</code> pins: the bus port and the per-trit pins
+      <em>coexist</em> on the same block, and for any slot an individually-wired
+      trit pin overrides the bus. This is the convenience layer over the bus
+      primitives — fewer blocks for the common "move a whole word" case. Press
+      <b>Play</b> and watch the accumulator climb exactly as before.</p>`,
   },
 
   // ---- CPU -----------------------------------------------------------------
