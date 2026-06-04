@@ -2440,6 +2440,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '-' || e.key === '_') { zoomAt(1/1.1, cv.width / 2, cv.height / 2); }
   if (e.key === 'Escape') {
     setPendingWire(null); selection.clear(); setSelectedWire(null);
+    if (tool !== 'select') setTool('select');   // also drop out of place / delete mode
     updateInspector(); draw();
   }
 });
