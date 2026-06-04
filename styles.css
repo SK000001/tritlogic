@@ -405,3 +405,58 @@
     mix-blend-mode: multiply;
   }
   body.crt header { box-shadow: inset 0 -1px 0 var(--border-strong); }
+
+  /* I2 — guided tutorials: highlight, picker cards, driver panel. */
+  .tut-highlight {
+    outline: 2px solid var(--accent) !important;
+    outline-offset: 2px; border-radius: 6px;
+    animation: tutPulse 1.1s ease-in-out infinite;
+  }
+  @keyframes tutPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(110,168,255,0.55); }
+    50%      { box-shadow: 0 0 0 6px rgba(110,168,255,0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .tut-highlight { animation: none; } }
+
+  #tutorials-list .cat {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin: 12px 0 6px;
+  }
+  .tut-card {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 7px; padding: 10px 12px; margin-bottom: 8px;
+  }
+  .tut-card-main { display: flex; flex-direction: column; flex: 1; }
+  .tut-card-main b { font-size: 14px; }
+  .tut-card-main span { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .tut-start { border-color: var(--accent); color: var(--accent); white-space: nowrap; }
+
+  #tut-panel {
+    position: fixed; left: 16px; bottom: 16px; width: 340px; max-height: 70vh;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 60;
+    display: flex; flex-direction: column; font-size: 13px;
+  }
+  #tut-panel .tut-head {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: var(--panel-2); border-bottom: 1px solid var(--border);
+    border-radius: 8px 8px 0 0;
+  }
+  #tut-panel .tut-head b { color: var(--accent); }
+  .tut-progress { color: var(--muted); font-size: 11px; }
+  .tut-barwrap { height: 3px; background: var(--panel-3); }
+  .tut-barfill { height: 3px; width: 0; background: var(--accent); transition: width .25s; }
+  #tut-text { padding: 12px; line-height: 1.5; overflow-y: auto; }
+  #tut-text b { color: var(--text); }
+  .tut-status { padding: 0 12px 8px; font-size: 12px; min-height: 16px; }
+  .tut-status.ok   { color: var(--t-pos); }
+  .tut-status.wait { color: var(--muted); }
+  .tut-nav {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    border-top: 1px solid var(--border);
+  }
+  #tut-next.ready { border-color: var(--accent); color: var(--accent); }
+  #tut-next:disabled, #tut-back:disabled { opacity: .4; cursor: default; }
+  body.embed #tut-panel { display: none !important; }

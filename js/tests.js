@@ -39,6 +39,7 @@ export function registerTests(deps) {
     simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
     duplicateSelection, nudgeSelection, pickBootExample,
     isEmbed, shareParamFrom, fullAppUrlFromEmbed, buildEmbedCode,
+    pickBootTutorial, TUTORIALS, TUTORIAL_LIST,
   } = deps;
 
 const TESTS = [];
@@ -2193,6 +2194,57 @@ test('I4 buildEmbedCode emits a valid iframe snippet that re-loads in embed mode
   assertEq(shareParamFrom(url.hash, url.search), '1ENC', 'snippet URL carries the circuit:');
   // Custom dimensions are honoured.
   assertEq(buildEmbedCode('x', 'e', { width: 800, height: 300 }).includes('width="800" height="300"'), true, 'custom size:');
+});
+
+// ---- I2 guided tutorials -------------------------------------------------
+//
+// Each tutorial is an ordered list of steps with an instruction and optional
+// check()/onEnter(api). These tests guard the data shape, that the picker only
+// lists real tutorials, that every preset a step loads actually exists, and that
+// no check() throws when handed an empty circuit.
+test('I2 pickBootTutorial resolves only known ?tutorial= keys', () => {
+  assertEq(pickBootTutorial('?tutorial=first-gate'), 'first-gate', 'a real lesson resolves:');
+  assertEq(pickBootTutorial('?x=1&tutorial=run-cpu'), 'run-cpu', 'mid-query resolves:');
+  assertEq(pickBootTutorial(''), null, 'empty:');
+  assertEq(pickBootTutorial('?tutorial='), null, 'blank:');
+  assertEq(pickBootTutorial('?tutorial=nope'), null, 'unknown key:');
+});
+test('I2 tutorials are well-formed and the picker lists only real ones', () => {
+  for (const k in TUTORIALS) {
+    const t = TUTORIALS[k];
+    if (!t.name || !t.tagline) throw new Error(`${k}: missing name/tagline`);
+    if (!Array.isArray(t.steps) || t.steps.length === 0) throw new Error(`${k}: no steps`);
+    t.steps.forEach((s, i) => {
+      if (typeof s.text !== 'string' || !s.text) throw new Error(`${k} step ${i}: no text`);
+      if (s.check && typeof s.check !== 'function') throw new Error(`${k} step ${i}: check not a fn`);
+      if (s.onEnter && typeof s.onEnter !== 'function') throw new Error(`${k} step ${i}: onEnter not a fn`);
+    });
+  }
+  for (const [, keys] of TUTORIAL_LIST)
+    for (const k of keys)
+      if (!TUTORIALS[k]) throw new Error(`picker lists a missing tutorial: ${k}`);
+});
+test('I2 every example a tutorial loads exists, and no check throws on an empty circuit', () => {
+  // Mock api: onEnter only calls loadExample/clearCanvas; record the loads.
+  const loaded = [];
+  const onEnterApi = { loadExample: (n) => loaded.push(n), clearCanvas: () => {} };
+  // A defaults-only api so every check() returns a boolean without throwing.
+  const emptyApi = {
+    loadExample: () => {}, clearCanvas: () => {},
+    countType: () => 0, firstType: () => null, byName: () => null,
+    inVal: () => null, outVal: () => null, wireBetween: () => false, modalOpen: () => false,
+  };
+  for (const k in TUTORIALS) {
+    for (const s of TUTORIALS[k].steps) {
+      if (s.onEnter) s.onEnter(onEnterApi);
+      if (s.check) {
+        const r = s.check(emptyApi);
+        if (typeof r !== 'boolean') throw new Error(`${k}: check did not return a boolean`);
+      }
+    }
+  }
+  for (const name of loaded)
+    if (!EXAMPLES[name]) throw new Error(`a tutorial loads a missing example: ${name}`);
 });
 
 // ---- All-structural CPU --------------------------------------------------

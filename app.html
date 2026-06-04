@@ -36,6 +36,7 @@
   <button id="btn-timing" title="Timing mode — watch signals propagate with per-gate delays, and spot glitches">Timing</button>
   <button id="btn-tests" title="Run the built-in self-test suite">Tests</button>
   <button id="btn-info" title="Component reference — select a component first to jump to its page">Info</button>
+  <button id="btn-learn" title="Guided, interactive tutorials — learn by building">Learn</button>
   <button id="btn-crt" title="Toggle retro CRT theme">CRT</button>
   <span class="spacer"></span>
   <select id="example-select" title="Load a preset circuit"
@@ -447,6 +448,37 @@
       </div>
       <div id="dbg-mem" style="font-family: monospace; font-size: 11px; padding: 4px 0;"></div>
     </div>
+  </div>
+</div>
+
+<!-- I2 — Tutorials picker modal -->
+<div class="modal-bg" id="tutorials-modal">
+  <div class="modal" style="min-width: 520px;">
+    <h2>Guided tutorials <button class="btn close" id="tutorials-close">close</button></h2>
+    <p style="color: var(--muted); font-size: 12px; margin: 0 0 10px 0;">
+      Short, interactive lessons. Each guides you step by step in the live canvas
+      and checks your progress as you go.
+    </p>
+    <div id="tutorials-list"></div>
+  </div>
+</div>
+
+<!-- I2 — Tutorial driver panel — floats over the canvas (bottom-left) so the
+     user can act on the circuit while following along. -->
+<div id="tut-panel" style="display: none;">
+  <div class="tut-head">
+    <b id="tut-title">Tutorial</b>
+    <span id="tut-progress" class="tut-progress">Step 1 of 1</span>
+    <span style="flex:1;"></span>
+    <button class="btn close" id="tut-exit" title="Exit the tutorial">exit</button>
+  </div>
+  <div class="tut-barwrap"><div id="tut-bar" class="tut-barfill"></div></div>
+  <div id="tut-text" class="tut-text"></div>
+  <div id="tut-status" class="tut-status"></div>
+  <div class="tut-nav">
+    <button class="btn" id="tut-back">← Back</button>
+    <span style="flex:1;"></span>
+    <button class="btn" id="tut-next">Next →</button>
   </div>
 </div>
 

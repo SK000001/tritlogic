@@ -22,6 +22,7 @@ import {
 } from './assembler.js';
 import { minimizeReport, materializeMinimized } from './minimizer.js';
 import { createExamples } from './examples.js';
+import { TUTORIALS, TUTORIAL_LIST } from './tutorials.js';
 import { registerTests } from './tests.js';
 import { createRender } from './render.js';
 import { createEngine } from './engine.js';
@@ -2877,6 +2878,157 @@ document.getElementById('info-close').addEventListener('click', () => closeModal
 document.getElementById('info-tab-components').addEventListener('click', () => setInfoTab('components'));
 document.getElementById('info-tab-examples').addEventListener('click', () => setInfoTab('examples'));
 
+// ============================================================================
+//  I2 — GUIDED TUTORIALS
+// ============================================================================
+//
+// An interactive lesson driver: shows one step at a time in a floating panel,
+// pulses the UI element to act on, and polls a per-step check() against the live
+// circuit so the user genuinely builds/drives it (rather than just reading).
+
+let _tutorial = null;     // the active tutorial object, or null
+let _tutStep = 0;         // current step index
+let _tutDone = false;     // has the current step's check passed?
+let _tutPoll = null;      // setInterval handle while a tutorial is active
+let _tutTarget = null;    // currently-highlighted DOM element
+
+// Read-only (plus a couple of safe actions) view of the app handed to step
+// check()/onEnter() so lessons can inspect what the user did and set the stage.
+function tutorialApi() {
+  return {
+    loadExample: (name) => loadExampleNamed(name),
+    clearCanvas: () => {
+      pushHistory();
+      setComps([]); setWires([]); setNextCompId(1); setNextWireId(1); syncCompMap();
+      setOutVals({}); selection.clear(); setSelectedWire(null); setTick(0);
+      invalidatePathCache(); simulate(); draw(); drawWaves(); updateInspector();
+    },
+    countType: (t) => comps.filter(c => c.type === t).length,
+    firstType: (t) => comps.find(c => c.type === t) || null,
+    byName: (name) => comps.find(c => c.state && c.state.name === name) || null,
+    inVal: (c, port = 'in') => inputValueFromWires({ comps, wires, outVals }, c.id, port),
+    outVal: (c, port = 'out') => outVals[`${c.id}:${port}`] ?? null,
+    wireBetween: (fromType, toType) => wires.some(w => {
+      const a = getComp(w.fromId), b = getComp(w.toId);
+      return a && b && a.type === fromType && b.type === toType;
+    }),
+    modalOpen: (id) => { const el = document.getElementById(id); return !!el && el.classList.contains('open'); },
+  };
+}
+
+function setTutorialHighlight(selector) {
+  if (_tutTarget) { _tutTarget.classList.remove('tut-highlight'); _tutTarget = null; }
+  if (!selector) return;
+  const el = document.querySelector(selector);
+  if (el) { el.classList.add('tut-highlight'); _tutTarget = el; }
+}
+
+function startTutorial(key) {
+  const t = TUTORIALS[key];
+  if (!t) return;
+  closeModal('tutorials-modal'); closeModal('info-modal');
+  _tutorial = t; _tutStep = -1;
+  document.getElementById('tut-panel').style.display = 'flex';
+  enterTutorialStep(0);
+  if (!_tutPoll) _tutPoll = setInterval(checkTutorialStep, 250);
+}
+
+function endTutorial() {
+  setTutorialHighlight(null);
+  _tutorial = null;
+  if (_tutPoll) { clearInterval(_tutPoll); _tutPoll = null; }
+  document.getElementById('tut-panel').style.display = 'none';
+}
+
+function enterTutorialStep(i) {
+  if (!_tutorial) return;
+  _tutStep = i;
+  _tutDone = false;
+  const step = _tutorial.steps[i];
+  if (step.onEnter) { try { step.onEnter(tutorialApi()); } catch (e) { console.warn('tutorial onEnter:', e); } }
+  setTutorialHighlight(step.target || null);
+  renderTutorialPanel();
+  checkTutorialStep();   // a step may already be satisfied (e.g. onEnter set it up)
+}
+
+// Poll: has the current step been accomplished? Updates the panel's Next button.
+function checkTutorialStep() {
+  if (!_tutorial) return;
+  const step = _tutorial.steps[_tutStep];
+  const done = step.check ? !!safeCheck(step.check) : true;
+  if (done !== _tutDone) { _tutDone = done; renderTutorialPanel(); }
+}
+function safeCheck(fn) { try { return fn(tutorialApi()); } catch (e) { return false; } }
+
+function renderTutorialPanel() {
+  if (!_tutorial) return;
+  const n = _tutorial.steps.length;
+  const i = _tutStep;
+  const step = _tutorial.steps[i];
+  const isLast = i === n - 1;
+  const checkable = !!step.check;
+  document.getElementById('tut-title').textContent = _tutorial.name;
+  document.getElementById('tut-progress').textContent = `Step ${i + 1} of ${n}`;
+  document.getElementById('tut-bar').style.width = `${((i + 1) / n) * 100}%`;
+  document.getElementById('tut-text').innerHTML = step.text;
+  const status = document.getElementById('tut-status');
+  if (!checkable) { status.textContent = ''; status.className = 'tut-status'; }
+  else if (_tutDone) { status.textContent = '✓ Done — continue'; status.className = 'tut-status ok'; }
+  else { status.textContent = 'Do the action above to continue…'; status.className = 'tut-status wait'; }
+  const back = document.getElementById('tut-back');
+  const next = document.getElementById('tut-next');
+  back.disabled = i === 0;
+  // Next is enabled for informational steps, or once a checkable step is done.
+  next.disabled = checkable && !_tutDone;
+  next.textContent = isLast ? 'Finish' : 'Next →';
+  next.classList.toggle('ready', !next.disabled);
+}
+
+function tutorialNext() {
+  if (!_tutorial) return;
+  if (_tutStep >= _tutorial.steps.length - 1) { endTutorial(); return; }
+  enterTutorialStep(_tutStep + 1);
+}
+function tutorialBack() {
+  if (!_tutorial || _tutStep === 0) return;
+  enterTutorialStep(_tutStep - 1);
+}
+
+// Tutorials picker modal — grouped list with a Start button per lesson.
+function openTutorialsModal() {
+  const host = document.getElementById('tutorials-list');
+  let html = '';
+  for (const [cat, keys] of TUTORIAL_LIST) {
+    html += `<div class="cat">${escapeHtml(cat)}</div>`;
+    for (const k of keys) {
+      const t = TUTORIALS[k];
+      if (!t) continue;
+      html += `<div class="tut-card" data-key="${k}">` +
+              `<div class="tut-card-main"><b>${escapeHtml(t.name)}</b>` +
+              `<span>${escapeHtml(t.tagline)}</span></div>` +
+              `<button class="btn tut-start" data-key="${k}">Start →</button></div>`;
+    }
+  }
+  host.innerHTML = html;
+  host.querySelectorAll('.tut-start').forEach(b =>
+    b.addEventListener('click', () => startTutorial(b.dataset.key)));
+  openModal('tutorials-modal');
+}
+document.getElementById('btn-learn')?.addEventListener('click', openTutorialsModal);
+document.getElementById('tutorials-close')?.addEventListener('click', () => closeModal('tutorials-modal'));
+document.getElementById('tut-next')?.addEventListener('click', tutorialNext);
+document.getElementById('tut-back')?.addEventListener('click', tutorialBack);
+document.getElementById('tut-exit')?.addEventListener('click', endTutorial);
+
+// I2 — landing-page deep link `?tutorial=<key>` opens straight into a lesson.
+// Pure + exported for tests (every landing tutorial link must name a real one).
+function pickBootTutorial(search) {
+  const m = (search || '').match(/[?&]tutorial=([^&]+)/);
+  if (!m) return null;
+  let key; try { key = decodeURIComponent(m[1]); } catch (e) { key = m[1]; }
+  return TUTORIALS[key] ? key : null;
+}
+
 // ---- assembler modal ------------------------------------------------------
 function openAsmModal() {
   // Populate the examples dropdown on first open (idempotent — clearing
@@ -5058,6 +5210,7 @@ const { TESTS, runAllTests } = registerTests({
   simulateTimed, switchingKeysAt, subLumpDelay, simulateSubInstance, stepSequential, syncCompMap, undo, redo,
   duplicateSelection, nudgeSelection, pickBootExample,
   isEmbed, shareParamFrom, fullAppUrlFromEmbed, buildEmbedCode,
+  pickBootTutorial, TUTORIALS, TUTORIAL_LIST,
 });
 
 
@@ -5179,7 +5332,12 @@ refreshSubLib();
 refreshGateLib();
 // A share link (`#c=…`) loads its circuit (async — gunzips), else the default
 // example. Runs last so the rest of BOOT is set up before the circuit lands.
-bootCircuit();
+// A `?tutorial=<key>` deep link (from the landing page) then opens that lesson —
+// after boot, since the lesson's first step sets its own stage.
+bootCircuit().then(() => {
+  const tk = pickBootTutorial(location.search);
+  if (tk) startTutorial(tk);
+});
 
 
 // ---- ESM shim for the headless test runner -------------------------------
