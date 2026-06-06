@@ -1048,7 +1048,8 @@ export const EXAMPLE_INFO = {
     tagline: 'The value-level twin of the taped-out photonic ternary crossbar',
     body: `
       <p>This is the <b>logical twin</b> of the real photonic chip in this project's
-      <code>photonic/</code> workspace — a taped-out <b>3×3 ternary-weight optical
+      <a href="https://github.com/SK000001/photonic" target="_blank" rel="noopener" style="color: var(--accent)"><code>photonic/</code></a>
+      workspace — a taped-out <b>3×3 ternary-weight optical
       crossbar</b>. It computes the same thing the chip does, in trits, so the two
       can be checked for <b>numerical agreement</b> (Strategic Push 2, the
       Photonic-AI bridge).</p>
