@@ -22,7 +22,7 @@ export const EXAMPLE_INFO_CATEGORIES = [
   ['Buses',              ['tristate-bus', 'regfile-bus', 'word-bus', 'regfile-wordbus', 'tryte-bus', 'bus-datapath', 'bus-ports']],
   ['CPU',                ['cpu', 'cpu-structural', 'cpu2']],
   ['Microcode',          ['microcode-seq', 'microcode-fields', 'microcode-dispatch', 'cpu3', 'cpu3-full']],
-  ['Neural net',         ['ternary-mac', 'ternary-layer', 'ternary-mlp', 'ternary-xor', 'ternary-mac-seq']],
+  ['Neural net',         ['ternary-mac', 'ternary-layer', 'ternary-mlp', 'ternary-xor', 'ternary-mac-seq', 'photonic-crossbar']],
 ];
 
 export const EXAMPLE_INFO = {
@@ -1042,5 +1042,38 @@ export const EXAMPLE_INFO = {
       swept over time. Press <b>▶ Play</b> and watch <code>sr0/sr1/sr2</code> fill in
       one neuron at a time. This is the architecture a photonic accelerator uses: a
       small number of physical MAC lanes, reused cycle after cycle.</p>`,
+  },
+  'photonic-crossbar': {
+    name: 'Photonic 3×3 crossbar twin',
+    tagline: 'The value-level twin of the taped-out photonic ternary crossbar',
+    body: `
+      <p>This is the <b>logical twin</b> of the real photonic chip in this project's
+      <code>photonic/</code> workspace — a taped-out <b>3×3 ternary-weight optical
+      crossbar</b>. It computes the same thing the chip does, in trits, so the two
+      can be checked for <b>numerical agreement</b> (Strategic Push 2, the
+      Photonic-AI bridge).</p>
+      <pre class="info-diagram">
+   x0 ─┬─▶ tile(0,0) ─┐   tile(0,1) ─┐   tile(0,2) ─┐
+   x1 ─┼─▶ tile(1,0) ─┼┐  tile(1,1) ─┼┐  tile(1,2) ─┼┐
+   x2 ─┼─▶ tile(2,0) ─┼┼▶ tile(2,1) ─┼┼▶ tile(2,2) ─┼┼▶
+       │   (col 0)    ▼▼   (col 1)    ▼▼   (col 2)   ▼▼
+       │             y0                y1             y2
+       └──── shared input vector fans into every column ────┘
+
+   y[j] = Σ_i  W[i][j] · x[i]      (column j coherently sums its tiles)
+      </pre>
+      <p>On the chip, input light enters on three <b>rows</b>; each <b>tile</b> is an
+      MZI weight cell whose heater phase sets a ternary weight
+      (φ = π/2 → <code>−1</code>, π → <code>0</code>, 3π/2 → <code>+1</code>); each
+      output <b>column</b> optically sums the weighted inputs. Here every column is
+      one <b>MAC3</b> dot product (the multiply-by-trit of a tile + the column's sum),
+      and the shared <code>x0/x1/x2</code> fan into all three columns — exactly the
+      weight matrix indexing <code>w<sub>ij</sub></code> = tile (input row <i>i</i>,
+      output column <i>j</i>).</p>
+      <p>The defaults give <code>y = (+2, 0, −2)</code>. The point isn't the numbers —
+      it's that the pure model <code>crossbarMac(W, x)</code> in
+      <code>photonic-twin.js</code> and this kit circuit are proven equal on every
+      weight/input by the P2 self-test, so "what the chip should compute" is pinned
+      down before the optics (loss, extinction, noise — that's P3) enter the picture.</p>`,
   },
 };

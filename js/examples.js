@@ -1831,6 +1831,63 @@ const EXAMPLES = {
       }));
     },
   },
+  'photonic-crossbar': {
+    label: 'Photonic 3×3 crossbar twin — y = Wᵀ·x',
+    build: () => {
+      // P2 — the value-level LOGICAL TWIN of the photonic 3×3 ternary-weight
+      // crossbar (photonic/scripts/05_crossbar_3x3.py). Same compute, built from
+      // the Neural-Net kit so the two agree numerically (see photonic-twin.js +
+      // the P2 self-test).
+      //
+      // The crossbar has 3 input rows and 3 output columns; tile (i,j) is an MZI
+      // weight cell holding ternary W[i][j]; column j coherently SUMS the weighted
+      // inputs:  y[j] = Σ_i W[i][j] · x[i].  Here each output column j is one MAC3
+      // block (a ternary dot product) over the shared input vector x and that
+      // column's three weights w0j/w1j/w2j — the multiply-by-trit of a tile and the
+      // column combiner's sum, exactly as the photonic mesh does it.
+      //
+      // Weight naming is the crossbar's orientation: `w<i><j>` = tile (input row i,
+      // output column j) — note this is the TRANSPOSE of ternary-layer's
+      // [output][input] labelling.
+      //
+      // Defaults:  x = (+1, +1, T),  W (input-major) below  → y = (+2, 0, −2).
+      subcircuitDefs['MAC3'] = buildMac3Def();
+      const xv = [1, 1, -1];
+      const W = [[1, -1, 0],     // input 0 → outputs 0,1,2
+                 [0, 1, -1],     // input 1 → outputs 0,1,2
+                 [-1, 0, 1]];    // input 2 → outputs 0,1,2
+      return buildExample((c, w) => {
+        const comps = [];
+        const wires = [];
+        // Shared activation vector — one column on the left, fanning to every
+        // output column's MAC3 (the input row that feeds all tiles in its row).
+        for (let i = 0; i < 3; i++)
+          comps.push(c('x' + i, 'INPUT', 40, 280 + i * 46, { value: xv[i], name: 'x' + i }));
+        for (let j = 0; j < 3; j++) {
+          const rowY = 40 + j * 210;
+          // Column j's three tile weights W[0][j], W[1][j], W[2][j].
+          for (let i = 0; i < 3; i++)
+            comps.push(c('w' + i + j, 'INPUT', 220, rowY + i * 46,
+                        { value: W[i][j], name: 'w' + i + j }));
+          comps.push(c('mac' + j, 'SUB:MAC3', 430, rowY));
+          comps.push(c('y' + j + 'lo', 'OUTPUT', 700, rowY + 40, { name: 'y' + j + 'lo' }));
+          comps.push(c('y' + j + 'hi', 'OUTPUT', 700, rowY + 90, { name: 'y' + j + 'hi' }));
+          // tile weights → this column's MAC3 weight pins
+          wires.push(w('w0' + j, 'out', 'mac' + j, 'w0'));
+          wires.push(w('w1' + j, 'out', 'mac' + j, 'w1'));
+          wires.push(w('w2' + j, 'out', 'mac' + j, 'w2'));
+          // shared input vector fans into every column's MAC3
+          wires.push(w('x0', 'out', 'mac' + j, 'x0'));
+          wires.push(w('x1', 'out', 'mac' + j, 'x1'));
+          wires.push(w('x2', 'out', 'mac' + j, 'x2'));
+          // column sum (2-trit, value = 3·hi + lo)
+          wires.push(w('mac' + j, 'lo', 'y' + j + 'lo', 'in'));
+          wires.push(w('mac' + j, 'hi', 'y' + j + 'hi', 'in'));
+        }
+        return { comps, wires };
+      });
+    },
+  },
 };
 
 

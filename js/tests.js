@@ -27,6 +27,7 @@ import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
 import { minimizeTernary, evalMinimizedExpr, minimizedGateCount,
          canonicalGateCount, materializeMinimized } from './minimizer.js';
 import { ternarizeAbsmean, evalTernaryXorNet, trainTernaryXor } from './ternary-train.js';
+import { crossbarMac, crossbarMacFromPhases, tritToPhase, phaseToTrit } from './photonic-twin.js';
 
 export function registerTests(deps) {
   const {
@@ -588,6 +589,107 @@ test('P1 slice 2 — time-multiplexed MAC computes a 3-neuron layer with ONE MAC
   } finally {
     setComps(savedComps); setWires(savedWires); setOutVals(savedOutVals); setTick(savedTick);
     syncCompMap();
+  }
+});
+
+// ---- P2 photonic crossbar twin (value-level bridge) ----------------------
+// The photonic 3×3 crossbar's compute, modelled at the value level, must agree
+// numerically with the TritLogic Neural-Net kit on the same weights/inputs —
+// that agreement IS Strategic Push 2's deliverable.
+
+test('P2 photonic-twin: crossbarMac = y_j = Σ_i W_ij·x_i, plus the MZI phase encoding', () => {
+  // Device weight encoding from the SAX model: φ = π/2 → −1, π → 0, 3π/2 → +1.
+  assertEq(tritToPhase(-1), Math.PI / 2,     'tritToPhase(−1) = π/2:');
+  assertEq(tritToPhase(0),  Math.PI,         'tritToPhase(0) = π:');
+  assertEq(tritToPhase(1),  3 * Math.PI / 2, 'tritToPhase(+1) = 3π/2:');
+  for (const t of [-1, 0, 1]) assertEq(phaseToTrit(tritToPhase(t)), t, `phase round-trips trit ${t}:`);
+  // A small heater-trim error still reads as the intended weight.
+  assertEq(phaseToTrit(Math.PI / 2 + 0.2), -1, 'slightly-off φ still snaps to −1:');
+
+  // crossbarMac on a hand-checked case: y = (+2, 0, −2) for the preset defaults.
+  const Wd = [[1, -1, 0], [0, 1, -1], [-1, 0, 1]];
+  assertDeepEq(crossbarMac(Wd, [1, 1, -1]), [2, 0, -2], 'crossbarMac default case:');
+  // The column sum is genuinely [input i][output j]: column 0 reads W[*][0].
+  assertEq(crossbarMac([[1, 0, 0], [1, 0, 0], [1, 0, 0]], [1, 1, 1])[0], 3, 'column 0 sums input rows:');
+  // Programming via heater phases gives the same answer.
+  const phaseGrid = Wd.map(row => row.map(tritToPhase));
+  assertDeepEq(crossbarMacFromPhases(phaseGrid, [1, 1, -1]), [2, 0, -2], 'from-phases matches:');
+});
+
+test('P2 functional MAC twin: Neural-Net kit MAC3 agrees NUMERICALLY with the crossbar model', () => {
+  // The core P2 check: each output column of the photonic crossbar is one MAC3
+  // dot product. Drive MAC3 directly with column j's weights {W[0][j],W[1][j],
+  // W[2][j]} + the shared input vector, decode its 2-trit output (lo + 3·hi),
+  // and assert it equals crossbarMac(W,x)[j]. Exhaustive over a single column's
+  // 3^6 weight×input space, then random over full 3×3 matrices.
+  const colVal = (wcol, x) => {
+    const o = simulateSubInstance({ type: 'SUB:MAC3', state: {} },
+      { w0: wcol[0], w1: wcol[1], w2: wcol[2], x0: x[0], x1: x[1], x2: x[2] });
+    return (o.lo + 3 * o.hi) || 0;
+  };
+  // Exhaustive: one column over all 729 (weights × inputs) — MAC3 == Σ wᵢxᵢ.
+  for (const w0 of [-1, 0, 1]) for (const w1 of [-1, 0, 1]) for (const w2 of [-1, 0, 1])
+  for (const x0 of [-1, 0, 1]) for (const x1 of [-1, 0, 1]) for (const x2 of [-1, 0, 1]) {
+    const wcol = [w0, w1, w2], x = [x0, x1, x2];
+    // A 3×3 crossbar whose column 0 carries this weight column.
+    const W = [[w0, 0, 0], [w1, 0, 0], [w2, 0, 0]];
+    assertEq(colVal(wcol, x), crossbarMac(W, x)[0],
+      `MAC3 vs twin (w=${wcol} x=${x}):`);
+  }
+  // Random full 3×3 matrices: every column of the kit agrees with the twin.
+  let seed = 2718;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let s = 0; s < 400; s++) {
+    const x = [nextTrit(), nextTrit(), nextTrit()];
+    const W = [[nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()]];
+    const yTwin = crossbarMac(W, x);
+    for (let j = 0; j < 3; j++) {
+      const wcol = [W[0][j], W[1][j], W[2][j]];
+      assertEq(colVal(wcol, x), yTwin[j], `sample ${s} column ${j} (x=${x}):`);
+    }
+  }
+});
+
+test('P2 photonic-crossbar preset circuit computes the crossbar matmul', () => {
+  // The on-canvas logical twin (3 MAC3 columns sharing the input vector) must
+  // reproduce crossbarMac on the same weights/inputs — validates the demo, the
+  // [input i][output j] weight wiring (wᵢⱼ), and the 2-trit output decode.
+  const { comps, wires } = EXAMPLES['photonic-crossbar'].build();
+  const inByName = {}, outSrc = {};
+  for (const c of comps) {
+    if (c.type === 'INPUT') inByName[c.state.name] = c;
+    if (c.type === 'OUTPUT') {
+      const wr = wires.find(w => w.toId === c.id && w.toPort === 'in');
+      outSrc[c.state.name] = wr ? `${wr.fromId}:${wr.fromPort}` : null;
+    }
+  }
+  // Defaults already wired: confirm the documented y = (+2, 0, −2).
+  let scope = { comps, wires, outVals: {} };
+  simulateScope(scope);
+  for (let j = 0; j < 3; j++) {
+    const got = 3 * scope.outVals[outSrc['y' + j + 'hi']] + scope.outVals[outSrc['y' + j + 'lo']];
+    assertEq(got || 0, [2, 0, -2][j], `default y${j}:`);
+  }
+  // Then a reproducible random sweep against the twin.
+  let seed = 1414;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let s = 0; s < 400; s++) {
+    const x = [nextTrit(), nextTrit(), nextTrit()];
+    const W = [[nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()]];
+    for (let i = 0; i < 3; i++) inByName['x' + i].state.value = x[i];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+      inByName['w' + i + j].state.value = W[i][j];
+    scope = { comps, wires, outVals: {} };
+    simulateScope(scope);
+    const yTwin = crossbarMac(W, x);
+    for (let j = 0; j < 3; j++) {
+      const got = 3 * scope.outVals[outSrc['y' + j + 'hi']] + scope.outVals[outSrc['y' + j + 'lo']];
+      assertEq(got || 0, yTwin[j], `sample ${s} y${j} (x=${x}):`);
+    }
   }
 });
 
