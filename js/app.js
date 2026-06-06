@@ -82,7 +82,9 @@ TYPES.TRYTE_IN = {
     return out;
   },
   inspector: (c) => [
-    { label: 'Decimal value', kind: 'number', get: () => c.state.value,
+    { label: 'Decimal value', kind: 'number', min: -364, max: 364,
+      hint: 'Range ±364 (the values a 6-trit balanced-ternary word can hold). Out-of-range entries are clamped.',
+      get: () => c.state.value,
       set: v => {
         const n = parseInt(v || '0', 10) || 0;
         const clamped = Math.max(-364, Math.min(364, n));
@@ -1802,6 +1804,7 @@ function updateInspector() {
       }
       const labelEl = document.createElement('label');
       labelEl.textContent = f.label;
+      if (f.hint) labelEl.title = f.hint;   // hover note, e.g. the valid range (U2)
       form.appendChild(labelEl);
       let inputEl;
       if (f.kind === 'select') {
@@ -1816,6 +1819,9 @@ function updateInspector() {
       } else {
         inputEl = document.createElement('input');
         inputEl.type = (f.kind === 'number') ? 'number' : 'text';
+        if (f.kind === 'number' && Number.isFinite(f.min)) inputEl.min = String(f.min);
+        if (f.kind === 'number' && Number.isFinite(f.max)) inputEl.max = String(f.max);
+        if (f.hint) inputEl.title = f.hint;
         inputEl.value = f.get();
         inputEl.addEventListener('change', () => { pushHistory(); f.set(inputEl.value); simulate(); draw(); updateInspector(); });
       }
@@ -2439,20 +2445,30 @@ function nudgeSelection(dx, dy) {
   simulate(); draw(); updateInspector();
 }
 
+// True when focus is in a field where keystrokes should reach the field, not
+// the canvas — text inputs, selects, textareas (e.g. the Assembler source) and
+// any contenteditable. Used to gate the global canvas shortcuts below.
+function isEditable(el) {
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' ||
+                  el.tagName === 'TEXTAREA' || el.isContentEditable);
+}
+
 window.addEventListener('keydown', (e) => {
-  // Undo / redo are bound even while focus is in a text field, but ONLY
-  // when the field isn't the palette search box — typing there should
-  // never collide with Ctrl+Z. The browser's built-in undo in the search
-  // input continues to work as usual.
+  // Ctrl/Cmd+Z / +Y drive the *canvas* undo stack — but only when focus isn't
+  // in an editable field. With the asm editor, an inspector input or the
+  // palette search focused, the keystroke must reach the browser so it undoes
+  // your *text* edit, not a canvas action (U1). isEditable() covers all of
+  // INPUT/SELECT/TEXTAREA/contenteditable, so the old pal-search special-case
+  // is subsumed here.
   const ae = document.activeElement;
-  const inSearch = ae && ae.id === 'pal-search';
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && !inSearch) {
-    if (e.key === 'z' || e.key === 'Z') {
+  const editable = isEditable(ae);
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    if ((e.key === 'z' || e.key === 'Z') && !editable) {
       e.preventDefault();
       if (e.shiftKey) redo(); else undo();
       return;
     }
-    if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); redo(); return; }
+    if ((e.key === 'y' || e.key === 'Y') && !editable) { e.preventDefault(); redo(); return; }
     if (e.key === 'f' || e.key === 'F') {
       const s = document.getElementById('pal-search');
       if (s) { e.preventDefault(); s.focus(); s.select(); }
@@ -2461,8 +2477,7 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'a' || e.key === 'A') {
       // Select every component — but only on the canvas, never while a text
       // field (inspector, gate name, …) has focus, where Ctrl+A selects text.
-      const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA');
-      if (!typing) {
+      if (!editable) {
         e.preventDefault();
         selection.clear();
         for (const c of comps) selection.add(c.id);
@@ -2475,14 +2490,13 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'd' || e.key === 'D') {
       // Duplicate selection (Ctrl/Cmd+D) — preventDefault to suppress the
       // browser's bookmark dialog; no-op while typing in a field.
-      const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA');
-      if (!typing) { e.preventDefault(); duplicateSelection(); }
+      if (!editable) { e.preventDefault(); duplicateSelection(); }
       return;
     }
   }
-  // Don't hijack other keys when typing in an input field.
-  if (ae && ae.tagName === 'INPUT') return;
-  if (ae && ae.tagName === 'SELECT') return;
+  // Don't hijack other keys when typing in an input field, a <select>, a
+  // <textarea> (e.g. the Assembler source) or any contenteditable.
+  if (isEditable(ae)) return;
   if (e.code === 'Space') { mouse.spaceDown = true; cv.style.cursor = 'grab'; }
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); }
   // Arrow keys nudge the selection by one grid step (Shift = ×5).
@@ -2686,6 +2700,27 @@ document.getElementById('tt-close').addEventListener('click', () => closeModal('
 document.getElementById('btn-pack').addEventListener('click', openPackModal);
 document.getElementById('pack-close').addEventListener('click', () => closeModal('pack-modal'));
 document.getElementById('micro-close').addEventListener('click', () => closeModal('micro-modal'));
+document.getElementById('warn-close').addEventListener('click', () => closeModal('warn-modal'));
+
+// Surface post-load validateCircuit() warnings: a one-line status plus an
+// expandable modal listing the actual problems (which wire / which pin / which
+// missing def), so a shared or corrupted circuit is debuggable rather than just
+// a count "see console". No-op when there are none. Always logs to the console
+// too. Shared by the file-load and link-load paths.
+function showLoadWarnings(warnings, sourceLabel = 'circuit') {
+  if (!warnings || !warnings.length) return;
+  console.warn(`Loaded ${sourceLabel} produced ${warnings.length} validation warning(s):`);
+  for (const w of warnings) console.warn('  ' + w);
+  const list = document.getElementById('warn-list');
+  list.textContent = '';
+  for (const w of warnings) {
+    const li = document.createElement('li');
+    li.textContent = w;   // textContent — never inject loaded strings as HTML
+    list.appendChild(li);
+  }
+  openModal('warn-modal');
+  setStatus(`loaded with ${warnings.length} validation warning(s) — see the list`);
+}
 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
@@ -2904,7 +2939,7 @@ let _tutTarget = null;    // currently-highlighted DOM element
 // check()/onEnter() so lessons can inspect what the user did and set the stage.
 function tutorialApi() {
   return {
-    loadExample: (name) => loadExampleNamed(name),
+    loadExample: (name) => loadExampleNamed(name, { keepTutorial: true }),
     clearCanvas: () => {
       stopAllClocks();
       pushHistory();
@@ -3584,6 +3619,7 @@ document.getElementById('dbg-panel').addEventListener('click', (e) => {
 
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (!confirm('Clear the entire circuit? (Subcircuit library is preserved.)')) return;
+  endTutorial();   // clearing the circuit out from under a lesson ends it (else its poll keeps running)
   stopAllClocks();
   pushHistory();
   setComps([]); setWires([]); setNextCompId(1); setNextWireId(1); syncCompMap();
@@ -3620,6 +3656,7 @@ function serializeCircuit({ forShare = false } = {}) {
 // Returns the post-load validation warnings. Shared by file-load and link-load.
 function applyCircuitData(data) {
   data = upgradeSave(data);   // older → current; newer is passed through
+  endTutorial();              // loading a different circuit ends any active lesson (else its poll keeps running)
   stopAllClocks();            // don't leave a clock/playback stepping the replaced circuit
   pushHistory();
   setComps(data.comps || []);
@@ -3676,11 +3713,7 @@ document.getElementById('file-input').addEventListener('change', (e) => {
       if (typeof v === 'number' && v > SAVE_FORMAT_VERSION &&
           !confirm(`Save file is format version ${v}; this build only knows up to ${SAVE_FORMAT_VERSION}. Load anyway?`)) return;
       const warnings = applyCircuitData(data);
-      if (warnings.length) {
-        console.warn('Loaded circuit produced ' + warnings.length + ' validation warning(s):');
-        for (const w of warnings) console.warn('  ' + w);
-        setStatus(`loaded with ${warnings.length} validation warning(s) — see console`);
-      }
+      showLoadWarnings(warnings, 'file');
     } catch (err) { alert('Could not load file: ' + err.message); }
   };
   reader.readAsText(file);
@@ -3801,7 +3834,10 @@ async function bootCircuit() {
     try {
       const warnings = applyCircuitData(await decodeShare(enc));
       setStatus('Loaded shared circuit from link' +
-                (warnings.length ? ` (${warnings.length} validation warning(s) — see console)` : ''));
+                (warnings.length ? ` (${warnings.length} validation warning(s))` : ''));
+      // Embeds stay chromeless — don't pop a modal over an iframed circuit; the
+      // full editor surfaces the list. The status text still notes the count.
+      if (!isEmbed(location.search)) showLoadWarnings(warnings, 'shared link');
       // A clock-driven shared circuit auto-runs so an embed shows it live at once.
       if (isEmbed(location.search) && comps.some(c => c.type === 'CLOCK')) setAutoPlay(true);
       return;
@@ -5183,9 +5219,14 @@ const EXAMPLES = createExamples({
 });
 
 
-function loadExampleNamed(name) {
+// `keepTutorial` is set by the tutorial engine when a lesson loads its own
+// example as part of a step — that must not tear down the running tutorial.
+// Every user-facing load (Examples menu, boot deep-link) leaves it false so a
+// circuit swap ends any active lesson and its 250 ms poll (see endTutorial).
+function loadExampleNamed(name, { keepTutorial = false } = {}) {
   const ex = EXAMPLES[name];
   if (!ex) return;
+  if (!keepTutorial) endTutorial();   // a circuit swap must not leave a lesson polling the new circuit
   stopAllClocks();   // a running clock/debugger/timing must not carry over to the new circuit
   pushHistory();
   const { comps: newComps, wires: newWires } = ex.build();

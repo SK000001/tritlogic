@@ -2199,6 +2199,30 @@ test('I3 shareable circuits: encodeShare/decodeShare round-trips a circuit, URL-
   assertDeepEq(await decodeShare(legacy), ascii, 'legacy un-prefixed base64 link still loads:');
 });
 
+// ---- B2 decompression-bomb guard -----------------------------------------
+//
+// Share links are public, untrusted input. A tiny gzipped payload can expand to
+// hundreds of MB; decodeShare must cap the decompressed size and throw (the
+// boot path turns that into the friendly "invalid link" toast) rather than OOM.
+test('B2 decodeShare rejects an oversized (decompression-bomb) gzip payload', async () => {
+  if (typeof CompressionStream !== 'function') return;   // env without gzip — nothing to cap
+  // Valid JSON (would parse fine) but ~8 MB decompressed — well past the 4 MB cap.
+  // Using real JSON, not garbage, proves the guard is the *size* cap and not an
+  // incidental JSON.parse failure: without the cap this would decode cleanly.
+  const huge = JSON.stringify({ comps: [], wires: [], pad: 'a'.repeat(8 * 1024 * 1024) });
+  const cs = new CompressionStream('gzip');
+  const w = cs.writable.getWriter(); w.write(new TextEncoder().encode(huge)); w.close();
+  const r = cs.readable.getReader();
+  const parts = []; let n = 0;
+  for (;;) { const { value, done } = await r.read(); if (done) break; parts.push(value); n += value.length; }
+  const gz = new Uint8Array(n); let off = 0; for (const p of parts) { gz.set(p, off); off += p.length; }
+  let bin = ''; for (let i = 0; i < gz.length; i++) bin += String.fromCharCode(gz[i]);   // avoid spread on large arrays
+  const b64url = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  let threw = false;
+  try { await decodeShare('1' + b64url); } catch { threw = true; }
+  assertEq(threw, true, 'an over-cap decompressed payload must throw, not expand:');
+});
+
 // ---- I1 front door — landing-page deep links -----------------------------
 //
 // The landing page (index.html) is the public front door; its "try this" cards

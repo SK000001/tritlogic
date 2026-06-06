@@ -168,7 +168,12 @@ function base64urlToBytes(str) {
 // Push `bytes` through a (De)CompressionStream and collect the result. Writing
 // without awaiting + reading to completion is the standard one-shot pattern (no
 // backpressure deadlock for our modest sizes).
-async function streamThrough(bytes, transform) {
+//
+// `maxBytes` (optional) caps the collected output: as soon as the running total
+// exceeds it we cancel the stream and throw. This bounds gzip decompression of
+// untrusted share links so a tiny payload can't expand to hundreds of MB and
+// OOM the tab (a "decompression bomb").
+async function streamThrough(bytes, transform, maxBytes = Infinity) {
   const writer = transform.writable.getWriter();
   writer.write(bytes); writer.close();
   const reader = transform.readable.getReader();
@@ -178,12 +183,19 @@ async function streamThrough(bytes, transform) {
     const { value, done } = await reader.read();
     if (done) break;
     chunks.push(value); total += value.length;
+    if (total > maxBytes) {
+      reader.cancel().catch(() => {});
+      throw new RangeError('decompressed payload exceeds size cap');
+    }
   }
   const out = new Uint8Array(total);
   let off = 0;
   for (const c of chunks) { out.set(c, off); off += c.length; }
   return out;
 }
+// Hard cap on a decompressed share payload (4 MB). A genuine circuit JSON is a
+// few KB even when large; anything past this is malformed or hostile.
+const MAX_SHARE_BYTES = 4 * 1024 * 1024;
 const hasGzip = typeof CompressionStream === 'function' && typeof DecompressionStream === 'function';
 
 export async function encodeShare(data) {
@@ -199,12 +211,14 @@ export async function encodeShare(data) {
 export async function decodeShare(str) {
   const scheme = str[0];
   if (scheme === '1') {
-    const raw = await streamThrough(base64urlToBytes(str.slice(1)), new DecompressionStream('gzip'));
+    const raw = await streamThrough(base64urlToBytes(str.slice(1)), new DecompressionStream('gzip'), MAX_SHARE_BYTES);
     return JSON.parse(new TextDecoder().decode(raw));
   }
   // '0' (explicit raw) or a legacy pre-prefix link (the whole string is base64url).
   const payload = scheme === '0' ? str.slice(1) : str;
-  return JSON.parse(new TextDecoder().decode(base64urlToBytes(payload)));
+  const rawBytes = base64urlToBytes(payload);
+  if (rawBytes.length > MAX_SHARE_BYTES) throw new RangeError('share payload exceeds size cap');
+  return JSON.parse(new TextDecoder().decode(rawBytes));
 }
 
 // Prefer the platform's structuredClone (faster + preserves more JS types)

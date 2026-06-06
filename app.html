@@ -315,6 +315,19 @@
   </div>
 </div>
 
+<!-- Load-warnings modal — surfaces validateCircuit() problems after a load -->
+<div class="modal-bg" id="warn-modal">
+  <div class="modal">
+    <h2>Circuit loaded with warnings <button class="btn close" id="warn-close">close</button></h2>
+    <p style="color: var(--muted); font-size: 12px;">
+      The circuit loaded, but these problems were found. Broken components are
+      drawn as red placeholders on the canvas; any wire that couldn't be
+      rendered was dropped.
+    </p>
+    <ul id="warn-list" style="margin: 8px 0 0; padding-left: 18px; font-family: monospace; font-size: 12px; color: var(--warn, #e3b855); max-height: 280px; overflow: auto;"></ul>
+  </div>
+</div>
+
 <!-- Pack subcircuit modal -->
 <div class="modal-bg" id="pack-modal">
   <div class="modal">
