@@ -1075,6 +1075,14 @@ export const EXAMPLE_INFO = {
       it's that the pure model <code>crossbarMac(W, x)</code> in
       <code>photonic-twin.js</code> and this kit circuit are proven equal on every
       weight/input by the P2 self-test, so "what the chip should compute" is pinned
-      down before the optics (loss, extinction, noise — that's P3) enter the picture.</p>`,
+      down before the optics enter the picture.</p>
+      <p><b>Does the real optics still get it right?</b> The same module's
+      <b>analog-fidelity</b> model (P3) re-runs the MAC with the device's actual
+      numbers — <b>insertion loss</b>, finite <b>extinction ratio</b> (~25 dB),
+      <b>MMI imbalance</b>, and <b>detector noise</b>. The result: uniform loss and
+      extinction don't move a decision (they're just a gain the readout divides
+      back out), so with realistic imperfection but low noise the rounded ternary
+      MAC is <i>still exactly</i> the ideal one — the wall is set by the detector
+      <b>SNR</b>, where heavy noise finally starts flipping outputs.</p>`,
   },
 };

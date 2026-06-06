@@ -103,3 +103,111 @@ export function crossbarMacFromPhases(phaseGrid, x) {
   const W = phaseGrid.map(row => row.map(phaseToTrit));
   return crossbarMac(W, x);
 }
+
+// ── P3 — analog / optical fidelity ─────────────────────────────────────────
+// crossbarMac above is the IDEAL operation. A real optical mesh isn't ideal:
+// the MZI's "0"/"±1" states have finite extinction, every path has insertion
+// loss, the MMIs are slightly imbalanced, and the photodetector adds noise. P3
+// brings those in so the ternary-weight MAC can be checked against realistic
+// device behaviour — i.e. "does the chip still compute the right trits?".
+//
+// Modelling choices (value level, balanced detection — the standard scheme for
+// a SIGNED optical MAC, where a balanced photodetector subtracts the MZI's
+// in-phase and anti-phase ports to recover the weight's sign):
+//   • insertion loss  → a single uniform amplitude gain on every output. Uniform
+//     loss can't change a sign or an argmax; it just sets the signal level the
+//     detector noise competes with (the SNR).
+//   • finite extinction → a "±1" weight's magnitude is trimmed by the amplitude
+//     that leaks to the wrong port (also uniform, so also benign on its own).
+//   • MMI imbalance → a small STATIC per-tile offset. This is the real
+//     decision-limiter: it's why a "0" weight isn't a perfect null, and it
+//     varies tile-to-tile so it doesn't cancel.
+//   • detector noise → a per-output Gaussian whose stdev is in units of one
+//     ideal weighted input.
+// All randomness is seeded, so the model is deterministic given its params.
+//
+// Defaults are the device numbers from photonic/scripts/04_sax_mzi_sim.py
+// (4 dB GCs, 0.3 dB MMIs, 2 dB/cm waveguide) with a realistic 25 dB extinction
+// (the ideal SAX model gives >40 dB; real MMI imbalance drops it to ~20–30 dB).
+export const ANALOG_DEFAULTS = Object.freeze({
+  gcLossDb:    4.0,    // per grating coupler (an optical path passes two)
+  mmiLossDb:   0.3,    // excess loss per MMI
+  wgLossDbCm:  2.0,    // 220 nm strip waveguide propagation loss
+  armUm:       300,    // MZI arm length (one arm on the through path)
+  busUm:       50,     // GC-to-MMI bus on each side
+  extinctionDb: 25,    // realistic MZI extinction ratio
+  imbalance:   0.02,   // MMI amplitude imbalance, fractional (per-tile stdev)
+  noise:       0.0,    // detector noise stdev, in units of one ideal weighted input
+  seed:        1,      // PRNG seed for the static imbalance + noise draws
+});
+
+// Lumped insertion loss (dB) of one input→tile→output optical route through the
+// crossbar: two grating couplers, ~6 MMIs (splitter tree + tile + combiner
+// tree), and the waveguide run (two buses + one arm). A rough but honest budget
+// from the GDS lengths; refine when CORNERSTONE S-parameters land (that's the
+// FDTD half of P3, on the photonic side).
+export function pathInsertionLossDb(params = {}) {
+  const p = { ...ANALOG_DEFAULTS, ...params };
+  const MMI_COUNT = 6;
+  const wgUm = 2 * p.busUm + p.armUm;
+  return 2 * p.gcLossDb + MMI_COUNT * p.mmiLossDb + p.wgLossDbCm * (wgUm / 1e4);
+}
+
+// Seeded PRNG (mulberry32) + Box–Muller, local so the analog model is pure and
+// deterministic without leaning on Math.random.
+function mulberry32(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function gaussian(rnd) {
+  // Box–Muller; guard log(0).
+  const u = Math.max(rnd(), 1e-12);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd());
+}
+
+// The crossbar's compute WITH device imperfections. Returns the continuous
+// (real-valued) output vector a balanced photodetector would read — NOT rounded
+// to trits. `gain` (uniform insertion-loss amplitude) is applied so the output
+// is in the same units as crossbarMac up to that scale; recoverMac() inverts it.
+export function crossbarMacAnalog(W, x, params = {}) {
+  const p = { ...ANALOG_DEFAULTS, ...params };
+  const gain = Math.pow(10, -pathInsertionLossDb(p) / 20);   // amplitude transmission
+  const leak = Math.pow(10, -p.extinctionDb / 20);           // amplitude to the wrong port
+  const rnd = mulberry32(p.seed);
+  const n = x.length, m = W[0].length;
+  const y = new Array(m).fill(0);
+  for (let j = 0; j < m; j++) {
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+      const imb = p.imbalance * gaussian(rnd);               // static per-tile MMI imbalance
+      // A "0" tile reads only its residual imbalance (no perfect null); a "±1"
+      // tile reads its sign, magnitude trimmed by the leaked amplitude, plus imb.
+      const wReal = W[i][j] === 0 ? imb : W[i][j] * (1 - leak) + imb;
+      s += wReal * x[i];
+    }
+    s = gain * s + p.noise * gaussian(rnd);                  // uniform loss + detector noise
+    y[j] = s;
+  }
+  return y;
+}
+
+// Recover the integer ternary MAC result from the analog output: undo the
+// uniform gain and round (a calibrated ADC + threshold). The whole point of P3
+// is checking when this still equals crossbarMac(W, x).
+export function recoverMac(yAnalog, params = {}) {
+  const gain = Math.pow(10, -pathInsertionLossDb(params) / 20);
+  return yAnalog.map(v => Math.round(v / gain) || 0);
+}
+
+// Convenience: does the imperfect chip still compute the exact ideal MAC for
+// these weights/inputs under these device params?
+export function macFidelityOk(W, x, params = {}) {
+  const ideal = crossbarMac(W, x);
+  const got = recoverMac(crossbarMacAnalog(W, x, params), params);
+  return ideal.every((v, j) => v === got[j]);
+}

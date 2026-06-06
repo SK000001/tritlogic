@@ -27,7 +27,9 @@ import { COMPONENT_INFO, INFO_CATEGORIES } from './info-data.js';
 import { minimizeTernary, evalMinimizedExpr, minimizedGateCount,
          canonicalGateCount, materializeMinimized } from './minimizer.js';
 import { ternarizeAbsmean, evalTernaryXorNet, trainTernaryXor } from './ternary-train.js';
-import { crossbarMac, crossbarMacFromPhases, tritToPhase, phaseToTrit } from './photonic-twin.js';
+import { crossbarMac, crossbarMacFromPhases, tritToPhase, phaseToTrit,
+         crossbarMacAnalog, recoverMac, macFidelityOk, pathInsertionLossDb,
+         ANALOG_DEFAULTS } from './photonic-twin.js';
 
 export function registerTests(deps) {
   const {
@@ -691,6 +693,81 @@ test('P2 photonic-crossbar preset circuit computes the crossbar matmul', () => {
       assertEq(got || 0, yTwin[j], `sample ${s} y${j} (x=${x}):`);
     }
   }
+});
+
+// ---- P3 analog / optical fidelity ---------------------------------------
+// crossbarMac is the IDEAL op; the chip isn't ideal. P3 checks the ternary
+// result against realistic loss / finite extinction / MMI imbalance / detector
+// noise — "does the imperfect optical mesh still compute the right trits?".
+
+test('P3 ideal device params reproduce the exact integer MAC', () => {
+  // Insertion loss is a uniform gain that recoverMac divides back out, so even
+  // a lossy-but-otherwise-ideal chip (no leak, no imbalance, no noise) recovers
+  // the exact crossbarMac result.
+  const ideal = { extinctionDb: 200, imbalance: 0, noise: 0, seed: 7 };
+  let seed = 31337;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let s = 0; s < 300; s++) {
+    const x = [nextTrit(), nextTrit(), nextTrit()];
+    const W = [[nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()]];
+    const got = recoverMac(crossbarMacAnalog(W, x, ideal), ideal);
+    assertDeepEq(got, crossbarMac(W, x), `ideal analog == crossbarMac (sample ${s}):`);
+  }
+  // The insertion-loss budget is a sane positive number (~9.9 dB), and a fully
+  // lossless device has unity gain.
+  const il = pathInsertionLossDb();
+  if (!(il > 5 && il < 15)) throw new Error('insertion loss out of expected range: ' + il);
+  assertEq(pathInsertionLossDb({ gcLossDb: 0, mmiLossDb: 0, wgLossDbCm: 0 }), 0, 'lossless path = 0 dB:');
+});
+
+test('P3 realistic loss + 25 dB extinction + MMI imbalance still recover the exact result', () => {
+  // The reassuring result: with the device's real loss/extinction/imbalance but
+  // no detector noise, the rounded ternary MAC is still exactly the ideal one —
+  // uniform loss/extinction don't move a decision, and the small static
+  // imbalance stays well inside the ±0.5 rounding margin.
+  const real = { ...ANALOG_DEFAULTS, noise: 0 };   // 25 dB ER, 0.02 imbalance, lossy path
+  let seed = 24601;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let s = 0; s < 400; s++) {
+    const x = [nextTrit(), nextTrit(), nextTrit()];
+    const W = [[nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()]];
+    const params = { ...real, seed: s + 1 };        // vary the static imbalance draw per chip
+    assertEq(macFidelityOk(W, x, params), true,
+      `realistic device recovers ideal (sample ${s}, x=${x}):`);
+  }
+});
+
+test('P3 detector noise degrades gracefully — exact at low noise, errors at high noise', () => {
+  // Effective noise (post gain-recovery) ≈ p.noise / gain. Low noise stays many
+  // sigma inside the ±0.5 rounding margin → every case recovers; crank it up and
+  // the ternary result starts to break — the fidelity wall the SNR sets.
+  let seed = 90210;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  const N = 250;
+  const cases = [];
+  for (let s = 0; s < N; s++) {
+    const x = [nextTrit(), nextTrit(), nextTrit()];
+    const W = [[nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()]];
+    cases.push({ x, W });
+  }
+  const rateAt = (noise) => {
+    let ok = 0;
+    cases.forEach((c, s) => {
+      if (macFidelityOk(c.W, c.x, { ...ANALOG_DEFAULTS, noise, seed: s + 1 })) ok++;
+    });
+    return ok / N;
+  };
+  const low = rateAt(0.02);    // tiny noise → perfect recovery
+  const high = rateAt(0.6);    // heavy noise → frequent errors
+  assertEq(low, 1, 'low noise recovers every case:');
+  if (!(high < 0.9)) throw new Error(`high noise should degrade recovery, got rate ${high}`);
+  if (!(high < low))  throw new Error('more noise must not recover better than less noise');
 });
 
 // ---- A2 timed simulation (propagation delays) ----
