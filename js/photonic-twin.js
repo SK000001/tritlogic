@@ -269,3 +269,50 @@ export function formatProgram(program) {
 export function programToWeights(program) {
   return program.phaseRad.map(row => row.map(phaseToTrit));
 }
+
+// ── P5 — end-to-end: run a whole ternary net on the modeled chip ───────────
+// The capstone of Push 2: P1 trains a ternary net, P2/P3 model the optical MAC,
+// P4 programs it — P5 runs INFERENCE through the lot. Each network layer is one
+// crossbar pass (program the weights → push the input vector through the analog
+// chip → recover the integer MACs) followed by a sign() activation, with the
+// same 3×3 crossbar reused layer by layer (time-multiplexed) — the way a real
+// fixed-function accelerator runs a small net.
+
+const _sgn = v => (v < 0 ? -1 : v > 0 ? 1 : 0);
+
+// [output][input] per-neuron weight rows → the crossbar's [input][output]
+// matrix. The crossbar's rows are inputs and columns are outputs, so a layer's
+// weight matrix is the transpose of its stacked neuron weight vectors.
+export function transpose(M) {
+  return M[0].map((_, j) => M.map(row => row[j]));
+}
+
+// Run one crossbar layer through the modeled chip: `Wcb[i][j]` = weight from
+// input i to output column j. Returns the recovered integer pre-activation
+// vector (one per output), i.e. what a calibrated readout reports after the
+// real optics. Pass realistic `params` to fold in loss/extinction/noise.
+export function inferLayerOnChip(Wcb, x, params = {}) {
+  return recoverMac(crossbarMacAnalog(Wcb, x, params), params);
+}
+
+// Run a whole ternary MLP on the crossbar. `layers` is a list of
+// { W, bias=true } where W is the crossbar weight matrix ([input][output]) and
+// `bias` appends a +1 bias lane to that layer's input vector. Between layers the
+// activation is sign(). Returns { y, pre, trace } — y = final activations, pre =
+// final layer's raw pre-activations, trace = per-layer { x, pre, act }. A fresh
+// noise draw per layer (seed offset) so the layers don't share device noise.
+export function inferMlpOnCrossbar(layers, input, params = {}) {
+  const baseSeed = params.seed ?? ANALOG_DEFAULTS.seed;
+  let a = input.slice();
+  const trace = [];
+  for (let L = 0; L < layers.length; L++) {
+    const { W, bias = true } = layers[L];
+    const x = bias ? [...a, 1] : a.slice();
+    const pre = inferLayerOnChip(W, x, { ...params, seed: baseSeed + L });
+    const act = pre.map(_sgn);
+    trace.push({ x, pre, act });
+    a = act;
+  }
+  const last = trace[trace.length - 1];
+  return { y: a, pre: last ? last.pre : [], trace };
+}

@@ -30,7 +30,8 @@ import { ternarizeAbsmean, evalTernaryXorNet, trainTernaryXor } from './ternary-
 import { crossbarMac, crossbarMacFromPhases, tritToPhase, phaseToTrit,
          crossbarMacAnalog, recoverMac, macFidelityOk, pathInsertionLossDb,
          ANALOG_DEFAULTS, exportCrossbarProgram, programToWeights, formatProgram,
-         HEATER_P_PI_MW } from './photonic-twin.js';
+         HEATER_P_PI_MW, transpose, inferLayerOnChip, inferMlpOnCrossbar }
+       from './photonic-twin.js';
 
 export function registerTests(deps) {
   const {
@@ -847,6 +848,69 @@ test('P4 trained ternary XOR layer programs onto the crossbar', () => {
       assertEq(sgn(y[j]), hj, `hidden neuron ${j} via programmed chip (a=${a},b=${b}):`);
     }
   }
+});
+
+// ---- P5 end-to-end: a whole trained net running on the modeled chip --------
+// The Push-2 capstone. Train (P1) → ternarize (P1) → program (P4) → run
+// inference through the optical MAC model (P2/P3): the trained ternary XOR net,
+// both layers, on ONE reused 3×3 crossbar.
+
+test('P5 transpose maps [output][input] neuron rows to the crossbar [input][output] matrix', () => {
+  assertDeepEq(transpose([[1, 0, -1], [-1, 1, 0]]), [[1, -1], [0, 1], [-1, 0]], 'transpose:');
+  // Round-trips a square matrix and squares with crossbarMac's indexing: a layer
+  // row-dotted with x equals the crossbar column-summed with x.
+  const W1 = [[1, -1, 0], [0, 1, -1]];   // 2 neurons over 3 inputs
+  const Wcb = transpose(W1), x = [1, 1, -1];
+  for (let j = 0; j < 2; j++)
+    assertEq(crossbarMac(Wcb, x)[j], W1[j][0] * x[0] + W1[j][1] * x[1] + W1[j][2] * x[2], `neuron ${j}:`);
+});
+
+test('P5 trained ternary XOR runs end-to-end on the modeled photonic crossbar', () => {
+  // The full pipeline. trainTernaryXor (P1) gives a 2→2→1 ternary net; each layer
+  // is a crossbar pass (programmed weights → analog optics → recovered MACs →
+  // sign). With realistic device params but low noise it must classify XOR
+  // correctly on all four inputs, agreeing with the reference net.
+  const { W1, W2, seed } = trainTernaryXor();
+  if (seed < 0) throw new Error('no trained ternary XOR net (P1 dependency)');
+  const layers = [{ W: transpose(W1) }, { W: transpose([W2]) }];   // [a,b]+bias → h ; [h0,h1]+bias → y
+  const sgn = v => (v < 0 ? -1 : v > 0 ? 1 : 0);
+  const params = { ...ANALOG_DEFAULTS, noise: 0.02 };
+  let s = 0;
+  for (const a of [-1, 1]) for (const b of [-1, 1]) {
+    const want = a !== b ? 1 : -1;                       // XOR on bipolar inputs
+    const { y, trace } = inferMlpOnCrossbar(layers, [a, b], { ...params, seed: 10 * (++s) });
+    assertEq(y.length, 1, 'single output:');
+    assertEq(y[0], want, `XOR on chip (a=${a},b=${b}):`);
+    // Agrees with the reference net AND the chip reproduced the hidden layer.
+    assertEq(y[0], evalTernaryXorNet(W1, W2, a, b), `chip == reference net (a=${a},b=${b}):`);
+    const hRef = [0, 1].map(j => sgn(W1[j][0] * a + W1[j][1] * b + W1[j][2] * 1));
+    assertDeepEq(trace[0].act, hRef, `hidden layer on chip (a=${a},b=${b}):`);
+  }
+  // The deployable artifact: a faithful device program for each layer.
+  for (const layer of layers)
+    assertDeepEq(programToWeights(exportCrossbarProgram(layer.W)), layer.W, 'layer program round-trips:');
+});
+
+test('P5 end-to-end inference is SNR-limited — perfect at low noise, degrades at high', () => {
+  // The honest caveat: the optics-in-the-loop net is reliable only above an SNR.
+  const { W1, W2 } = trainTernaryXor();
+  const layers = [{ W: transpose(W1) }, { W: transpose([W2]) }];
+  const inputs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+  const accuracyAt = (noise) => {
+    let ok = 0, total = 0;
+    for (let trial = 0; trial < 60; trial++) {
+      for (const [a, b] of inputs) {
+        const want = a !== b ? 1 : -1;
+        const { y } = inferMlpOnCrossbar(layers, [a, b], { ...ANALOG_DEFAULTS, noise, seed: 7 * (trial + 1) + 1 });
+        if (y[0] === want) ok++;
+        total++;
+      }
+    }
+    return ok / total;
+  };
+  assertEq(accuracyAt(0.02), 1, 'low noise classifies XOR perfectly:');
+  const hi = accuracyAt(0.8);
+  if (!(hi < 1)) throw new Error(`heavy noise should cost accuracy, got ${hi}`);
 });
 
 // ---- A2 timed simulation (propagation delays) ----

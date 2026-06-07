@@ -1097,6 +1097,19 @@ export const EXAMPLE_INFO = {
    (0,1) −1   π/2     12.5             export program (P4)
    (1,0)  0   π       25.0                  ↓
     …                                  set 9 heaters  →  chip runs the MAC
-      </pre>`,
+      </pre>
+      <p><b>End to end (P5).</b> Put it all together: <code>inferMlpOnCrossbar</code>
+      runs a whole trained ternary net on the modeled chip — each layer is one
+      crossbar pass (programmed weights → the analog optics → recovered MACs →
+      <code>sign()</code>), reusing the same 3×3 crossbar layer by layer. The P5
+      self-test trains the ternary <b>XOR</b> net (two layers), programs both onto
+      the crossbar, and classifies all four inputs correctly through the realistic
+      optics — agreeing with the reference net, and degrading only once detector
+      noise crosses the SNR wall. That's the whole arc: <i>train → ternarize →
+      verify logical = ideal optical → check analog fidelity → program the chip →
+      run inference.</i> The remaining work is physical — DRC, FDTD device
+      characterisation, and heater pad-out toward a real tape-out (the
+      <a href="https://github.com/SK000001/photonic" target="_blank" rel="noopener" style="color: var(--accent)"><code>photonic/</code></a>
+      side).</p>`,
   },
 };
