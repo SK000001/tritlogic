@@ -1083,6 +1083,20 @@ export const EXAMPLE_INFO = {
       extinction don't move a decision (they're just a gain the readout divides
       back out), so with realistic imperfection but low noise the rounded ternary
       MAC is <i>still exactly</i> the ideal one — the wall is set by the detector
-      <b>SNR</b>, where heavy noise finally starts flipping outputs.</p>`,
+      <b>SNR</b>, where heavy noise finally starts flipping outputs.</p>
+      <p><b>Programming the chip (P4).</b> The last step turns weights into device
+      settings: <code>exportCrossbarProgram(W)</code> maps each tile's trit to its
+      MZI <b>heater phase</b> (−1→π/2, 0→π, +1→3π/2) and the drive <b>power</b>
+      (P = (φ/π)·P<sub>π</sub>, P<sub>π</sub> ≈ 25 mW) — the literal "set tile (i,j)'s
+      heater to <i>x</i> mW" recipe. End to end: a tiny net is trained, its weights
+      BitNet-ternarized, exported to this program, and the modeled chip then computes
+      the trained layer — verified for the XOR net's hidden layer by the P4 self-test.</p>
+      <pre class="info-diagram">
+   tile  w    φ      heater(mW)        train (P1)  →  ternarize (BitNet)
+   (0,0) +1  3π/2     37.5                  ↓
+   (0,1) −1   π/2     12.5             export program (P4)
+   (1,0)  0   π       25.0                  ↓
+    …                                  set 9 heaters  →  chip runs the MAC
+      </pre>`,
   },
 };

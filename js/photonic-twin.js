@@ -211,3 +211,61 @@ export function macFidelityOk(W, x, params = {}) {
   const got = recoverMac(crossbarMacAnalog(W, x, params), params);
   return ideal.every((v, j) => v === got[j]);
 }
+
+// ── P4 — weights → device export ("train → program the chip") ──────────────
+// The end of the pipeline: take trained ternary weights (P1's absmean
+// ternarization, or any ternary matrix) and emit the concrete settings that
+// program the photonic crossbar. The v1 weight cell is a thermo-optic MZI
+// (photonic/RESEARCH_NOTES §5b), so each tile is programmed by ONE knob — its
+// heater phase — via the trit→φ encoding from the SAX model
+// (−1→π/2, 0→π, +1→3π/2). (§4b's "MZM amplitude + π trim" is the foundry-MZM
+// alternative, kept as a reference pad; the per-cell weight is heater-phase.)
+//
+// The heater itself is driven by electrical power, so we also give the per-tile
+// drive power from a linear thermo-optic model φ = π·(P/P_π): P = (φ/π)·P_π.
+// P_π (power for a π shift) is an ESTIMATE — a real heater wants on-bench
+// calibration (the FDTD/characterisation half), so it's flagged and overridable.
+
+// Heater power for a π phase shift — typical Si thermo-optic heater is ~20–30 mW.
+// ESTIMATE; replace with the characterised value once the device is measured.
+export const HEATER_P_PI_MW = 25;
+
+// trit → the phase set-point's display label, for readable program tables.
+const TRIT_PHASE_LABEL = { '-1': 'π/2', '0': 'π', '1': '3π/2' };
+
+// Map a ternary weight matrix to a crossbar device program. Returns the
+// per-tile heater phases (rad) and drive powers (mW), plus a flat `tiles` list
+// suitable for a bench table. `W[i][j]` is tile (input row i, output column j).
+export function exportCrossbarProgram(W, { pPiMw = HEATER_P_PI_MW } = {}) {
+  const phaseRad      = W.map(row => row.map(tritToPhase));
+  const heaterPowerMw = phaseRad.map(row => row.map(phi => (phi / Math.PI) * pPiMw));
+  const tiles = [];
+  for (let i = 0; i < W.length; i++) {
+    for (let j = 0; j < W[i].length; j++) {
+      tiles.push({
+        i, j,
+        weight: W[i][j],
+        phaseRad: phaseRad[i][j],
+        phaseLabel: TRIT_PHASE_LABEL[String(W[i][j])],
+        heaterPowerMw: heaterPowerMw[i][j],
+      });
+    }
+  }
+  return { rows: W.length, cols: W[0].length, pPiMw, phaseRad, heaterPowerMw, tiles };
+}
+
+// A plain-text bench table of a program — the literal "set tile (i,j)'s heater
+// to X mW" instructions. Handy for a UI "copy program" action or a lab notebook.
+export function formatProgram(program) {
+  const head = `tile  w   φ      heater(mW)`;
+  const rows = program.tiles.map(t =>
+    `(${t.i},${t.j})  ${t.weight >= 0 ? '+' + t.weight : t.weight}  ${t.phaseLabel.padEnd(4)}  ${t.heaterPowerMw.toFixed(1)}`);
+  return [head, ...rows].join('\n');
+}
+
+// Round-trip check: decode a program's heater phases back to the ternary weight
+// matrix it encodes (via phaseToTrit). exportCrossbarProgram(W) → this == W, so
+// the program faithfully carries the trained weights onto the chip.
+export function programToWeights(program) {
+  return program.phaseRad.map(row => row.map(phaseToTrit));
+}

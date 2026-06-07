@@ -29,7 +29,8 @@ import { minimizeTernary, evalMinimizedExpr, minimizedGateCount,
 import { ternarizeAbsmean, evalTernaryXorNet, trainTernaryXor } from './ternary-train.js';
 import { crossbarMac, crossbarMacFromPhases, tritToPhase, phaseToTrit,
          crossbarMacAnalog, recoverMac, macFidelityOk, pathInsertionLossDb,
-         ANALOG_DEFAULTS } from './photonic-twin.js';
+         ANALOG_DEFAULTS, exportCrossbarProgram, programToWeights, formatProgram,
+         HEATER_P_PI_MW } from './photonic-twin.js';
 
 export function registerTests(deps) {
   const {
@@ -768,6 +769,84 @@ test('P3 detector noise degrades gracefully — exact at low noise, errors at hi
   assertEq(low, 1, 'low noise recovers every case:');
   if (!(high < 0.9)) throw new Error(`high noise should degrade recovery, got rate ${high}`);
   if (!(high < low))  throw new Error('more noise must not recover better than less noise');
+});
+
+// ---- P4 weights → device export ("train → program the chip") -------------
+// The end of the pipeline: trained ternary weights → the concrete per-tile
+// heater settings that program the crossbar, validated end to end.
+
+test('P4 exportCrossbarProgram maps trits → heater phases/powers and round-trips', () => {
+  const W = [[-1, 0], [1, -1], [0, 1]];   // 3 inputs × 2 outputs
+  const prog = exportCrossbarProgram(W);
+  // Per-tile encoding: −1→π/2, 0→π, +1→3π/2; power = (φ/π)·P_π.
+  assertDeepEq(prog.phaseRad, [[Math.PI / 2, Math.PI], [3 * Math.PI / 2, Math.PI / 2], [Math.PI, 3 * Math.PI / 2]], 'phase grid:');
+  assertDeepEq(prog.heaterPowerMw, [[12.5, 25], [37.5, 12.5], [25, 37.5]], 'heater power grid (P_π=25 mW):');
+  assertEq(prog.tiles.length, 6, 'one entry per tile:');
+  const t00 = prog.tiles[0];
+  assertEq(t00.weight, -1, 'tile (0,0) weight:'); assertEq(t00.phaseLabel, 'π/2', 'tile (0,0) label:');
+  assertEq(t00.heaterPowerMw, 12.5, 'tile (0,0) power:');
+  // A different P_π scales every power linearly.
+  assertEq(exportCrossbarProgram(W, { pPiMw: 30 }).heaterPowerMw[2][1], 45, 'P_π=30 → +1 tile = 45 mW:');
+  assertEq(HEATER_P_PI_MW, 25, 'default P_π estimate:');
+  // The program faithfully carries the weights: decoding the phases gives W back.
+  let seed = 555;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let s = 0; s < 200; s++) {
+    const Wr = [[nextTrit(), nextTrit(), nextTrit()],
+                [nextTrit(), nextTrit(), nextTrit()],
+                [nextTrit(), nextTrit(), nextTrit()]];
+    assertDeepEq(programToWeights(exportCrossbarProgram(Wr)), Wr, `program round-trips W (sample ${s}):`);
+  }
+  // formatProgram is a readable table: header + one row per tile.
+  assertEq(formatProgram(prog).split('\n').length, 1 + 6, 'formatProgram: header + 6 rows:');
+});
+
+test('P4 export → reprogrammed (modeled) chip computes the intended MAC', () => {
+  // Feeding the exported heater phases back through the crossbar model must
+  // reproduce the ideal MAC — and still recover it through the analog twin at
+  // realistic device params (ties P4 to P3).
+  let seed = 8191;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let s = 0; s < 300; s++) {
+    const x = [nextTrit(), nextTrit(), nextTrit()];
+    const W = [[nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()],
+               [nextTrit(), nextTrit(), nextTrit()]];
+    const prog = exportCrossbarProgram(W);
+    assertDeepEq(crossbarMacFromPhases(prog.phaseRad, x), crossbarMac(W, x),
+      `reprogrammed phases reproduce MAC (sample ${s}):`);
+    // The programmed weights, through the realistic analog chip (low noise),
+    // still recover the exact trits.
+    const Wprog = programToWeights(prog);
+    assertEq(macFidelityOk(Wprog, x, { ...ANALOG_DEFAULTS, noise: 0.02, seed: s + 1 }), true,
+      `programmed chip recovers ideal under realistic optics (sample ${s}):`);
+  }
+});
+
+test('P4 trained ternary XOR layer programs onto the crossbar', () => {
+  // The headline pipeline: trained (BitNet-absmean) ternary weights → device
+  // program → the modeled crossbar computes the trained hidden layer. The XOR
+  // net's layer 1 is 2 neurons over [a, b, bias]; the crossbar matrix is its
+  // transpose Wcb[i][j] = W1[j][i] (3 inputs × 2 output columns).
+  const { W1, seed } = trainTernaryXor();
+  if (seed < 0) throw new Error('no trained ternary XOR net (P1 dependency)');
+  const Wcb = [[W1[0][0], W1[1][0]],   // input a → neurons 0,1
+               [W1[0][1], W1[1][1]],   // input b
+               [W1[0][2], W1[1][2]]];  // bias
+  const prog = exportCrossbarProgram(Wcb);
+  assertDeepEq(programToWeights(prog), Wcb, 'trained weights survive the export:');
+  const sgn = v => (v < 0 ? -1 : v > 0 ? 1 : 0);
+  for (const a of [-1, 1]) for (const b of [-1, 1]) {
+    const x = [a, b, 1];   // bias lane = +1
+    const y = crossbarMacFromPhases(prog.phaseRad, x);
+    // Programmed crossbar reproduces the layer's pre-activations …
+    assertDeepEq(y, crossbarMac(Wcb, x), `programmed pre-activations (a=${a},b=${b}):`);
+    // … whose signs are exactly the net's hidden activations h_j = sgn(W1[j]·x).
+    for (let j = 0; j < 2; j++) {
+      const hj = sgn(W1[j][0] * a + W1[j][1] * b + W1[j][2] * 1);
+      assertEq(sgn(y[j]), hj, `hidden neuron ${j} via programmed chip (a=${a},b=${b}):`);
+    }
+  }
 });
 
 // ---- A2 timed simulation (propagation delays) ----
