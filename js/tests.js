@@ -32,6 +32,8 @@ import { crossbarMac, crossbarMacFromPhases, tritToPhase, phaseToTrit,
          ANALOG_DEFAULTS, exportCrossbarProgram, programToWeights, formatProgram,
          HEATER_P_PI_MW, transpose, inferLayerOnChip, inferMlpOnCrossbar }
        from './photonic-twin.js';
+import { ANALOG_LEVELS_DEFAULT, tritToVoltage, voltageToTrit, noiseMargin, erfc,
+         symbolErrorProb, worstCaseErrorProb, monteCarloErrorRate } from './analog.js';
 
 export function registerTests(deps) {
   const {
@@ -911,6 +913,83 @@ test('P5 end-to-end inference is SNR-limited — perfect at low noise, degrades 
   assertEq(accuracyAt(0.02), 1, 'low noise classifies XOR perfectly:');
   const hi = accuracyAt(0.8);
   if (!(hi < 1)) throw new Error(`heavy noise should cost accuracy, got ${hi}`);
+});
+
+// ---- A4 analog / noise-margin mode (signal-level slice) ------------------
+// The discrete solver is exact; A4 asks the robustness question — with real
+// voltages, noise, and detection thresholds, does each wire still hold its trit?
+
+test('A4 ternary rail: trit↔voltage encoding, thresholds, and noise margin', () => {
+  for (const t of [-1, 0, 1]) {
+    assertEq(tritToVoltage(t), t * 1.0, `trit ${t} → voltage:`);
+    assertEq(voltageToTrit(tritToVoltage(t)), t, `noiseless detect of ${t}:`);
+  }
+  // Threshold behaviour at the default ±0.5 decision points.
+  assertEq(voltageToTrit(0.4), 0, 'just below +thresh → 0:');
+  assertEq(voltageToTrit(0.6), 1, 'just above +thresh → +1:');
+  assertEq(voltageToTrit(-0.6), -1, 'below −thresh → −1:');
+  // Balanced design: every level sits 0.5 from its nearest threshold.
+  assertEq(noiseMargin(), 0.5, 'default noise margin:');
+  assertEq(Math.abs(noiseMargin({ vDrive: 1.0, thresh: 0.3 }) - 0.3) < 1e-9, true, 'thresh-limited margin:');
+  assertEq(Math.abs(noiseMargin({ vDrive: 1.0, thresh: 0.7 }) - 0.3) < 1e-9, true, '±1-limited margin:');
+});
+
+test('A4 erfc + analytic symbol-error probability (0 is the weakest level)', () => {
+  // erfc sanity: erfc(0)=1, erfc(∞)→0, symmetry erfc(−x)=2−erfc(x).
+  assertEq(Math.abs(erfc(0) - 1) < 1e-6, true, 'erfc(0)=1:');
+  assertEq(erfc(6) < 1e-6, true, 'erfc(6)≈0:');
+  assertEq(Math.abs(erfc(-0.7) - (2 - erfc(0.7))) < 1e-9, true, 'erfc symmetry:');
+  // No noise → no errors.
+  assertEq(symbolErrorProb(1, 0), 0, 'σ=0 → no error:');
+  // At σ = margin (0.5), a ±1 symbol errs with prob Φ(−1) ≈ 0.1587 (1σ tail).
+  const e1 = symbolErrorProb(1, 0.5);
+  assertEq(Math.abs(e1 - 0.158655) < 1e-3, true, `±1 error at σ=margin ≈ 0.1587 (got ${e1.toFixed(4)}):`);
+  // ±1 symbols are symmetric; the 0 symbol errs across BOTH thresholds → 2×.
+  assertEq(Math.abs(symbolErrorProb(-1, 0.5) - e1) < 1e-12, true, '+1 and −1 symmetric:');
+  assertEq(Math.abs(symbolErrorProb(0, 0.5) - 2 * e1) < 1e-3, true, '0 symbol is 2× weaker:');
+  // Worst-case over a mix picks the 0 level.
+  assertEq(worstCaseErrorProb([1, -1, 0, 1], 0.5), symbolErrorProb(0, 0.5), 'worst case = 0 symbol:');
+});
+
+test('A4 Monte-Carlo error rate matches the analytic model and is SNR-limited', () => {
+  const trits = [];
+  let seed = 4242;
+  const nextTrit = () => { seed = (seed * 75 + 74) % 65537; return (seed % 3) - 1; };
+  for (let i = 0; i < 60; i++) trits.push(nextTrit());
+  // Low noise: essentially error-free.
+  assertEq(monteCarloErrorRate(trits, 0.1, { trials: 500, seed: 1 }).errorRate < 0.005, true,
+    'low noise → ~0 errors:');
+  // At σ = margin, the measured rate tracks the analytic worst/typical band.
+  const mc = monteCarloErrorRate(trits, 0.5, { trials: 4000, seed: 7 });
+  const lo = symbolErrorProb(1, 0.5), hi = symbolErrorProb(0, 0.5);
+  if (!(mc.errorRate > lo * 0.6 && mc.errorRate < hi * 1.4))
+    throw new Error(`MC rate ${mc.errorRate.toFixed(4)} outside analytic band [${lo.toFixed(3)}, ${hi.toFixed(3)}]`);
+  // Heavy noise clearly worse than light noise (monotone degradation).
+  const heavy = monteCarloErrorRate(trits, 1.0, { trials: 2000, seed: 7 }).errorRate;
+  if (!(heavy > mc.errorRate)) throw new Error('more noise must not read more reliably');
+  assertEq(mc.margin, 0.5, 'report carries the static margin:');
+});
+
+test('A4 robustness analysis of a real circuit (ternary-mac output nets)', () => {
+  // Tie A4 to an actual circuit: run the discrete solver, take the output-net
+  // trits, and check their analog robustness. Clean logic + low noise ⇒ no trit
+  // errors; crank the noise and the right trits start to flip.
+  const { comps, wires } = EXAMPLES['ternary-mac'].build();
+  const inByName = {};
+  for (const c of comps) if (c.type === 'INPUT') inByName[c.state.name] = c;
+  inByName.x0.state.value = 1; inByName.x1.state.value = -1; inByName.x2.state.value = 1;
+  inByName.w0.state.value = 1; inByName.w1.state.value = 1;  inByName.w2.state.value = -1;
+  const scope = { comps, wires, outVals: {} };
+  simulateScope(scope);
+  // The trits actually carried on the output nets.
+  const outTrits = comps.filter(c => c.type === 'OUTPUT').map(c => {
+    const wr = wires.find(w => w.toId === c.id && w.toPort === 'in');
+    return wr ? (scope.outVals[`${wr.fromId}:${wr.fromPort}`] ?? 0) : 0;
+  });
+  assertEq(monteCarloErrorRate(outTrits, 0.1, { trials: 1000, seed: 3 }).errorRate < 0.01, true,
+    'circuit reads cleanly under low noise:');
+  if (!(monteCarloErrorRate(outTrits, 0.9, { trials: 1000, seed: 3 }).errorRate > 0.05))
+    throw new Error('heavy noise should corrupt some output trits');
 });
 
 // ---- A2 timed simulation (propagation delays) ----
