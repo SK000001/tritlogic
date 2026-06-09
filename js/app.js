@@ -21,6 +21,7 @@ import {
   ASM_EXAMPLES, ASM2_EXAMPLES
 } from './assembler.js';
 import { minimizeReport, materializeMinimized } from './minimizer.js';
+import { analyzeRobustness } from './analog.js';
 import { createExamples } from './examples.js';
 import { TUTORIALS, TUTORIAL_LIST } from './tutorials.js';
 import { registerTests } from './tests.js';
@@ -5304,6 +5305,55 @@ document.getElementById('tests-run').addEventListener('click', () => {
   document.getElementById('btn-tests').click();
 });
 document.getElementById('tests-close').addEventListener('click', () => closeModal('tests-modal'));
+
+// ---- Noise / analog-robustness panel (A4 analog mode, slice 2) ------------
+// Gather every trit-carrying net (one entry per driven output pin in outVals;
+// bus-packed integers and floating/null nets are skipped) and report how well
+// the circuit holds its trits under voltage noise, via the pure analog model.
+const NOISE_VERDICT_COLOR = {
+  robust: 'var(--t-pos)', marginal: 'var(--accent)',
+  fragile: 'var(--t-neg)', empty: 'var(--muted)',
+};
+function collectNetTrits() {
+  const out = [];
+  for (const k in outVals) {
+    const v = outVals[k];
+    if (v === -1 || v === 0 || v === 1) out.push(v);
+  }
+  return out;
+}
+function renderNoiseAnalysis() {
+  const sigma = Math.max(0, parseFloat(document.getElementById('noise-sigma').value) || 0);
+  document.getElementById('noise-sigma-val').textContent = sigma.toFixed(2);
+  const rep = analyzeRobustness(collectNetTrits(), sigma, { trials: 4000, seed: 1 });
+  const el = document.getElementById('noise-result');
+  if (rep.nets === 0) {
+    el.innerHTML = `<span style="color: var(--muted)">No trit-carrying nets yet — build or run a circuit first.</span>`;
+    return;
+  }
+  const pct = x => (x === 0 ? '0%' : (x * 100).toFixed(x < 0.001 ? 3 : 1) + '%');
+  const col = NOISE_VERDICT_COLOR[rep.verdict] || 'var(--muted)';
+  const lc = rep.levelCounts;
+  el.innerHTML =
+    `<div style="font-size: 15px; margin-bottom: 8px;">Verdict:
+       <b style="color: ${col}; text-transform: uppercase;">${rep.verdict}</b></div>
+     <table style="border-collapse: collapse; font-family: monospace; font-size: 12px;">
+       <tr><td style="padding: 2px 14px 2px 0; color: var(--muted);">nets analysed</td>
+           <td>${rep.nets}
+             &nbsp;(<span style="color: var(--t-neg)">${lc.neg}×−1</span>,
+             <span style="color: var(--t-zero)">${lc.zero}×0</span>,
+             <span style="color: var(--t-pos)">${lc.pos}×+1</span>)</td></tr>
+       <tr><td style="padding: 2px 14px 2px 0; color: var(--muted);">noise margin</td>
+           <td>${rep.margin.toFixed(2)} V&nbsp; · &nbsp;SNR ${rep.snr === Infinity ? '∞' : rep.snr.toFixed(2)}</td></tr>
+       <tr><td style="padding: 2px 14px 2px 0; color: var(--muted);">worst-case symbol error</td>
+           <td>${pct(rep.worstCaseProb)} <span style="color: var(--muted)">(analytic)</span></td></tr>
+       <tr><td style="padding: 2px 14px 2px 0; color: var(--muted);">measured trit-error rate</td>
+           <td>${pct(rep.mcErrorRate)} <span style="color: var(--muted)">(Monte-Carlo)</span></td></tr>
+     </table>`;
+}
+document.getElementById('btn-noise').addEventListener('click', () => { renderNoiseAnalysis(); openModal('noise-modal'); });
+document.getElementById('noise-sigma').addEventListener('input', renderNoiseAnalysis);
+document.getElementById('noise-close').addEventListener('click', () => closeModal('noise-modal'));
 
 document.getElementById('btn-crt').addEventListener('click', () => {
   document.body.classList.toggle('crt');

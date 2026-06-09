@@ -33,7 +33,8 @@ import { crossbarMac, crossbarMacFromPhases, tritToPhase, phaseToTrit,
          HEATER_P_PI_MW, transpose, inferLayerOnChip, inferMlpOnCrossbar }
        from './photonic-twin.js';
 import { ANALOG_LEVELS_DEFAULT, tritToVoltage, voltageToTrit, noiseMargin, erfc,
-         symbolErrorProb, worstCaseErrorProb, monteCarloErrorRate } from './analog.js';
+         symbolErrorProb, worstCaseErrorProb, monteCarloErrorRate,
+         analyzeRobustness } from './analog.js';
 
 export function registerTests(deps) {
   const {
@@ -990,6 +991,26 @@ test('A4 robustness analysis of a real circuit (ternary-mac output nets)', () =>
     'circuit reads cleanly under low noise:');
   if (!(monteCarloErrorRate(outTrits, 0.9, { trials: 1000, seed: 3 }).errorRate > 0.05))
     throw new Error('heavy noise should corrupt some output trits');
+});
+
+test('A4 analyzeRobustness report drives the analog-mode panel', () => {
+  // Empty circuit → an honest "empty" verdict, no NaNs.
+  const empty = analyzeRobustness([], 0.2);
+  assertEq(empty.verdict, 'empty', 'no nets → empty:'); assertEq(empty.nets, 0, 'zero nets:');
+  // A coarse but monotone verdict ladder as noise rises on a fixed circuit.
+  const trits = [1, 0, -1, 1, 0, 0, -1, 1];
+  const r0 = analyzeRobustness(trits, 0.05, { trials: 1500, seed: 2 });
+  const r1 = analyzeRobustness(trits, 0.25, { trials: 1500, seed: 2 });
+  const r2 = analyzeRobustness(trits, 0.5,  { trials: 1500, seed: 2 });
+  assertEq(r0.verdict, 'robust', 'low noise → robust:');
+  assertEq(r2.verdict, 'fragile', 'σ=margin → fragile:');
+  // Worst-case error is monotone in σ, and SNR = margin/σ.
+  if (!(r0.worstCaseProb < r1.worstCaseProb && r1.worstCaseProb < r2.worstCaseProb))
+    throw new Error('worst-case error must rise with noise');
+  assertEq(Math.abs(r1.snr - (0.5 / 0.25)) < 1e-9, true, 'SNR = margin/σ:');
+  // The level census counts each rail level (the 0 census is what flags the weak nets).
+  assertDeepEq(r0.levelCounts, { neg: 2, zero: 3, pos: 3 }, 'level census:');
+  assertEq(r0.nets, 8, 'net count:');
 });
 
 // ---- A2 timed simulation (propagation delays) ----

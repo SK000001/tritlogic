@@ -34,6 +34,7 @@
   <button id="btn-debug" title="Open the CPU debugger — step the program, set breakpoints, watch ACC/PC">Debug</button>
   <button id="btn-wave" title="Toggle waveform panel">Wave</button>
   <button id="btn-timing" title="Timing mode — watch signals propagate with per-gate delays, and spot glitches">Timing</button>
+  <button id="btn-noise" title="Analog mode — noise margin &amp; robustness: how reliably do the circuit's signals hold their trits under voltage noise?">Noise</button>
   <button id="btn-tests" title="Run the built-in self-test suite">Tests</button>
   <button id="btn-info" title="Component reference — select a component first to jump to its page">Info</button>
   <button id="btn-learn" title="Guided, interactive tutorials — learn by building">Learn</button>
@@ -312,6 +313,27 @@
       <span id="tests-summary" style="margin-left: 12px; color: var(--muted); font-size: 12px;"></span>
     </div>
     <div id="tests-result" style="margin-top: 8px; font-family: monospace; font-size: 12px;"></div>
+  </div>
+</div>
+
+<!-- Noise / analog-robustness modal (A4 analog mode, slice 2) -->
+<div class="modal-bg" id="noise-modal">
+  <div class="modal">
+    <h2>Noise margin &amp; robustness <button class="btn close" id="noise-close">close</button></h2>
+    <p style="color: var(--muted); font-size: 12px;">
+      The <b>analog view</b> of the circuit. Each wire's trit is really a voltage on a
+      3-level rail (<span style="color: var(--t-neg)">−1</span>/<span style="color: var(--t-zero)">0</span>/<span style="color: var(--t-pos)">+1</span>
+      → −1/0/+1&nbsp;V), detected at ±0.5&nbsp;V. Drag the noise level and watch how
+      reliably the current circuit's signals still read the right trit. The middle level
+      (<span style="color: var(--t-zero)">0</span>) is the weakest — noise can push it
+      across <i>either</i> threshold. (Bus-packed nets aren't analysed.)
+    </p>
+    <div style="margin: 12px 0; display: flex; align-items: center; gap: 10px;">
+      <label style="margin: 0; white-space: nowrap;">Noise σ (V)</label>
+      <input id="noise-sigma" type="range" min="0" max="0.6" step="0.01" value="0.15" style="flex: 1;" />
+      <span id="noise-sigma-val" style="font-family: monospace; min-width: 3em; text-align: right;">0.15</span>
+    </div>
+    <div id="noise-result" style="margin-top: 8px; font-size: 13px;"></div>
   </div>
 </div>
 

@@ -105,3 +105,23 @@ export function monteCarloErrorRate(trits, sigma, { trials = 2000, seed = 1,
   }
   return { errorRate: errors / samples, errors, samples, margin: noiseMargin(levels) };
 }
+
+// One-call robustness report for a set of net trit values — what the editor's
+// analog-mode panel renders. Bundles the static margin, SNR (margin/σ), the
+// analytic worst-case per-symbol error, the Monte-Carlo measured trit-error
+// rate, a per-level census (the 0 level is the weak one), and a coarse verdict.
+export function analyzeRobustness(trits, sigma, { trials = 2000, seed = 1,
+                                                  levels = ANALOG_LEVELS_DEFAULT } = {}) {
+  const margin = noiseMargin(levels);
+  const worstCaseProb = worstCaseErrorProb(trits, sigma, levels);
+  const mcErrorRate = monteCarloErrorRate(trits, sigma, { trials, seed, levels }).errorRate;
+  const levelCounts = { neg: 0, zero: 0, pos: 0 };
+  for (const t of trits) levelCounts[t === -1 ? 'neg' : t === 1 ? 'pos' : 'zero']++;
+  let verdict;
+  if (trits.length === 0) verdict = 'empty';
+  else if (worstCaseProb < 1e-3) verdict = 'robust';
+  else if (worstCaseProb < 5e-2) verdict = 'marginal';
+  else verdict = 'fragile';
+  return { sigma, margin, snr: sigma > 0 ? margin / sigma : Infinity,
+           worstCaseProb, mcErrorRate, nets: trits.length, levelCounts, verdict };
+}
