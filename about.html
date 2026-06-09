@@ -139,15 +139,17 @@
     <div class="panel doesnt">
       <h3>What it does <i>not</i> model</h3>
       <ul>
-        <li>Continuous voltages, thresholds, or noise margins</li>
-        <li>Analog noise, drift, or device physics</li>
+        <li>Continuous-voltage device physics (transistor curves, drift)</li>
         <li>Real-world timing in seconds (delays are unit-less)</li>
-        <li>Optical / photonic power or loss</li>
+        <li>Optical / photonic power or loss in the canvas solver</li>
         <li>Power, area, or fabrication effects</li>
       </ul>
       <p class="muted" style="font-size:13px;margin:8px 0 0">
-        Continuous-voltage / analog behaviour is a separate, future direction
-        (an analog mode); the physical photonic side lives in its own workspace.
+        The core solver is discrete, but a first <b>analog slice</b> now ships: the
+        <b>Noise</b> panel models each wire as a 3-level voltage and reports the
+        circuit's noise margin and trit-error rate under voltage noise. Full
+        continuous-voltage device simulation is still a future direction; the
+        physical photonic side lives in its own workspace.
       </p>
     </div>
   </div>
